@@ -14,9 +14,8 @@ export class AuthController {
     @Body('firstName') firstName: string,
     @Body('lastName') lastName: string,
     @Body('phone') phone: string,
-    @Body('role') role: string = 'member',
   ) {
-    return this.authService.register(email, password, firstName, lastName, phone, role);
+    return this.authService.register(email, password, firstName, lastName, phone);
   }
 
   @Post('login')

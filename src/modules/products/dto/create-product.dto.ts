@@ -35,6 +35,26 @@ export class CreateProductDto {
   @IsDateString()
   @IsOptional()
   expiryDate?: string;
+
+  @IsString()
+  @IsOptional()
+  imageUrl?: string;
+
+  @IsNumber()
+  @IsOptional()
+  cost?: number;
+
+  @IsNumber()
+  @IsOptional()
+  minStockLevel?: number;
+
+  @IsString()
+  @IsOptional()
+  sku?: string;
+
+  @IsDateString()
+  @IsNotEmpty()
+  purchaseDate: string;
 }
 
 export class UpdateProductDto {

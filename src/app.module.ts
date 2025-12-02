@@ -7,6 +7,7 @@ import { APP_INTERCEPTOR } from '@nestjs/core';
 
 import { User } from './entities/user.entity';
 import { Product } from './entities/product.entity';
+import { Equipment } from './entities/equipment.entity';
 import { Sale } from './entities/sale.entity';
 import { SaleItem } from './entities/sale-item.entity';
 import { GymSettings } from './entities/gym-settings.entity';
@@ -20,6 +21,7 @@ import { Payment } from './entities/payment.entity';
 
 import { AuthModule } from './modules/auth/auth.module';
 import { ProductsModule } from './modules/products/products.module';
+import { EquipmentModule } from './modules/equipment/equipment.module';
 import { SalesModule } from './modules/sales/sales.module';
 import { GymSettingsModule } from './modules/gym-settings/gym-settings.module';
 import { EmployeeModule } from './modules/employees/employee.module';
@@ -29,6 +31,7 @@ import { MembershipsModule } from './modules/memberships/memberships.module';
 import { ClassesModule } from './modules/classes/classes.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { ReportsModule } from './modules/reports/reports.module';
+import { UserRolesModule } from './modules/user-roles/user-roles.module';
 
 import { ErrorHandlingInterceptor, ResponseInterceptor } from './common/interceptors';
 import { LoggerMiddleware } from './common/middleware';
@@ -46,17 +49,18 @@ import { LoggerMiddleware } from './common/middleware';
       username: process.env.DB_USERNAME || 'root',
       password: process.env.DB_PASSWORD || 'password',
       database: process.env.DB_NAME || 'gym_manager',
-      entities: [User, Product, Sale, SaleItem, GymSettings, Employee, Member, Membership, MemberMembership, GymClass, ClassEnrollment, Payment],
+      entities: [User, Product, Equipment, Sale, SaleItem, GymSettings, Employee, Member, Membership, MemberMembership, GymClass, ClassEnrollment, Payment],
       synchronize: true,
       logging: false,
     }),
     PassportModule,
     JwtModule.register({
-      secret: process.env.JWT_SECRET || 'your-secret-key',
+      secret: process.env.JWT_SECRET || 'muerete66',
       signOptions: { expiresIn: '24h' },
     }),
     AuthModule,
     ProductsModule,
+    EquipmentModule,
     SalesModule,
     GymSettingsModule,
     EmployeeModule,
@@ -66,6 +70,7 @@ import { LoggerMiddleware } from './common/middleware';
     ClassesModule,
     PaymentsModule,
     ReportsModule,
+    UserRolesModule,
   ],
   controllers: [],
   providers: [

@@ -10,8 +10,10 @@ import { Sale } from './sale.entity';
 
 export enum UserRole {
   ADMIN = 'admin',
-  TRAINER = 'trainer',
-  MEMBER = 'member',
+  ENCARGADO = 'encargado',
+  EMPLEADO_CAJERO = 'empleado_cajero',
+  EMPLEADO_ENTRENADOR = 'empleado_entrenador',
+  CLIENTE = 'cliente',
 }
 
 @Entity('users')
@@ -37,7 +39,7 @@ export class User {
   @Column({
     type: 'enum',
     enum: UserRole,
-    default: UserRole.MEMBER,
+    default: UserRole.CLIENTE,
   })
   role: UserRole;
 

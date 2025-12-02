@@ -3,7 +3,7 @@ import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
-import { User } from '../../entities/user.entity';
+import { User, UserRole } from '../../entities/user.entity';
 
 @Injectable()
 export class AuthService {
@@ -13,7 +13,7 @@ export class AuthService {
     private jwtService: JwtService,
   ) {}
 
-  async register(email: string, password: string, firstName: string, lastName: string, phone: string, role: string) {
+  async register(email: string, password: string, firstName: string, lastName: string, phone: string) {
     const existingUser = await this.userRepository.findOne({
       where: { email },
     });
@@ -30,7 +30,7 @@ export class AuthService {
       firstName,
       lastName,
       phone,
-      role: (role as any) || 'member',
+      role: UserRole.CLIENTE, // Por defecto, todo nuevo usuario es CLIENTE
       isActive: true,
     });
 

@@ -18,7 +18,7 @@ export class DashboardService {
 
   async getMembersCount(): Promise<{ count: number }> {
     const count = await this.userRepository.count({
-      where: { role: UserRole.MEMBER, isActive: true },
+      where: { role: UserRole.CLIENTE, isActive: true },
     });
     return { count };
   }
@@ -33,7 +33,7 @@ export class DashboardService {
   async getTotalRevenue(): Promise<{ total: number; currency: string }> {
     const result = await this.saleRepository
       .createQueryBuilder('sale')
-      .select('SUM(sale.total)', 'total')
+      .select('SUM(sale.totalAmount)', 'total')
       .getRawOne();
 
     return {
@@ -69,8 +69,8 @@ export class DashboardService {
     const result = await this.saleRepository
       .createQueryBuilder('sale')
       .select('COUNT(sale.id)', 'transactionCount')
-      .addSelect('SUM(sale.total)', 'totalRevenue')
-      .addSelect('AVG(sale.total)', 'averageTransaction')
+      .addSelect('SUM(sale.totalAmount)', 'totalRevenue')
+      .addSelect('AVG(sale.totalAmount)', 'averageTransaction')
       .where('sale.createdAt BETWEEN :start AND :end', {
         start: startDate,
         end: endDate,
@@ -99,7 +99,7 @@ export class DashboardService {
     const result = await this.saleRepository
       .createQueryBuilder('sale')
       .select('COUNT(sale.id)', 'transactionCount')
-      .addSelect('SUM(sale.total)', 'totalRevenue')
+      .addSelect('SUM(sale.totalAmount)', 'totalRevenue')
       .where('sale.createdAt BETWEEN :start AND :end', {
         start: startDate,
         end: endDate,
@@ -123,7 +123,7 @@ export class DashboardService {
     const result = await this.saleRepository
       .createQueryBuilder('sale')
       .select('COUNT(sale.id)', 'transactionCount')
-      .addSelect('SUM(sale.total)', 'totalRevenue')
+      .addSelect('SUM(sale.totalAmount)', 'totalRevenue')
       .where('sale.createdAt BETWEEN :start AND :end', {
         start: startDate,
         end: endDate,

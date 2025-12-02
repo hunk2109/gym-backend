@@ -5,6 +5,8 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   OneToMany,
+  BeforeInsert,
+  BeforeUpdate,
 } from 'typeorm';
 import { SaleItem } from './sale-item.entity';
 
@@ -22,8 +24,11 @@ export class Product {
   @Column({ type: 'varchar' })
   category: string;
 
-  @Column({ type: 'decimal', precision: 10, scale: 2 })
+  @Column({ type: 'decimal', precision: 10, scale: 2, transformer: { to: (v) => v, from: (v) => parseFloat(v) } })
   price: number;
+
+  @Column({ type: 'int' })
+  quantity: number;
 
   @Column({ type: 'int' })
   quantityAvailable: number;
@@ -31,8 +36,23 @@ export class Product {
   @Column({ type: 'varchar' })
   supplier: string;
 
+  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true, transformer: { to: (v) => v, from: (v) => v ? parseFloat(v) : null } })
+  cost: number | null;
+
+  @Column({ type: 'int', nullable: true })
+  minStockLevel: number | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  sku: string | null;
+
   @Column({ type: 'date', nullable: true })
-  expiryDate: Date;
+  purchaseDate: Date | null;
+
+  @Column({ type: 'date', nullable: true })
+  expiryDate: Date | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  imageUrl: string | null;
 
   @Column({ type: 'boolean', default: true })
   isActive: boolean;
@@ -45,6 +65,18 @@ export class Product {
 
   @UpdateDateColumn()
   updatedAt: Date;
+
+  @BeforeInsert()
+  @BeforeUpdate()
+  convertNumberTypes() {
+    // Asegurar que los números sean del tipo correcto
+    if (typeof this.price === 'string') {
+      this.price = parseFloat(this.price as any);
+    }
+    if (typeof this.cost === 'string') {
+      this.cost = parseFloat(this.cost as any);
+    }
+  }
 
   get isExpired(): boolean {
     if (!this.expiryDate) return false;

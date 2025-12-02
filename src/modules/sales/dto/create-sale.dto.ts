@@ -26,8 +26,8 @@ export class CreateSaleItemDto {
 
 export class CreateSaleDto {
   @IsUUID()
-  @IsNotEmpty()
-  memberId: string;
+  @IsOptional()
+  memberId?: string;
 
   @IsArray()
   @ValidateNested({ each: true })

@@ -21,12 +21,12 @@ export class Sale {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column({ type: 'uuid' })
-  memberId: string;
+  @Column({ type: 'uuid', nullable: true })
+  memberId: string | null;
 
   @ManyToOne(() => User, (user) => user.sales)
   @JoinColumn({ name: 'memberId' })
-  member: User;
+  member: User | null;
 
   @Column({ type: 'decimal', precision: 10, scale: 2 })
   totalAmount: number;

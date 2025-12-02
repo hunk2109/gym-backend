@@ -18,6 +18,7 @@ export class ProductService {
       take: limit,
       order: { createdAt: 'DESC' },
     });
+    console.log('[ProductService] getAllProducts - found products:', products.length, 'total:', total);
     return {
       products,
       total,
@@ -37,11 +38,17 @@ export class ProductService {
   }
 
   async createProduct(createProductDto: CreateProductDto) {
+    console.log('[ProductService] Creating product with DTO:', createProductDto);
     const product = this.productRepository.create({
       ...createProductDto,
+      purchaseDate: new Date(createProductDto.purchaseDate),
+      expiryDate: createProductDto.expiryDate ? new Date(createProductDto.expiryDate) : null,
       quantityAvailable: createProductDto.quantity,
     });
-    return this.productRepository.save(product);
+    console.log('[ProductService] Product entity created:', product);
+    const saved = await this.productRepository.save(product);
+    console.log('[ProductService] Product saved with ID:', saved.id);
+    return saved;
   }
 
   async updateProduct(id: string, updateProductDto: UpdateProductDto) {
