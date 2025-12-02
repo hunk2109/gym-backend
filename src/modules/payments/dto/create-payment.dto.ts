@@ -1,0 +1,117 @@
+import { IsString, IsOptional, IsNumber, IsEnum, IsUUID, IsDate } from 'class-validator';
+import { PaymentMethod, PaymentStatus, PaymentType } from '../../../entities/payment.entity';
+
+export class CreatePaymentDto {
+  @IsUUID()
+  memberId: string;
+
+  @IsNumber()
+  amount: number;
+
+  @IsEnum(PaymentMethod)
+  paymentMethod: PaymentMethod;
+
+  @IsOptional()
+  @IsEnum(PaymentStatus)
+  status?: PaymentStatus;
+
+  @IsEnum(PaymentType)
+  paymentType: PaymentType;
+
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @IsOptional()
+  @IsString()
+  transactionId?: string;
+
+  @IsOptional()
+  @IsString()
+  reference?: string;
+
+  @IsOptional()
+  @IsString()
+  notes?: string;
+
+  @IsDate()
+  paymentDate: Date;
+
+  @IsOptional()
+  @IsDate()
+  dueDate?: Date;
+
+  @IsOptional()
+  @IsNumber()
+  discount?: number;
+
+  @IsOptional()
+  @IsNumber()
+  tax?: number;
+}
+
+export class UpdatePaymentDto {
+  @IsOptional()
+  @IsNumber()
+  amount?: number;
+
+  @IsOptional()
+  @IsEnum(PaymentMethod)
+  paymentMethod?: PaymentMethod;
+
+  @IsOptional()
+  @IsEnum(PaymentStatus)
+  status?: PaymentStatus;
+
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @IsOptional()
+  @IsString()
+  transactionId?: string;
+
+  @IsOptional()
+  @IsString()
+  reference?: string;
+
+  @IsOptional()
+  @IsString()
+  notes?: string;
+
+  @IsOptional()
+  @IsDate()
+  paymentDate?: Date;
+
+  @IsOptional()
+  @IsDate()
+  dueDate?: Date;
+
+  @IsOptional()
+  @IsNumber()
+  discount?: number;
+
+  @IsOptional()
+  @IsNumber()
+  tax?: number;
+}
+
+export class PaymentResponseDto {
+  id: string;
+  member: any;
+  memberId: string;
+  amount: number;
+  paymentMethod: PaymentMethod;
+  status: PaymentStatus;
+  paymentType: PaymentType;
+  description?: string;
+  transactionId?: string;
+  reference?: string;
+  notes?: string;
+  paymentDate: Date;
+  dueDate?: Date;
+  discount: number;
+  tax?: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
