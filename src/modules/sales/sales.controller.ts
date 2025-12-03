@@ -113,7 +113,8 @@ export class SalesController {
     
     const result = await this.salesService.getSalesByDateRange(decodedStartDate, decodedEndDate);
     console.log('[SalesController] getSalesByDateRange - result length:', result.length);
-    return result;
+    console.log('[SalesController] getSalesByDateRange - result statuses:', result.map(r => r.status));
+    return { data: result };
   }
 
   @Get(':id')

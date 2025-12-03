@@ -50,6 +50,17 @@ export class PaymentsController {
     return this.paymentsService.getPendingPayments(parseInt(daysOverdue));
   }
 
+  @Get('pending-all')
+  @Roles(UserRole.ADMIN, UserRole.ENCARGADO)
+  async getAllPendingPayments(@Query('daysOverdue') daysOverdue: string = '0'): Promise<any> {
+    const payments = await this.paymentsService.getAllPendingPayments(parseInt(daysOverdue));
+    return {
+      data: payments,
+      total: payments.length,
+      message: `${payments.length} pagos pendientes encontrados (pagos + membresías)`,
+    };
+  }
+
   @Get('date-range')
   @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO)
   async getByDateRange(

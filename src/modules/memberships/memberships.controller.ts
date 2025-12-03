@@ -12,20 +12,70 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { MembershipsService } from './memberships.service';
-import { CreateMembershipDto, UpdateMembershipDto, AssignMembershipDto, RenewMembershipDto } from './dto/create-membership.dto';
+import { CreateMembershipDto, UpdateMembershipDto, AssignMembershipDto, RenewMembershipDto, sanitizeAssignMembershipDto } from './dto/create-membership.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../../entities/user.entity';
 
 @Controller('api/memberships')
-@UseGuards(JwtAuthGuard, RolesGuard)
 export class MembershipsController {
   constructor(private readonly membershipsService: MembershipsService) {}
 
+  // Seed endpoint - sin protección para inicializar datos
+  @Post('seed')
+  @HttpCode(HttpStatus.OK)
+  async seedMemberships() {
+    console.log('[MembershipsController] Iniciando seed de membresías...');
+    const memberships = [
+      {
+        name: 'Basic',
+        description: 'Plan básico de gimnasio',
+        price: 29.99,
+        durationMonths: 1,
+        benefits: ['Acceso a máquinas', 'Horario 6am-10pm'],
+        isActive: true,
+      },
+      {
+        name: 'Premium',
+        description: 'Plan premium con servicios adicionales',
+        price: 59.99,
+        durationMonths: 1,
+        benefits: ['Acceso a máquinas', 'Clases grupales', 'Entrenador personal 2x/mes', '24/7'],
+        isActive: true,
+      },
+      {
+        name: 'VIP',
+        description: 'Plan VIP exclusivo',
+        price: 99.99,
+        durationMonths: 1,
+        benefits: ['Todo Premium', 'Entrenador personal ilimitado', 'Nutricionista', 'Spa'],
+        isActive: true,
+      },
+    ];
+
+    const createdMemberships: any[] = [];
+    for (const membership of memberships) {
+      try {
+        const created = await this.membershipsService.createMembership(membership);
+        createdMemberships.push(created);
+        console.log(`[MembershipsController] Membresía "${created.name}" creada con ID: ${created.id}`);
+      } catch (error) {
+        console.log(`[MembershipsController] Error creando membresía: ${error.message}`);
+      }
+    }
+
+    return {
+      message: 'Seed completado',
+      count: createdMemberships.length,
+      memberships: createdMemberships,
+    };
+  }
+
   // Membership endpoints - Ver todas las membresías
   @Get()
-  @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO, UserRole.CLIENTE)
   @HttpCode(HttpStatus.OK)
   async getAllMemberships(@Query('page') page: string = '1', @Query('limit') limit: string = '10') {
     const result = await this.membershipsService.getAllMemberships(parseInt(page), parseInt(limit));
@@ -35,7 +85,7 @@ export class MembershipsController {
 
   // Ver membresías activas
   @Get('active')
-  @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO)
+  @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO, UserRole.CLIENTE)
   @HttpCode(HttpStatus.OK)
   async getActiveMemberships() {
     return this.membershipsService.getActiveMemberships();
@@ -87,16 +137,54 @@ export class MemberMembershipsController {
   @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO)
   @HttpCode(HttpStatus.CREATED)
   async assignMembership(@Body() assignMembershipDto: AssignMembershipDto) {
-    return this.membershipsService.assignMembership(assignMembershipDto);
+    // Sanitizar el DTO en caso de que venga serializado incorrectamente
+    const sanitized = sanitizeAssignMembershipDto(assignMembershipDto);
+    
+    console.log('[MemberMembershipsController] POST memberId SANITIZADO:', sanitized.memberId);
+    console.log('[MemberMembershipsController] POST membershipId SANITIZADO:', sanitized.membershipId);
+    
+    try {
+      const result = await this.membershipsService.assignMembership(sanitized);
+      console.log('[MemberMembershipsController] Membresía asignada exitosamente:', result.id);
+      return result;
+    } catch (error) {
+      console.log('[MemberMembershipsController] ERROR en assignMembership:', error.message);
+      throw error;
+    }
   }
 
-  // Obtener membresía activa del miembro
-  @Get('member/:memberId')
-  @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO, UserRole.CLIENTE, UserRole.EMPLEADO_ENTRENADOR)
+  // ======== RUTAS GET/DELETE CON SLUG ESPECÍFICO (ANTES QUE :id) ========
+
+  // Obtener membresías con pago pendiente
+  @Get('pending-payments')
+  @Roles(UserRole.ADMIN, UserRole.ENCARGADO)
   @HttpCode(HttpStatus.OK)
-  async getMemberActiveMembership(@Param('memberId') memberId: string) {
-    return this.membershipsService.getMemberActiveMembership(memberId);
+  async getPendingPayments(@Query('daysOverdue') daysOverdue?: string) {
+    console.log(`[MemberMembershipsController] GET /pending-payments - daysOverdue=${daysOverdue}`);
+    const data = await this.membershipsService.getPendingPayments(daysOverdue ? parseInt(daysOverdue) : undefined);
+    console.log(`[MemberMembershipsController] Retornando ${data.length} pagos pendientes`);
+    return { data };
   }
+
+  // Verificar expiración de membresías
+  @Get('expiry/check')
+  @Roles(UserRole.ADMIN, UserRole.ENCARGADO)
+  @HttpCode(HttpStatus.OK)
+  async checkMembershipExpiry() {
+    return this.membershipsService.checkMembershipExpiry();
+  }
+
+  // ======== RUTAS CON SLUG 'by-member' (ANTES QUE SLUG GENÉRICO 'member') ========
+
+  // Remover membresía por memberId (la más reciente)
+  @Delete('by-member/:memberId')
+  @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async removeMembershipByMemberId(@Param('memberId') memberId: string) {
+    return this.membershipsService.removeMembershipByMemberId(memberId);
+  }
+
+  // ======== RUTAS CON SLUG GENÉRICO (AL FINAL) ========
 
   // Historial de membresías
   @Get('history/:memberId')
@@ -110,6 +198,16 @@ export class MemberMembershipsController {
     return this.membershipsService.getMemberMembershipHistory(memberId, parseInt(page), parseInt(limit));
   }
 
+  // Obtener membresía activa del miembro
+  @Get('member/:memberId')
+  @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO, UserRole.CLIENTE, UserRole.EMPLEADO_ENTRENADOR)
+  @HttpCode(HttpStatus.OK)
+  async getMemberActiveMembership(@Param('memberId') memberId: string) {
+    return this.membershipsService.getMemberActiveMembership(memberId);
+  }
+
+  // ======== RUTAS POST/DELETE CON :id (AL FINAL) ========
+
   // Renovar membresía
   @Post(':id/renew')
   @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO)
@@ -121,11 +219,38 @@ export class MemberMembershipsController {
     return this.membershipsService.renewMembership(id, renewMembershipDto);
   }
 
-  // Verificar expiración de membresías
-  @Get('expiry/check')
+  // Registrar pago de membresía
+  @Post(':id/record-payment')
+  @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO)
+  @HttpCode(HttpStatus.OK)
+  async recordPayment(
+    @Param('id') id: string,
+    @Body() body: { amountPaid: number; paymentDate: Date },
+  ) {
+    return this.membershipsService.recordPayment(id, body.amountPaid, body.paymentDate);
+  }
+
+  // Renovación automática de membresías expiradas
+  @Post('auto-renew')
   @Roles(UserRole.ADMIN, UserRole.ENCARGADO)
   @HttpCode(HttpStatus.OK)
-  async checkMembershipExpiry() {
-    return this.membershipsService.checkMembershipExpiry();
+  async autoRenewExpiredMemberships() {
+    return this.membershipsService.autoRenewExpiredMemberships();
+  }
+
+  // Sincronizar membresías pendientes con sistema de pagos
+  @Post('sync-with-payments')
+  @Roles(UserRole.ADMIN, UserRole.ENCARGADO)
+  @HttpCode(HttpStatus.OK)
+  async syncWithPayments() {
+    return this.membershipsService.syncPendingMembershipsToPayments();
+  }
+
+  // Remover membresía por ID
+  @Delete(':id')
+  @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async removeMembership(@Param('id') id: string) {
+    return this.membershipsService.removeMembership(id);
   }
 }

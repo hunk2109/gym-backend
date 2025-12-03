@@ -23,7 +23,26 @@ export class MembersController {
   @Get()
   @HttpCode(HttpStatus.OK)
   async findAll(@Query('page') page: string = '1', @Query('limit') limit: string = '10') {
-    return this.membersService.findAll(parseInt(page), parseInt(limit));
+    const result = await this.membersService.findAll(parseInt(page), parseInt(limit));
+    
+    // Asegurar que cada miembro tiene hasMembership y hasPendingPayment en la respuesta
+    const enrichedData = result.data.map(member => {
+      const plainMember = { ...member };
+      // Asegurar que los campos booleanos están presentes
+      if (!('hasMembership' in plainMember)) {
+        plainMember.hasMembership = false;
+      }
+      if (!('hasPendingPayment' in plainMember)) {
+        plainMember.hasPendingPayment = false;
+      }
+      console.log(`[MembersController] Miembro ${plainMember.id}: hasMembership=${plainMember.hasMembership}, hasPendingPayment=${plainMember.hasPendingPayment}`);
+      return plainMember;
+    });
+    
+    return {
+      data: enrichedData,
+      pagination: result.pagination,
+    };
   }
 
   @Get('search')

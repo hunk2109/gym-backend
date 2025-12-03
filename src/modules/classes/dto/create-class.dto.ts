@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsNumber, IsBoolean, IsEnum, IsUUID, IsDate } from 'class-validator';
+import { IsString, IsOptional, IsNumber, IsBoolean, IsEnum, IsDate } from 'class-validator';
 import { ClassLevel, GymClass } from '../../../entities/gym-class.entity';
 import { EnrollmentStatus } from '../../../entities/class-enrollment.entity';
 
@@ -11,7 +11,7 @@ export class CreateClassDto {
   description?: string;
 
   @IsOptional()
-  @IsUUID()
+  @IsString()
   trainerId?: string;
 
   @IsString()
@@ -43,7 +43,7 @@ export class UpdateClassDto {
   description?: string;
 
   @IsOptional()
-  @IsUUID()
+  @IsString()
   trainerId?: string;
 
   @IsOptional()
@@ -68,7 +68,7 @@ export class UpdateClassDto {
 }
 
 export class EnrollMemberDto {
-  @IsUUID()
+  @IsString()
   memberId: string;
 
   @IsOptional()

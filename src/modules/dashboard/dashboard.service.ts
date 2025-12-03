@@ -2,8 +2,9 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User, UserRole } from '../../entities/user.entity';
-import { Sale } from '../../entities/sale.entity';
+import { Sale, SaleStatus } from '../../entities/sale.entity';
 import { Employee } from '../../entities/employee.entity';
+import { Member } from '../../entities/member.entity';
 
 @Injectable()
 export class DashboardService {
@@ -14,12 +15,12 @@ export class DashboardService {
     private saleRepository: Repository<Sale>,
     @InjectRepository(Employee)
     private employeeRepository: Repository<Employee>,
+    @InjectRepository(Member)
+    private memberRepository: Repository<Member>,
   ) {}
 
   async getMembersCount(): Promise<{ count: number }> {
-    const count = await this.userRepository.count({
-      where: { role: UserRole.CLIENTE, isActive: true },
-    });
+    const count = await this.memberRepository.count();
     return { count };
   }
 
@@ -34,6 +35,7 @@ export class DashboardService {
     const result = await this.saleRepository
       .createQueryBuilder('sale')
       .select('SUM(sale.totalAmount)', 'total')
+      .where('sale.status = :status', { status: SaleStatus.COMPLETED })
       .getRawOne();
 
     return {
@@ -47,7 +49,7 @@ export class DashboardService {
       this.getMembersCount(),
       this.getEmployeesCount(),
       this.getTotalRevenue(),
-      this.saleRepository.count(),
+      this.saleRepository.count({ where: { status: SaleStatus.COMPLETED } }),
       this.getTopProducts(5),
     ]);
 
@@ -89,6 +91,7 @@ export class DashboardService {
           start: startDate,
           end: endDate,
         })
+        .andWhere('sale.status = :status', { status: SaleStatus.COMPLETED })
         .getRawOne();
 
       results.push({
@@ -130,6 +133,7 @@ export class DashboardService {
           start: startDate,
           end: endDate,
         })
+        .andWhere('sale.status = :status', { status: SaleStatus.COMPLETED })
         .getRawOne();
 
       results.push({
@@ -157,6 +161,7 @@ export class DashboardService {
         start: startDate,
         end: endDate,
       })
+      .andWhere('sale.status = :status', { status: SaleStatus.COMPLETED })
       .getRawOne();
 
     return {
@@ -180,6 +185,7 @@ export class DashboardService {
         startDate: startOfMonth,
         endDate: endOfMonth,
       })
+      .andWhere('sale.status = :status', { status: SaleStatus.COMPLETED })
       .select('product.id', 'id')
       .addSelect('product.name', 'name')
       .addSelect('SUM(items.quantity)', 'quantity')

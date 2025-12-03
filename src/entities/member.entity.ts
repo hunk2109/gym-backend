@@ -9,6 +9,7 @@ import {
   JoinColumn,
 } from 'typeorm';
 import { User } from './user.entity';
+import { MemberMembership } from './member-membership.entity';
 
 export enum MemberGender {
   MALE = 'male',
@@ -21,11 +22,11 @@ export class Member {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @ManyToOne(() => User, { eager: true, onDelete: 'CASCADE' })
+  @ManyToOne(() => User, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'userId' })
   user: User;
 
-  @Column({ type: 'uuid' })
+  @Column({ type: 'varchar' })
   userId: string;
 
   @Column({ type: 'varchar', nullable: true })
@@ -65,6 +66,9 @@ export class Member {
 
   @Column({ type: 'boolean', default: false })
   isPaid: boolean;
+
+  @OneToMany(() => MemberMembership, (membership) => membership.member)
+  memberships: MemberMembership[];
 
   @CreateDateColumn()
   createdAt: Date;

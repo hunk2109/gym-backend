@@ -40,7 +40,7 @@ export class Payment {
   @JoinColumn({ name: 'memberId' })
   member: Member;
 
-  @Column({ type: 'uuid' })
+  @Column({ type: 'varchar' })
   memberId: string;
 
   @Column({ type: 'decimal', precision: 10, scale: 2 })

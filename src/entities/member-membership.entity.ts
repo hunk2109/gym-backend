@@ -15,18 +15,18 @@ export class MemberMembership {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @ManyToOne(() => Member, { eager: true, onDelete: 'CASCADE' })
+  @ManyToOne(() => Member, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'memberId' })
   member: Member;
 
-  @Column({ type: 'uuid' })
+  @Column({ type: 'varchar' })
   memberId: string;
 
-  @ManyToOne(() => Membership, { eager: true, onDelete: 'CASCADE' })
+  @ManyToOne(() => Membership, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'membershipId' })
   membership: Membership;
 
-  @Column({ type: 'uuid' })
+  @Column({ type: 'varchar' })
   membershipId: string;
 
   @Column({ type: 'date' })
@@ -43,6 +43,15 @@ export class MemberMembership {
 
   @Column({ type: 'date', nullable: true })
   paymentDate: Date;
+
+  @Column({ type: 'varchar', length: 20, default: 'pending' })
+  paymentStatus: 'pending' | 'paid' | 'suspended';
+
+  @Column({ type: 'boolean', default: false })
+  isRecurring: boolean;
+
+  @Column({ type: 'date', nullable: true })
+  suspensionDate: Date;
 
   @CreateDateColumn()
   createdAt: Date;

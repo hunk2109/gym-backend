@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsNumber, IsBoolean, IsArray, IsUUID, IsDate } from 'class-validator';
+import { IsString, IsOptional, IsNumber, IsBoolean, IsArray, IsDate } from 'class-validator';
 
 export class CreateMembershipDto {
   @IsString()
@@ -50,28 +50,44 @@ export class UpdateMembershipDto {
 }
 
 export class AssignMembershipDto {
-  @IsUUID()
-  memberId: string;
+  @IsNumber()
+  memberId: number;
 
-  @IsUUID()
-  membershipId: string;
+  @IsNumber()
+  membershipId: number;
 
   @IsOptional()
-  @IsDate()
-  startDate?: Date;
+  @IsString()
+  startDate?: string; // Será un ISO8601 string del frontend
+
+  @IsOptional()
+  @IsString()
+  endDate?: string; // Será un ISO8601 string del frontend
 
   @IsOptional()
   @IsNumber()
   amountPaid?: number;
 
   @IsOptional()
-  @IsDate()
-  paymentDate?: Date;
+  @IsString()
+  paymentDate?: string; // Será un ISO8601 string del frontend
+}
+
+// Transform hook para sanitizar memberId si viene como objeto
+export function sanitizeAssignMembershipDto(dto: AssignMembershipDto): AssignMembershipDto {
+  // Si memberId es un objeto (por error de serialización), extraer solo el id
+  if (typeof dto.memberId === 'object' && dto.memberId !== null) {
+    (dto as any).memberId = (dto.memberId as any).id || (dto.memberId as any);
+  }
+  if (typeof dto.membershipId === 'object' && dto.membershipId !== null) {
+    (dto as any).membershipId = (dto.membershipId as any).id || (dto.membershipId as any);
+  }
+  return dto;
 }
 
 export class RenewMembershipDto {
-  @IsUUID()
-  membershipId: string;
+  @IsNumber()
+  membershipId: number;
 
   @IsOptional()
   @IsNumber()
@@ -83,7 +99,7 @@ export class RenewMembershipDto {
 }
 
 export class MembershipResponseDto {
-  id: string;
+  id: number;
   name: string;
   description?: string;
   price: number;
@@ -95,11 +111,11 @@ export class MembershipResponseDto {
 }
 
 export class MemberMembershipResponseDto {
-  id: string;
+  id: number;
   member: any;
-  memberId: string;
+  memberId: number;
   membership: any;
-  membershipId: string;
+  membershipId: number;
   startDate: Date;
   endDate: Date;
   isActive: boolean;

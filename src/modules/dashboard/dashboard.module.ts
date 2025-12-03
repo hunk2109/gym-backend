@@ -5,9 +5,10 @@ import { DashboardController } from './dashboard.controller';
 import { User } from '../../entities/user.entity';
 import { Sale } from '../../entities/sale.entity';
 import { Employee } from '../../entities/employee.entity';
+import { Member } from '../../entities/member.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([User, Sale, Employee])],
+  imports: [TypeOrmModule.forFeature([User, Sale, Employee, Member])],
   controllers: [DashboardController],
   providers: [DashboardService],
   exports: [DashboardService],

@@ -25,14 +25,14 @@ export class ClassEnrollment {
   @JoinColumn({ name: 'classId' })
   gymClass: GymClass;
 
-  @Column({ type: 'uuid' })
+  @Column({ type: 'varchar' })
   classId: string;
 
   @ManyToOne(() => Member, { eager: true, onDelete: 'CASCADE' })
   @JoinColumn({ name: 'memberId' })
   member: Member;
 
-  @Column({ type: 'uuid' })
+  @Column({ type: 'varchar' })
   memberId: string;
 
   @Column({ type: 'date' })

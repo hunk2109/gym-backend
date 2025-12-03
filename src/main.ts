@@ -11,6 +11,14 @@ async function bootstrap() {
     allowedHeaders: ['Content-Type', 'Authorization'],
   });
 
+  // ValidationPipe deshabilitado temporalmente para debug
+  // app.useGlobalPipes(
+  //   new ValidationPipe({
+  //     transform: true,
+  //     whitelist: false,
+  //   }),
+  // );
+
   await app.listen(process.env.PORT ?? 3000, '0.0.0.0');
   console.log('Backend running on http://localhost:3000');
 }

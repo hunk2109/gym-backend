@@ -16,6 +16,9 @@ export class SalesReportDto {
   totalRevenue: number;
   averageSaleValue: number;
   salesCount: number;
+  cancelledSales: number;
+  cancelledRevenue: number;
+  salesNote: string;
   salesTrend: ChartDataDto;
   topProducts: {
     product: string;

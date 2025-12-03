@@ -1,8 +1,8 @@
-import { IsString, IsOptional, IsNumber, IsEnum, IsUUID, IsDate } from 'class-validator';
+import { IsString, IsOptional, IsNumber, IsEnum, IsDate } from 'class-validator';
 import { PaymentMethod, PaymentStatus, PaymentType } from '../../../entities/payment.entity';
 
 export class CreatePaymentDto {
-  @IsUUID()
+  @IsString()
   memberId: string;
 
   @IsNumber()

@@ -15,7 +15,9 @@ export class MembershipsService {
     private memberMembershipRepository: Repository<MemberMembership>,
     @InjectRepository(Member)
     private memberRepository: Repository<Member>,
-  ) {}
+  ) {
+    // Inyectar Payment si es necesario en el futuro
+  }
 
   // Membership CRUD
   async createMembership(createMembershipDto: CreateMembershipDto): Promise<Membership> {
@@ -83,44 +85,87 @@ export class MembershipsService {
 
   // Member Membership Operations
   async assignMembership(assignMembershipDto: AssignMembershipDto): Promise<MemberMembership> {
-    const { memberId, membershipId, startDate, amountPaid, paymentDate } = assignMembershipDto;
+    let { memberId, membershipId, startDate, endDate, amountPaid, paymentDate } = assignMembershipDto;
 
-    // Verify member exists
-    const member = await this.memberRepository.findOne({ where: { id: memberId } });
+    // Sanitizar memberId por si acaso viene como objeto
+    if (typeof memberId === 'object' && memberId !== null) {
+      console.log(`[MembershipsService] memberId es objeto, extrayendo id...`);
+      memberId = (memberId as any).id || memberId;
+    }
+
+    console.log(`[MembershipsService] assignMembership - Buscando miembro con ID: "${memberId}"`);
+
+    // Verify member exists - try by id first, then by userId
+    let member = await this.memberRepository.findOne({ where: { id: memberId as any } });
+    
     if (!member) {
+      console.log(`[MembershipsService] Miembro NO ENCONTRADO por ID, intentando por userId...`);
+      member = await this.memberRepository.findOne({ where: { userId: memberId as any } });
+    }
+
+    if (!member) {
+      console.log(`[MembershipsService] Miembro NO ENCONTRADO: "${memberId}"`);
+      const allMembers = await this.memberRepository.find();
+      console.log(`[MembershipsService] Miembros en BD:`, allMembers.map(m => ({ id: m.id, userId: m.userId })));
       throw new BadRequestException('Member not found');
     }
 
+    console.log(`[MembershipsService] Miembro encontrado: ${member.id} (userId: ${member.userId})`);
+
     // Verify membership exists
-    const membership = await this.membershipRepository.findOne({ where: { id: membershipId } });
+    const membership = await this.membershipRepository.findOne({ where: { id: membershipId as any } });
     if (!membership) {
+      console.log(`[MembershipsService] Membresía NO ENCONTRADA: "${membershipId}"`);
       throw new BadRequestException('Membership not found');
     }
 
+    console.log(`[MembershipsService] Membresía encontrada: ${membership.id}`);
+
     // Check if member already has active membership
     const activeMembership = await this.memberMembershipRepository.findOne({
-      where: { memberId, isActive: true },
+      where: { memberId: member.id, isActive: true },
     });
 
     if (activeMembership) {
+      console.log(`[MembershipsService] Miembro YA tiene membresía activa: ${activeMembership.id}`);
       throw new BadRequestException('Member already has an active membership');
     }
 
-    const start = startDate || new Date();
-    const end = new Date(start);
-    end.setMonth(end.getMonth() + membership.durationMonths);
+    // Parse dates from strings
+    const start = startDate ? new Date(startDate) : new Date();
+    const end = endDate ? new Date(endDate) : new Date(start);
+    if (!endDate) {
+      end.setMonth(end.getMonth() + membership.durationMonths);
+    }
 
-    const memberMembership = this.memberMembershipRepository.create({
-      memberId,
-      membershipId,
+    const parsedPaymentDate = paymentDate ? new Date(paymentDate) : undefined;
+    const paymentStatus = amountPaid && parsedPaymentDate ? 'paid' : 'pending';
+
+    console.log(`[MembershipsService] Creando membresía: memberId=${member.id}, membershipId=${membershipId}, status=${paymentStatus}`);
+
+    // Crear y guardar directamente
+    const newMemberMembership = this.memberMembershipRepository.create({
+      memberId: member.id,
+      membershipId: membershipId as any,
       startDate: start,
       endDate: end,
-      amountPaid,
-      paymentDate,
+      amountPaid: (amountPaid as any) || null,
+      paymentDate: (parsedPaymentDate as any) || null,
+      paymentStatus: paymentStatus,
+      isRecurring: true,
       isActive: true,
     });
 
-    return this.memberMembershipRepository.save(memberMembership);
+    const result = await this.memberMembershipRepository.save(newMemberMembership);
+    console.log(`[MembershipsService] Membresía insertada con ID: ${result.id}`);
+
+    // Recuperar el registro con relaciones para retornar
+    const saved = await this.memberMembershipRepository.findOne({
+      where: { id: result.id },
+      relations: ['member', 'membership'],
+    });
+
+    return saved as MemberMembership;
   }
 
   async getMemberActiveMembership(memberId: string): Promise<MemberMembership> {
@@ -198,5 +243,219 @@ export class MembershipsService {
       .where('mm.endDate <= :today', { today })
       .andWhere('mm.isActive = true')
       .getMany();
+  }
+
+  /**
+   * Renovar automáticamente membresías que expiraron
+   * Genera nueva membresía con pago pendiente
+   */
+  async autoRenewExpiredMemberships(): Promise<{ renewed: number; suspended: number }> {
+    const today = new Date();
+
+    // Encontrar membresías expiradas que deben renovarse
+    const expiredRecurring = await this.memberMembershipRepository
+      .createQueryBuilder('mm')
+      .leftJoinAndSelect('mm.membership', 'membership')
+      .where('mm.endDate <= :today', { today })
+      .andWhere('mm.isActive = true')
+      .andWhere('mm.isRecurring = true')
+      .getMany();
+
+    let renewed = 0;
+    let suspended = 0;
+
+    for (const currentMembership of expiredRecurring) {
+      // Verificar si el pago anterior está pendiente
+      if (currentMembership.paymentStatus === 'pending') {
+        // Calcular días sin pagar
+        const daysSinceDue = Math.floor(
+          (today.getTime() - new Date(currentMembership.endDate).getTime()) / (1000 * 60 * 60 * 24),
+        );
+
+        if (daysSinceDue > 15) {
+          // Suspender membresía
+          currentMembership.isActive = false;
+          currentMembership.paymentStatus = 'suspended';
+          currentMembership.suspensionDate = today;
+          await this.memberMembershipRepository.save(currentMembership);
+          suspended++;
+        } else {
+          // Renovar con pago pendiente
+          const newStartDate = currentMembership.endDate;
+          const newEndDate = new Date(newStartDate);
+          newEndDate.setMonth(newEndDate.getMonth() + currentMembership.membership.durationMonths);
+
+          const newMembership = this.memberMembershipRepository.create({
+            memberId: currentMembership.memberId,
+            membershipId: currentMembership.membershipId,
+            startDate: newStartDate,
+            endDate: newEndDate,
+            paymentStatus: 'pending',
+            isRecurring: true,
+            isActive: true,
+          });
+
+          await this.memberMembershipRepository.save(newMembership);
+          renewed++;
+        }
+      } else if (currentMembership.paymentStatus === 'paid') {
+        // Si ya pagó, renovar automáticamente
+        const newStartDate = currentMembership.endDate;
+        const newEndDate = new Date(newStartDate);
+        newEndDate.setMonth(newEndDate.getMonth() + currentMembership.membership.durationMonths);
+
+        const newMembership = this.memberMembershipRepository.create({
+          memberId: currentMembership.memberId,
+          membershipId: currentMembership.membershipId,
+          startDate: newStartDate,
+          endDate: newEndDate,
+          paymentStatus: 'pending',
+          isRecurring: true,
+          isActive: true,
+        });
+
+        await this.memberMembershipRepository.save(newMembership);
+        renewed++;
+      }
+    }
+
+    return { renewed, suspended };
+  }
+
+  /**
+   * Registrar pago de membresía pendiente
+   */
+  async recordPayment(
+    memberMembershipId: string,
+    amountPaid: number,
+    paymentDate: Date,
+  ): Promise<MemberMembership> {
+    const membership = await this.memberMembershipRepository.findOne({
+      where: { id: memberMembershipId },
+    });
+
+    if (!membership) {
+      throw new NotFoundException('Membership not found');
+    }
+
+    const wasSuspended = membership.paymentStatus === 'suspended';
+
+    membership.amountPaid = amountPaid;
+    membership.paymentDate = paymentDate;
+    membership.paymentStatus = 'paid';
+
+    // Si estaba suspendida, reactivar
+    if (wasSuspended) {
+      membership.isActive = true;
+      membership.suspensionDate = null as any;
+    }
+
+    return this.memberMembershipRepository.save(membership);
+  }
+
+  /**
+   * Obtener membresías con pago pendiente
+   */
+  async getPendingPayments(daysOverdue?: number): Promise<MemberMembership[]> {
+    console.log(`[MembershipsService] getPendingPayments - Buscando pagos pendientes...`);
+    
+    const query = this.memberMembershipRepository
+      .createQueryBuilder('mm')
+      .leftJoinAndSelect('mm.member', 'member')
+      .leftJoinAndSelect('member.user', 'user')
+      .leftJoinAndSelect('mm.membership', 'membership')
+      .where('mm.paymentStatus = :status', { status: 'pending' });
+
+    if (daysOverdue) {
+      const cutoffDate = new Date();
+      cutoffDate.setDate(cutoffDate.getDate() - daysOverdue);
+      query.andWhere('mm.endDate <= :cutoffDate', { cutoffDate });
+    }
+
+    const result = await query.orderBy('mm.endDate', 'ASC').getMany();
+    
+    console.log(`[MembershipsService] Encontrados ${result.length} pagos pendientes`);
+    if (result.length > 0) {
+      console.log(`[MembershipsService] Pagos:`, result.map(r => ({
+        id: r.id,
+        memberId: r.memberId,
+        paymentStatus: r.paymentStatus,
+        endDate: r.endDate,
+      })));
+    }
+    
+    return result;
+  }
+
+  /**
+   * Remover membresía de un miembro (busca la más reciente, activa o no)
+   */
+  async removeMembership(memberMembershipId: string): Promise<void> {
+    const membership = await this.memberMembershipRepository.findOne({
+      where: { id: memberMembershipId },
+    });
+
+    if (!membership) {
+      throw new NotFoundException('Membership not found');
+    }
+
+    await this.memberMembershipRepository.remove(membership);
+  }
+
+  /**
+   * Remover membresía por memberId (busca la más reciente)
+   */
+  async removeMembershipByMemberId(memberId: string): Promise<void> {
+    // Buscar la membresía más reciente del miembro (no importa estado)
+    const membership = await this.memberMembershipRepository
+      .createQueryBuilder('mm')
+      .where('mm.memberId = :memberId', { memberId })
+      .orderBy('mm.createdAt', 'DESC')
+      .getOne();
+
+    if (!membership) {
+      throw new NotFoundException('No membership found for this member');
+    }
+
+    console.log(`[MembershipsService] ANTES de remover - Miembro ${memberId} tiene membresía: ${membership.id}, paymentStatus: ${membership.paymentStatus}`);
+
+    await this.memberMembershipRepository.remove(membership);
+
+    // Después de remover, verificar si hay más membresías pendientes
+    const remainingMemberships = await this.memberMembershipRepository.find({
+      where: { memberId },
+    });
+
+    console.log(`[MembershipsService] DESPUÉS de remover - Miembro ${memberId} tiene ${remainingMemberships.length} membresías restantes`);
+    if (remainingMemberships.length > 0) {
+      console.log(`[MembershipsService] Membresías restantes:`, remainingMemberships.map(m => ({ id: m.id, paymentStatus: m.paymentStatus })));
+    }
+  }
+
+  /**
+   * Sincronizar membresías pendientes con el sistema de pagos
+   * Convierte membresías con pago pendiente en registros visibles para la tabla de pagos
+   */
+  async syncPendingMembershipsToPayments(): Promise<{ synced: number; message: string }> {
+    console.log(`[MembershipsService] Iniciando sincronización de membresías pendientes...`);
+
+    // Obtener membresías con pago pendiente
+    const pendingMemberships = await this.getPendingPayments();
+
+    console.log(`[MembershipsService] Encontradas ${pendingMemberships.length} membresías con pago pendiente`);
+    console.log(`[MembershipsService] Datos:`, pendingMemberships.map(m => ({
+      id: m.id,
+      memberId: m.memberId,
+      membershipId: m.membershipId,
+      paymentStatus: m.paymentStatus,
+      endDate: m.endDate,
+      membershipName: m.membership?.name,
+      membershipPrice: m.membership?.price,
+    })));
+
+    return {
+      synced: pendingMemberships.length,
+      message: `Sincronización completada. ${pendingMemberships.length} membresías con pago pendiente están disponibles en el sistema de pagos.`,
+    };
   }
 }

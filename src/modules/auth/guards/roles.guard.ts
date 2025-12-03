@@ -17,17 +17,23 @@ export class RolesGuard implements CanActivate {
     const request = context.switchToHttp().getRequest();
     const user = request.user;
 
+    console.log('[RolesGuard] User from request:', user);
+    console.log('[RolesGuard] User role:', user?.role);
+    console.log('[RolesGuard] Required roles:', requiredRoles);
+
     if (!user) {
       throw new ForbiddenException('User not found in request');
     }
 
     // Verificar si el rol del usuario está en los roles permitidos
     if (!requiredRoles.includes(user.role)) {
+      console.log('[RolesGuard] ❌ FORBIDDEN - Role mismatch');
       throw new ForbiddenException(
         `User role '${user.role}' does not have access to this resource. Required roles: ${requiredRoles.join(', ')}`,
       );
     }
 
+    console.log('[RolesGuard] ✓ ALLOWED - Role match');
     return true;
   }
 }

@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Between } from 'typeorm';
 import { Payment, PaymentStatus, PaymentType } from '../../entities/payment.entity';
 import { Member } from '../../entities/member.entity';
+import { MemberMembership } from '../../entities/member-membership.entity';
 import { CreatePaymentDto, UpdatePaymentDto } from './dto/create-payment.dto';
 import { PermissionsService } from '../auth/services/permissions.service';
 
@@ -15,6 +16,8 @@ export class PaymentsService {
     private paymentRepository: Repository<Payment>,
     @InjectRepository(Member)
     private memberRepository: Repository<Member>,
+    @InjectRepository(MemberMembership)
+    private memberMembershipRepository: Repository<MemberMembership>,
     private readonly permissionsService: PermissionsService,
   ) {}
 
@@ -251,5 +254,73 @@ export class PaymentsService {
       .andWhere('payment.dueDate <= :cutoffDate', { cutoffDate })
       .orderBy('payment.dueDate', 'ASC')
       .getMany();
+  }
+
+  /**
+   * Obtener todos los pagos pendientes (tanto de tabla Payment como de membresías asignadas)
+   */
+  async getAllPendingPayments(daysOverdue: number = 0): Promise<any[]> {
+    this.logger.log(`[Payments] getAllPendingPayments - Obteniendo pagos pendientes...`);
+
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - daysOverdue);
+
+    // Obtener pagos pendientes de la tabla Payment
+    const paymentRecords = await this.paymentRepository
+      .createQueryBuilder('payment')
+      .leftJoinAndSelect('payment.member', 'member')
+      .leftJoinAndSelect('member.user', 'user')
+      .where('payment.status = :status', { status: PaymentStatus.PENDING })
+      .andWhere('payment.dueDate <= :cutoffDate', { cutoffDate })
+      .orderBy('payment.dueDate', 'ASC')
+      .getMany();
+
+    // Obtener membresías con pago pendiente
+    const membershipRecords = await this.memberMembershipRepository
+      .createQueryBuilder('mm')
+      .leftJoinAndSelect('mm.member', 'member')
+      .leftJoinAndSelect('member.user', 'user')
+      .leftJoinAndSelect('mm.membership', 'membership')
+      .where('mm.paymentStatus = :status', { status: 'pending' })
+      .andWhere('mm.endDate <= :cutoffDate', { cutoffDate })
+      .orderBy('mm.endDate', 'ASC')
+      .getMany();
+
+    // Transformar membresías a formato similar a Payment
+    const membershipPayments = membershipRecords.map(mm => ({
+      id: mm.id,
+      memberId: mm.memberId,
+      member: mm.member,
+      amount: mm.membership?.price || 0,
+      paymentMethod: 'MEMBERSHIP',
+      status: 'pending',
+      paymentType: 'RECURRING',
+      paymentDate: mm.paymentDate,
+      dueDate: mm.endDate,
+      description: `Membership: ${mm.membership?.name}`,
+      transactionId: null,
+      reference: null,
+      notes: null,
+      discount: 0,
+      tax: 0,
+      createdAt: mm.createdAt,
+      updatedAt: mm.updatedAt,
+      type: 'MEMBERSHIP', // Marker para saber que es de MemberMembership
+      membershipRecordId: mm.id, // ID del registro de membresía
+      membership: mm.membership,
+    }));
+
+    // Combinar y ordenar por fecha
+    const allPending = [...paymentRecords, ...membershipPayments].sort((a, b) => {
+      const dateA = new Date(a.dueDate || a.paymentDate).getTime();
+      const dateB = new Date(b.dueDate || b.paymentDate).getTime();
+      return dateA - dateB;
+    });
+
+    this.logger.log(
+      `[Payments] Encontrados ${paymentRecords.length} pagos + ${membershipRecords.length} membresías con pago pendiente = ${allPending.length} total`
+    );
+
+    return allPending;
   }
 }

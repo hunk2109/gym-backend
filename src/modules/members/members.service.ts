@@ -41,18 +41,85 @@ export class MembersService {
     return this.memberRepository.save(member);
   }
 
-  async findAll(page: number = 1, limit: number = 10): Promise<{ data: Member[]; pagination: any }> {
+  async findAll(page: number = 1, limit: number = 10): Promise<{ data: any[]; pagination: any }> {
     const skip = (page - 1) * limit;
 
-    const [data, total] = await this.memberRepository.findAndCount({
-      relations: ['user'],
-      skip,
-      take: limit,
-      order: { createdAt: 'DESC' },
+    // Query simple con relaciones
+    const data = await this.memberRepository
+      .createQueryBuilder('member')
+      .leftJoinAndSelect('member.user', 'user')
+      .leftJoinAndSelect('member.memberships', 'memberships')
+      .select([
+        'member.id',
+        'member.userId',
+        'member.documentId',
+        'member.emergencyContact',
+        'member.emergencyPhone',
+        'member.dateOfBirth',
+        'member.gender',
+        'member.address',
+        'member.city',
+        'member.zipCode',
+        'member.joinDate',
+        'member.lastVisit',
+        'member.isPaid',
+        'member.createdAt',
+        'member.updatedAt',
+        'user',
+        'memberships',
+      ])
+      .orderBy('member.createdAt', 'DESC')
+      .skip(skip)
+      .take(limit)
+      .getMany();
+
+    console.log(`[MembersService.findAll] Total de miembros obtenidos: ${data.length}`);
+    if (data.length > 0) {
+      console.log(`[MembersService.findAll] Primer miembro: id=${data[0].id}, userId=${data[0].userId}, type=${typeof data[0].id}`);
+    }
+
+    const total = await this.memberRepository.count();
+
+    // Calcular hasPendingPayment para cada miembro
+    const mappedData = data.map(member => {
+      console.log(`[MembersService.findAll] Procesando miembro: id="${member.id}" (type: ${typeof member.id}), userId="${member.userId}"`);
+      
+      // Asegurar que memberships es un array
+      const memberships = member.memberships || [];
+      
+      if (memberships.length === 0) {
+        console.log(`[MembersService] Miembro ${member.id}: SIN MEMBRESÍAS → hasMembership=false`);
+        const mapped = {
+          ...member,
+          currentMembership: null,
+          hasMembership: false,
+          hasPendingPayment: false,
+        };
+        return mapped;
+      }
+
+      // Ordenar membresías por fecha más reciente
+      const sortedMemberships = memberships.sort(
+        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+      );
+      
+      const mostRecent = sortedMemberships[0];
+      const isPending = mostRecent.paymentStatus === 'pending';
+      
+      console.log(`[MembersService] Miembro ${member.id}: hasMembership=true, hasPendingPayment=${isPending}`);
+      
+      const mapped = {
+        ...member,
+        memberships: sortedMemberships,
+        currentMembership: mostRecent,
+        hasMembership: true,
+        hasPendingPayment: isPending,
+      };
+      return mapped;
     });
 
     return {
-      data,
+      data: mappedData,
       pagination: {
         page,
         limit,
@@ -63,10 +130,11 @@ export class MembersService {
   }
 
   async findById(id: string): Promise<Member> {
-    const member = await this.memberRepository.findOne({
-      where: { id },
-      relations: ['user'],
-    });
+    const member = await this.memberRepository
+      .createQueryBuilder('member')
+      .leftJoinAndSelect('member.user', 'user')
+      .where('member.id = :id', { id })
+      .getOne();
 
     if (!member) {
       throw new NotFoundException('Member not found');

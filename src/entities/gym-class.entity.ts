@@ -31,7 +31,7 @@ export class GymClass {
   @JoinColumn({ name: 'trainerId' })
   trainer: Employee;
 
-  @Column({ type: 'uuid', nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   trainerId: string;
 
   @Column({ type: 'varchar' })

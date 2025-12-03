@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Between, MoreThan, LessThan } from 'typeorm';
-import { Sale } from '../../entities/sale.entity';
+import { Sale, SaleStatus } from '../../entities/sale.entity';
 import { Payment, PaymentStatus } from '../../entities/payment.entity';
 import { Member } from '../../entities/member.entity';
 import { MemberMembership } from '../../entities/member-membership.entity';
@@ -75,16 +75,29 @@ export class ReportsService {
   async getSalesReport(dto: ReportRequestDto = {}): Promise<SalesReportDto> {
     const { start, end } = this.getDateRange(dto.dateRange, dto.startDate, dto.endDate);
 
-    const sales = await this.saleRepository.find({
-      where: { createdAt: Between(start, end) },
-      relations: ['member', 'items'],
-    });
+    const [completedSales, cancelledSales] = await Promise.all([
+      this.saleRepository.find({
+        where: { createdAt: Between(start, end), status: SaleStatus.COMPLETED },
+        relations: ['member', 'items'],
+      }),
+      this.saleRepository.find({
+        where: { createdAt: Between(start, end), status: SaleStatus.CANCELLED },
+        relations: ['member', 'items'],
+      }),
+    ]);
 
-    const totalSales = sales.length;
-    const totalRevenue = sales.reduce((sum, s) => sum + parseFloat(s.totalAmount.toString()), 0);
+    const totalSales = completedSales.length;
+    const totalRevenue = completedSales.reduce((sum, s) => sum + parseFloat(s.totalAmount.toString()), 0);
     const averageSaleValue = totalSales > 0 ? totalRevenue / totalSales : 0;
+    
+    const cancelledCount = cancelledSales.length;
+    const cancelledRevenue = cancelledSales.reduce((sum, s) => sum + parseFloat(s.totalAmount.toString()), 0);
+    
+    const salesNote = cancelledCount > 0 
+      ? `Se encontraron ${cancelledCount} venta${cancelledCount !== 1 ? 's' : ''} anulada${cancelledCount !== 1 ? 's' : ''} en el período de reporte con un monto total de RD$${cancelledRevenue.toFixed(2)}.`
+      : 'No hay ventas anuladas en el período de reporte.';
 
-    const salesTrend = this.generateBasicChart('Ventas', [totalSales]);
+    const salesTrend = this.generateBasicChart('Ventas Completadas', [totalSales]);
     const topProducts = await this.getTopProducts(start, end);
     const topEmployees: any[] = [];
 
@@ -93,6 +106,9 @@ export class ReportsService {
       totalRevenue,
       averageSaleValue,
       salesCount: totalSales,
+      cancelledSales: cancelledCount,
+      cancelledRevenue,
+      salesNote,
       salesTrend,
       topProducts,
       topEmployees,
@@ -119,6 +135,7 @@ export class ReportsService {
       .leftJoinAndSelect('item.sale', 'sale')
       .leftJoinAndSelect('item.product', 'product')
       .where('sale.createdAt BETWEEN :startDate AND :endDate', { startDate, endDate })
+      .andWhere('sale.status = :status', { status: SaleStatus.COMPLETED })
       .select('product.name', 'name')
       .addSelect('product.id', 'id')
       .addSelect('SUM(item.quantity)', 'quantity')
@@ -366,7 +383,7 @@ export class ReportsService {
     const { start, end } = this.getDateRange(dto.dateRange, dto.startDate, dto.endDate);
 
     const sales = await this.saleRepository.find({
-      where: { createdAt: Between(start, end) },
+      where: { createdAt: Between(start, end), status: SaleStatus.COMPLETED },
     });
 
     const payments = await this.paymentRepository.find({
@@ -397,6 +414,7 @@ export class ReportsService {
       .createQueryBuilder('sale')
       .select('SUM(sale.totalAmount)', 'total')
       .where('sale.createdAt BETWEEN :startDate AND :endDate', { startDate, endDate })
+      .andWhere('sale.status = :status', { status: SaleStatus.COMPLETED })
       .getRawOne();
 
     const paymentsResult = await this.paymentRepository
@@ -573,6 +591,7 @@ export class ReportsService {
       .createQueryBuilder('sale')
       .select('SUM(sale.totalAmount)', 'total')
       .where('sale.createdAt BETWEEN :start AND :end', { start, end })
+      .andWhere('sale.status = :status', { status: SaleStatus.COMPLETED })
       .getRawOne();
 
     const paymentsResult = await this.paymentRepository

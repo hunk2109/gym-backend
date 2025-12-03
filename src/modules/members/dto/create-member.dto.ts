@@ -1,8 +1,8 @@
-import { IsString, IsEmail, IsOptional, IsDate, IsBoolean, IsEnum, IsUUID } from 'class-validator';
+import { IsString, IsEmail, IsOptional, IsDate, IsBoolean, IsEnum, IsNumber } from 'class-validator';
 import { MemberGender } from '../../../entities/member.entity';
 
 export class CreateMemberDto {
-  @IsUUID()
+  @IsString()
   userId: string;
 
   @IsOptional()

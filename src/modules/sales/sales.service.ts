@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Between } from 'typeorm';
-import { Sale } from '../../entities/sale.entity';
+import { Sale, SaleStatus } from '../../entities/sale.entity';
 import { SaleItem } from '../../entities/sale-item.entity';
 import { CreateSaleDto, UpdateSaleDto } from './dto/create-sale.dto';
 import { ProductService } from '../products/product.service';
@@ -30,7 +30,7 @@ export class SalesService {
       order: { createdAt: 'DESC' },
     });
     return {
-      sales,
+      sales: sales.map(sale => this.transformSaleWithSubtotals(sale)),
       total,
       page,
       lastPage: Math.ceil(total / limit),
@@ -45,7 +45,7 @@ export class SalesService {
     if (!sale) {
       throw new NotFoundException(`Sale ${id} not found`);
     }
-    return sale;
+    return this.transformSaleWithSubtotals(sale);
   }
 
   async createSale(createSaleDto: CreateSaleDto) {
@@ -110,6 +110,11 @@ export class SalesService {
   async deleteSale(id: string) {
     const sale = await this.getSaleById(id);
 
+    // Solo anular si no está ya anulada
+    if (sale.status === SaleStatus.CANCELLED) {
+      throw new BadRequestException('Esta venta ya ha sido anulada');
+    }
+
     // Restore stock
     for (const item of sale.items) {
       await this.productService.addStock(
@@ -118,8 +123,9 @@ export class SalesService {
       );
     }
 
-    await this.saleRepository.remove(sale);
-    this.logger.warn(`[SENSITIVE] Sale deleted: ${id}, Amount: ${sale.totalAmount}`);
+    // Cambiar estado a 'cancelled' en lugar de eliminar
+    await this.saleRepository.update(id, { status: SaleStatus.CANCELLED });
+    this.logger.warn(`[SENSITIVE] Sale cancelled: ${id}, Amount: ${sale.totalAmount}`);
   }
 
   async getSalesByMember(memberId: string, page = 1, limit = 10) {
@@ -132,7 +138,7 @@ export class SalesService {
       order: { createdAt: 'DESC' },
     });
     return {
-      sales,
+      sales: sales.map(sale => this.transformSaleWithSubtotals(sale)),
       total,
       page,
       lastPage: Math.ceil(total / limit),
@@ -184,10 +190,25 @@ export class SalesService {
     this.logger.debug(`[getSalesByDateRange] Found ${sales.length} sales`);
     
     if (sales.length > 0) {
-      this.logger.debug(`[getSalesByDateRange] First sale: id=${sales[0].id}, amount=${sales[0].totalAmount}, date=${sales[0].createdAt}`);
+      this.logger.debug(`[getSalesByDateRange] First sale: id=${sales[0].id}, amount=${sales[0].totalAmount}, status=${sales[0].status}, date=${sales[0].createdAt}`);
+      // Log todas las ventas con sus estados
+      sales.forEach((sale, index) => {
+        this.logger.debug(`[getSalesByDateRange] Sale ${index}: id=${sale.id}, status=${sale.status}, items=${sale.items?.length || 0}`);
+      });
     }
     
-    return sales;
+    // Transformar sales para incluir subtotal en items
+    return sales.map(sale => this.transformSaleWithSubtotals(sale));
+  }
+
+  private transformSaleWithSubtotals(sale: any) {
+    return {
+      ...sale,
+      items: sale.items?.map((item: any) => ({
+        ...item,
+        subtotal: Number(item.unitPrice) * Number(item.quantity),
+      })) || [],
+    };
   }
 
   async getTopSellingProducts(days = 30) {
