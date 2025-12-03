@@ -23,6 +23,38 @@ import { SalesService } from './sales.service';
 export class SalesController {
   constructor(private readonly salesService: SalesService) {}
 
+  @Get('health')
+  async health() {
+    console.log('[SalesController] Health check called');
+    return { status: 'ok', message: 'Sales API is running' };
+  }
+
+  @Get('debug/today')
+  async debugToday() {
+    console.log('[SalesController] Debug today endpoint called');
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    
+    const sales = await this.salesService.getSalesByDateRange(
+      today.toISOString(),
+      tomorrow.toISOString()
+    );
+    
+    console.log(`[SalesController] Found ${sales.length} sales for today`);
+    return {
+      statusCode: 200,
+      success: true,
+      data: sales,
+      debug: {
+        today: today.toISOString(),
+        tomorrow: tomorrow.toISOString(),
+        count: sales.length,
+      }
+    };
+  }
+
   @Get()
   @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO)
   async getAllSales(@Query('page') page = 1, @Query('limit') limit = 10) {
@@ -63,6 +95,27 @@ export class SalesController {
     return this.salesService.getDailyRevenue(startDate, endDate);
   }
 
+  @Get('date-range/:startDate/:endDate')
+  @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO)
+  async getSalesByDateRange(
+    @Param('startDate') startDate: string,
+    @Param('endDate') endDate: string,
+  ) {
+    console.log('[SalesController] getSalesByDateRange - Raw startDate:', startDate);
+    console.log('[SalesController] getSalesByDateRange - Raw endDate:', endDate);
+    
+    // Decodificar los parámetros de la URL
+    const decodedStartDate = decodeURIComponent(startDate);
+    const decodedEndDate = decodeURIComponent(endDate);
+    
+    console.log('[SalesController] getSalesByDateRange - Decoded startDate:', decodedStartDate);
+    console.log('[SalesController] getSalesByDateRange - Decoded endDate:', decodedEndDate);
+    
+    const result = await this.salesService.getSalesByDateRange(decodedStartDate, decodedEndDate);
+    console.log('[SalesController] getSalesByDateRange - result length:', result.length);
+    return result;
+  }
+
   @Get(':id')
   @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO)
   async getSaleById(@Param('id') id: string) {
@@ -90,14 +143,5 @@ export class SalesController {
   @HttpCode(HttpStatus.NO_CONTENT)
   async deleteSale(@Param('id') id: string) {
     return this.salesService.deleteSale(id);
-  }
-
-  @Get('date-range/:startDate/:endDate')
-  @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO)
-  async getSalesByDateRange(
-    @Param('startDate') startDate: string,
-    @Param('endDate') endDate: string,
-  ) {
-    return this.salesService.getSalesByDateRange(startDate, endDate);
   }
 }

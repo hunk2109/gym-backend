@@ -162,13 +162,32 @@ export class SalesService {
   }
 
   async getSalesByDateRange(startDate: string, endDate: string) {
-    return this.saleRepository.find({
+    this.logger.debug(`[getSalesByDateRange] Received: startDate=${startDate}, endDate=${endDate}`);
+    
+    // Asegurar que las fechas incluyan "Z" para UTC si no lo tienen
+    const startStr = startDate.includes('Z') ? startDate : `${startDate}Z`;
+    const endStr = endDate.includes('Z') ? endDate : `${endDate}Z`;
+    
+    const start = new Date(startStr);
+    const end = new Date(endStr);
+    
+    this.logger.debug(`[getSalesByDateRange] Parsed dates: start=${start.toISOString()}, end=${end.toISOString()}`);
+    
+    const sales = await this.saleRepository.find({
       where: {
-        createdAt: Between(new Date(startDate), new Date(endDate)),
+        createdAt: Between(start, end),
       },
       relations: ['items', 'items.product', 'member'],
       order: { createdAt: 'DESC' },
     });
+    
+    this.logger.debug(`[getSalesByDateRange] Found ${sales.length} sales`);
+    
+    if (sales.length > 0) {
+      this.logger.debug(`[getSalesByDateRange] First sale: id=${sales[0].id}, amount=${sales[0].totalAmount}, date=${sales[0].createdAt}`);
+    }
+    
+    return sales;
   }
 
   async getTopSellingProducts(days = 30) {

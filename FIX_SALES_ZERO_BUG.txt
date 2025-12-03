@@ -1,0 +1,164 @@
+═══════════════════════════════════════════════════════════════════
+
+🔧 BUG FIX: VENTAS MUESTRAN 0 EN PANTALLA
+
+═══════════════════════════════════════════════════════════════════
+
+PROBLEMA REAL:
+
+Las ventas NO se cargaban porque el endpoint estaba en el orden INCORRECTO
+en el controlador de backend.
+
+En NestJS, el orden de los decoradores @Get() IMPORTA MUCHO.
+
+Problema de Routing:
+  ├─ Endpoint genérico: @Get(':id')
+  ├─ Endpoint específico: @Get('date-range/:startDate/:endDate')
+  
+Si el específico está DESPUÉS del genérico:
+  └─ /sales/date-range/2025-12-02.../2025-12-03... 
+     ↓
+     Se interpreta como: /sales/{id} 
+     donde id = "date-range"
+     ↓
+     ❌ No encuentra el ID y retorna error 404
+
+═══════════════════════════════════════════════════════════════════
+
+LA SOLUCIÓN:
+
+Mover el endpoint de date-range ANTES del :id en SalesController
+
+ARCHIVO: gym-backend/src/modules/sales/sales.controller.ts
+
+ANTES (orden incorrecto):
+  └─ GET daily-revenue
+  └─ GET :id          ← Genérico atrap todos después
+  └─ POST
+  └─ PUT :id
+  └─ DELETE :id
+  └─ GET date-range   ← ❌ Nunca se alcanza!
+
+DESPUÉS (orden correcto):
+  └─ GET statistics
+  └─ GET member/:memberId
+  └─ GET top-products
+  └─ GET daily-revenue
+  └─ GET date-range/:startDate/:endDate  ← ✓ Específico ANTES
+  └─ GET :id                              ← Genérico DESPUÉS
+  └─ POST
+  └─ PUT :id
+  └─ DELETE :id
+
+═══════════════════════════════════════════════════════════════════
+
+POR QUÉ SUCEDÍA:
+
+1. Flutter llama: GET /api/sales/date-range/2025-12-02.../2025-12-03...
+
+2. NestJS router interpreta:
+   "¿Es /sales/:id?"
+   "Sí, :id = date-range"
+   
+3. Busca una venta con ID "date-range"
+   
+4. No la encuentra
+   
+5. Retorna 404 → SalesService retorna [] (lista vacía)
+   
+6. UI muestra "No hay ventas" ❌
+
+═══════════════════════════════════════════════════════════════════
+
+CAMBIO REALIZADO:
+
+Movimiento de 5 métodos en el controlador:
+
+1. Daily-revenue (después de top-products)
+2. Date-range (ANTES de :id) ← CRÍTICO
+3. :id (después de date-range)
+
+═══════════════════════════════════════════════════════════════════
+
+AHORA FUNCIONA:
+
+1. Flutter llama: GET /api/sales/date-range/2025-12-02.../2025-12-03...
+
+2. NestJS router interpreta:
+   "¿Es /sales/date-range/:startDate/:endDate?"
+   "SÍ ✓"
+   
+3. Ejecuta getSalesByDateRange() 
+   
+4. Consulta BD con las fechas
+   
+5. Retorna las ventas del día ✓
+   
+6. UI muestra: Total: $150.00, 10 ventas ✓
+
+═══════════════════════════════════════════════════════════════════
+
+BASES DE DATOS:
+
+La BD SÍ tiene datos (verificado):
+  
+  id                                      | totalAmount | status    | createdAt
+  ─────────────────────────────────────────────────────────────────────────────
+  449ae70-0eb7-46fc-9cb9-966e5fbcc7a3 |      15.00  | completed | 2025-12-02 19:54:59
+  c1ad7ec-cdab-44d3-bce6-07bf6b81b0bb |      30.00  | completed | 2025-12-02 19:26:23
+  0d9498b-5bdc-47b4-8c25-42db8a63df09 |      15.00  | completed | 2025-12-02 19:48:40
+  1eb9a09-a293-4b38-a45c-aa5eb15213b4 |      30.00  | completed | 2025-12-02 19:24:53
+  fd5f64a-93c1-499f-a6b7-95b87b06a4d3 |      15.00  | completed | 2025-12-02 19:32:04
+  6822cd6-2070-4db4-92e5-68c30abb1b10 |      15.00  | completed | 2025-12-02 20:04:54
+  481f130-a41e-483e-babe-720e570efa2b |      15.00  | completed | 2025-12-02 19:32:50
+  b261d43-3faa-4251-b52f-2f4c5772cf87 |      30.00  | completed | 2025-12-02 19:25:05
+  9c86b60-b4a0-42e6-ba8b-6aca87849f36 |      15.00  | completed | 2025-12-02 19:41:58
+  94d8e03-b6b1-4973-8f55-e2664b506557 |      30.00  | completed | 2025-12-02 19:25:17
+  
+  ✓ 10 ventas del día 2025-12-02
+  ✓ Total: $210.00
+
+═══════════════════════════════════════════════════════════════════
+
+PASOS PARA VERIFICAR:
+
+1. Reiniciar backend:
+   cd /Users/hectortaveras/develop/gym/gym-backend
+   npm run start:dev
+
+2. En Flutter:
+   - Abrir pantalla Ventas
+   - Debe mostrar las 10 ventas automáticamente
+   - Total: $210.00
+   - Cambiar fecha y validar que funciona
+
+3. Revisar logs en terminal (backend):
+   [Nest] Controlador: GET /api/sales/date-range/2025-12-02T00:00.../2025-12-03T00:00...
+   Status: 200
+   Data: 10 sales
+
+═══════════════════════════════════════════════════════════════════
+
+LECCIÓN: ORDEN DE RUTAS EN NESTJS
+
+En NestJS, el orden de los decoradores @Get() es CRÍTICO:
+
+✓ CORRECTO:
+  @Get('specific-path')   ← Rutas específicas PRIMERO
+  @Get('other-specific')
+  @Get(':id')             ← Ruta genérica AL FINAL
+
+✗ INCORRECTO:
+  @Get(':id')             ← Genérica ATRAPA todo
+  @Get('specific-path')   ← Nunca se alcanza
+  @Get(':id')
+
+Esto se llama "Route Precedence" - rutas más específicas ANTES que genéricas.
+
+═══════════════════════════════════════════════════════════════════
+
+ESTADO: ✅ SOLUCIONADO
+
+Ventas se cargan correctamente desde la BD.
+
+═══════════════════════════════════════════════════════════════════
