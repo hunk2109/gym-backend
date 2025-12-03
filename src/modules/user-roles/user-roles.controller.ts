@@ -1,14 +1,17 @@
 import { Controller, Post, Get, Body, Param, UseGuards, Req, HttpCode, HttpStatus } from '@nestjs/common';
 import { UserRolesService } from './user-roles.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../../entities/user.entity';
 
 @Controller('api/user-roles')
+@UseGuards(JwtAuthGuard, RolesGuard)
 export class UserRolesController {
   constructor(private readonly userRolesService: UserRolesService) {}
 
   @Post('assign/:userId')
-  @UseGuards(JwtAuthGuard)
+  @Roles(UserRole.ADMIN)
   @HttpCode(HttpStatus.OK)
   async assignRole(
     @Param('userId') userId: string,
@@ -28,7 +31,7 @@ export class UserRolesController {
   }
 
   @Get('clients')
-  @UseGuards(JwtAuthGuard)
+  @Roles(UserRole.ADMIN, UserRole.ENCARGADO)
   async getActiveClients(@Req() req: any) {
     const clients = await this.userRolesService.getActiveClients();
     return {
@@ -42,7 +45,7 @@ export class UserRolesController {
   }
 
   @Get('by-role/:role')
-  @UseGuards(JwtAuthGuard)
+  @Roles(UserRole.ADMIN, UserRole.ENCARGADO)
   async getUsersByRole(@Param('role') role: UserRole, @Req() req: any) {
     const users = await this.userRolesService.getUsersByRole(role);
     return {
@@ -56,7 +59,7 @@ export class UserRolesController {
   }
 
   @Post('toggle-active/:userId')
-  @UseGuards(JwtAuthGuard)
+  @Roles(UserRole.ADMIN, UserRole.ENCARGADO)
   @HttpCode(HttpStatus.OK)
   async toggleUserActive(
     @Param('userId') userId: string,

@@ -1,14 +1,18 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Product } from '../../entities/product.entity';
 import { CreateProductDto, UpdateProductDto } from './dto/create-product.dto';
+import { PermissionsService } from '../auth/services/permissions.service';
 
 @Injectable()
 export class ProductService {
+  private readonly logger = new Logger(ProductService.name);
+
   constructor(
     @InjectRepository(Product)
     private productRepository: Repository<Product>,
+    private readonly permissionsService: PermissionsService,
   ) {}
 
   async getAllProducts(page = 1, limit = 10) {
@@ -18,7 +22,7 @@ export class ProductService {
       take: limit,
       order: { createdAt: 'DESC' },
     });
-    console.log('[ProductService] getAllProducts - found products:', products.length, 'total:', total);
+    this.logger.debug(`[Products] Retrieved ${products.length} products, total: ${total}`);
     return {
       products,
       total,
@@ -38,16 +42,16 @@ export class ProductService {
   }
 
   async createProduct(createProductDto: CreateProductDto) {
-    console.log('[ProductService] Creating product with DTO:', createProductDto);
+    this.logger.debug(`[Products] Creating product with DTO:`, createProductDto);
     const product = this.productRepository.create({
       ...createProductDto,
       purchaseDate: new Date(createProductDto.purchaseDate),
       expiryDate: createProductDto.expiryDate ? new Date(createProductDto.expiryDate) : null,
       quantityAvailable: createProductDto.quantity,
     });
-    console.log('[ProductService] Product entity created:', product);
+    this.logger.debug(`[Products] Product entity created:`, product);
     const saved = await this.productRepository.save(product);
-    console.log('[ProductService] Product saved with ID:', saved.id);
+    this.logger.log(`[Product] Product created successfully. ID: ${saved.id}, Name: ${saved.name}, Quantity: ${saved.quantityAvailable}`);
     return saved;
   }
 
@@ -59,6 +63,7 @@ export class ProductService {
   async deleteProduct(id: string) {
     const product = await this.getProductById(id);
     await this.productRepository.remove(product);
+    this.logger.warn(`[SENSITIVE] Product deleted. ID: ${id}, Name: ${product.name}`);
   }
 
   async getProductsByCategory(category: string) {

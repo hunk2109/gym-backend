@@ -1,19 +1,24 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Between } from 'typeorm';
 import { Sale } from '../../entities/sale.entity';
 import { SaleItem } from '../../entities/sale-item.entity';
 import { CreateSaleDto, UpdateSaleDto } from './dto/create-sale.dto';
 import { ProductService } from '../products/product.service';
+import { PermissionsService } from '../auth/services/permissions.service';
+import { UserRole } from '../../entities/user.entity';
 
 @Injectable()
 export class SalesService {
+  private readonly logger = new Logger(SalesService.name);
+
   constructor(
     @InjectRepository(Sale)
     private saleRepository: Repository<Sale>,
     @InjectRepository(SaleItem)
     private saleItemRepository: Repository<SaleItem>,
     private productService: ProductService,
+    private readonly permissionsService: PermissionsService,
   ) {}
 
   async getAllSales(page = 1, limit = 10) {
@@ -44,7 +49,7 @@ export class SalesService {
   }
 
   async createSale(createSaleDto: CreateSaleDto) {
-    console.log('[SalesService] Creating sale with DTO:', createSaleDto);
+    this.logger.debug('[SalesService] Creating sale with DTO:', createSaleDto);
     
     // Validar que paymentMethod existe
     if (!createSaleDto.paymentMethod) {
@@ -93,6 +98,7 @@ export class SalesService {
       );
     }
 
+    this.logger.log(`[Sales] Sale created successfully. ID: ${(savedSale as any).id}, Amount: ${totalAmount}`);
     return this.getSaleById((savedSale as any).id);
   }
 
@@ -113,6 +119,7 @@ export class SalesService {
     }
 
     await this.saleRepository.remove(sale);
+    this.logger.warn(`[SENSITIVE] Sale deleted: ${id}, Amount: ${sale.totalAmount}`);
   }
 
   async getSalesByMember(memberId: string, page = 1, limit = 10) {

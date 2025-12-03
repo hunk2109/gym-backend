@@ -1,17 +1,22 @@
-import { Injectable, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException, ForbiddenException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User, UserRole } from '../../entities/user.entity';
+import { PermissionsService } from '../auth/services/permissions.service';
 
 @Injectable()
 export class UserRolesService {
+  private readonly logger = new Logger(UserRolesService.name);
+
   constructor(
     @InjectRepository(User)
     private userRepository: Repository<User>,
+    private readonly permissionsService: PermissionsService,
   ) {}
 
   async assignRole(userId: string, newRole: UserRole, requestingUserId: string): Promise<User> {
-    // Verificar que el usuario que hace la solicitud es ADMIN o ENCARGADO
+    // DOBLE VERIFICACIÓN: Guards + Service
+    // Verificar que el usuario que hace la solicitud es ADMIN
     const requestingUser = await this.userRepository.findOne({
       where: { id: requestingUserId },
     });
@@ -20,9 +25,12 @@ export class UserRolesService {
       throw new NotFoundException('Requesting user not found');
     }
 
-    if (requestingUser.role !== UserRole.ADMIN && requestingUser.role !== UserRole.ENCARGADO) {
-      throw new ForbiddenException('Only ADMIN or ENCARGADO can assign roles');
-    }
+    // Verificación doble: Solo ADMIN puede asignar roles
+    this.permissionsService.requireAdmin(
+      requestingUser.role,
+      requestingUserId,
+      `assignRole to ${userId}`,
+    );
 
     // Buscar al usuario cuyo rol será cambiado
     const user = await this.userRepository.findOne({
@@ -33,19 +41,26 @@ export class UserRolesService {
       throw new NotFoundException('User not found');
     }
 
-    // No permitir cambiar rol de ADMIN si el que solicita no es ADMIN
-    if (user.role === UserRole.ADMIN && requestingUser.role !== UserRole.ADMIN) {
-      throw new ForbiddenException('Only ADMIN can change ADMIN role');
-    }
-
     // Validar que el nuevo rol sea válido
     const validRoles = Object.values(UserRole);
     if (!validRoles.includes(newRole)) {
       throw new BadRequestException(`Invalid role: ${newRole}`);
     }
 
+    const oldRole = user.role;
     user.role = newRole;
-    return this.userRepository.save(user);
+    const updatedUser = await this.userRepository.save(user);
+
+    // Log de acción sensible
+    this.permissionsService.logSensitiveAction(
+      requestingUserId,
+      requestingUser.role,
+      'Assign Role',
+      userId,
+      { oldRole, newRole },
+    );
+
+    return updatedUser;
   }
 
   async getAllUsers(): Promise<User[]> {
@@ -74,9 +89,16 @@ export class UserRolesService {
       where: { id: requestingUserId },
     });
 
-    if (!requestingUser || (requestingUser.role !== UserRole.ADMIN && requestingUser.role !== UserRole.ENCARGADO)) {
-      throw new ForbiddenException('Only ADMIN or ENCARGADO can toggle user status');
+    if (!requestingUser) {
+      throw new NotFoundException('Requesting user not found');
     }
+
+    // Verificación doble: Solo ADMIN/ENCARGADO puede cambiar estado
+    this.permissionsService.requireAdminOrManager(
+      requestingUser.role,
+      requestingUserId,
+      `toggleUserActive for ${userId}`,
+    );
 
     const user = await this.userRepository.findOne({
       where: { id: userId },
@@ -86,7 +108,19 @@ export class UserRolesService {
       throw new NotFoundException('User not found');
     }
 
+    const oldStatus = user.isActive;
     user.isActive = !user.isActive;
-    return this.userRepository.save(user);
+    const updatedUser = await this.userRepository.save(user);
+
+    // Log de acción sensible
+    this.permissionsService.logSensitiveAction(
+      requestingUserId,
+      requestingUser.role,
+      'Toggle User Status',
+      userId,
+      { oldStatus, newStatus: updatedUser.isActive },
+    );
+
+    return updatedUser;
   }
 }

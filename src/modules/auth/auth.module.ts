@@ -6,6 +6,9 @@ import { User } from '../../entities/user.entity';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { JwtStrategy } from './jwt.strategy';
+import { RolesGuard } from './guards/roles.guard';
+import { PermissionsService } from './services/permissions.service';
+import { ResponseFilterService } from './services/response-filter.service';
 
 @Module({
   imports: [
@@ -16,7 +19,8 @@ import { JwtStrategy } from './jwt.strategy';
       signOptions: { expiresIn: '24h' },
     }),
   ],
-  providers: [AuthService, JwtStrategy],
+  providers: [AuthService, JwtStrategy, RolesGuard, PermissionsService, ResponseFilterService],
   controllers: [AuthController],
+  exports: [RolesGuard, PermissionsService, ResponseFilterService],
 })
 export class AuthModule {}

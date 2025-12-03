@@ -34,6 +34,7 @@ import { ReportsModule } from './modules/reports/reports.module';
 import { UserRolesModule } from './modules/user-roles/user-roles.module';
 
 import { ErrorHandlingInterceptor, ResponseInterceptor } from './common/interceptors';
+import { ResponseFilterInterceptor } from './modules/auth/interceptors/response-filter.interceptor';
 import { LoggerMiddleware } from './common/middleware';
 
 @Module({
@@ -81,6 +82,10 @@ import { LoggerMiddleware } from './common/middleware';
     {
       provide: APP_INTERCEPTOR,
       useClass: ResponseInterceptor,
+    },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: ResponseFilterInterceptor,
     },
   ],
 })

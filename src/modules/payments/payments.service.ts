@@ -1,17 +1,21 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Between } from 'typeorm';
 import { Payment, PaymentStatus, PaymentType } from '../../entities/payment.entity';
 import { Member } from '../../entities/member.entity';
 import { CreatePaymentDto, UpdatePaymentDto } from './dto/create-payment.dto';
+import { PermissionsService } from '../auth/services/permissions.service';
 
 @Injectable()
 export class PaymentsService {
+  private readonly logger = new Logger(PaymentsService.name);
+
   constructor(
     @InjectRepository(Payment)
     private paymentRepository: Repository<Payment>,
     @InjectRepository(Member)
     private memberRepository: Repository<Member>,
+    private readonly permissionsService: PermissionsService,
   ) {}
 
   async createPayment(createPaymentDto: CreatePaymentDto): Promise<Payment> {
@@ -25,7 +29,10 @@ export class PaymentsService {
     }
 
     const payment = this.paymentRepository.create(createPaymentDto);
-    return this.paymentRepository.save(payment);
+    const savedPayment = await this.paymentRepository.save(payment);
+    
+    this.logger.log(`[Payment] Payment created. ID: ${savedPayment.id}, Amount: ${createPaymentDto.amount}, Member: ${createPaymentDto.memberId}`);
+    return savedPayment;
   }
 
   async getAllPayments(page: number = 1, limit: number = 10): Promise<{ data: Payment[]; pagination: any }> {
@@ -73,6 +80,7 @@ export class PaymentsService {
   async deletePayment(id: string): Promise<void> {
     const payment = await this.getPaymentById(id);
     await this.paymentRepository.remove(payment);
+    this.logger.warn(`[SENSITIVE] Payment deleted. ID: ${id}, Amount: ${payment.amount}`);
   }
 
   async getPaymentsByMember(memberId: string, page: number = 1, limit: number = 10): Promise<{ data: Payment[]; pagination: any }> {
@@ -225,8 +233,12 @@ export class PaymentsService {
       throw new BadRequestException('Payment has already been refunded');
     }
 
+    const oldStatus = payment.status;
     payment.status = PaymentStatus.REFUNDED;
-    return this.paymentRepository.save(payment);
+    const refundedPayment = await this.paymentRepository.save(payment);
+    
+    this.logger.warn(`[SENSITIVE] Payment refunded. ID: ${paymentId}, Amount: ${payment.amount}, Old Status: ${oldStatus}`);
+    return refundedPayment;
   }
 
   async getPendingPayments(daysOverdue: number = 0): Promise<Payment[]> {
