@@ -44,6 +44,13 @@ export class SalesService {
   }
 
   async createSale(createSaleDto: CreateSaleDto) {
+    console.log('[SalesService] Creating sale with DTO:', createSaleDto);
+    
+    // Validar que paymentMethod existe
+    if (!createSaleDto.paymentMethod) {
+      throw new BadRequestException('Payment method is required');
+    }
+
     let totalAmount = 0;
 
     // Validate products and stock

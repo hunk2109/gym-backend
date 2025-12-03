@@ -12,6 +12,6 @@ async function bootstrap() {
   });
 
   await app.listen(process.env.PORT ?? 3000, '0.0.0.0');
-  console.log('Backend running on http://10.10.4.207:3000');
+  console.log('Backend running on http://localhost:3000');
 }
 bootstrap();

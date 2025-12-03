@@ -43,16 +43,20 @@ export class DashboardService {
   }
 
   async getDashboardStats() {
-    const [membersCount, employeesCount, revenue] = await Promise.all([
+    const [membersCount, employeesCount, revenue, salesCount, topProducts] = await Promise.all([
       this.getMembersCount(),
       this.getEmployeesCount(),
       this.getTotalRevenue(),
+      this.saleRepository.count(),
+      this.getTopProducts(5),
     ]);
 
     return {
-      members: membersCount.count,
-      employees: employeesCount.count,
+      totalMembers: membersCount.count,
+      totalEmployees: employeesCount.count,
       totalRevenue: revenue.total,
+      totalSales: salesCount,
+      topProducts: topProducts,
       currency: revenue.currency,
       timestamp: new Date().toISOString(),
     };
@@ -61,58 +65,83 @@ export class DashboardService {
   async getMonthlySalesStats(year?: number, month?: number) {
     const now = new Date();
     const y = year || now.getFullYear();
-    const m = month || now.getMonth() + 1;
+    // If month is specified, return just that month; otherwise return all 12 months
+    const months = month ? [month] : Array.from({ length: 12 }, (_, i) => i + 1);
+    const results: Array<{
+      year: number;
+      month: number;
+      transactionCount: number;
+      totalRevenue: number;
+      averageTransaction: number;
+      currency: string;
+    }> = [];
 
-    const startDate = new Date(y, m - 1, 1);
-    const endDate = new Date(y, m, 0);
+    for (const m of months) {
+      const startDate = new Date(y, m - 1, 1);
+      const endDate = new Date(y, m, 0);
 
-    const result = await this.saleRepository
-      .createQueryBuilder('sale')
-      .select('COUNT(sale.id)', 'transactionCount')
-      .addSelect('SUM(sale.totalAmount)', 'totalRevenue')
-      .addSelect('AVG(sale.totalAmount)', 'averageTransaction')
-      .where('sale.createdAt BETWEEN :start AND :end', {
-        start: startDate,
-        end: endDate,
-      })
-      .getRawOne();
+      const result = await this.saleRepository
+        .createQueryBuilder('sale')
+        .select('COUNT(sale.id)', 'transactionCount')
+        .addSelect('SUM(sale.totalAmount)', 'totalRevenue')
+        .addSelect('AVG(sale.totalAmount)', 'averageTransaction')
+        .where('sale.createdAt BETWEEN :start AND :end', {
+          start: startDate,
+          end: endDate,
+        })
+        .getRawOne();
 
-    return {
-      year: y,
-      month: m,
-      transactionCount: parseInt(result.transactionCount || 0),
-      totalRevenue: result.totalRevenue ? parseFloat(result.totalRevenue) : 0,
-      averageTransaction: result.averageTransaction ? parseFloat(result.averageTransaction) : 0,
-      currency: 'DOP',
-    };
+      results.push({
+        year: y,
+        month: m,
+        transactionCount: parseInt(result?.transactionCount || 0),
+        totalRevenue: result?.totalRevenue ? parseFloat(result.totalRevenue) : 0,
+        averageTransaction: result?.averageTransaction ? parseFloat(result.averageTransaction) : 0,
+        currency: 'DOP',
+      });
+    }
+
+    return results;
   }
 
   async getQuarterlySalesStats(year?: number, quarter?: number) {
     const now = new Date();
     const y = year || now.getFullYear();
-    const q = quarter || Math.ceil((now.getMonth() + 1) / 3);
+    // If quarter is specified, return just that quarter; otherwise return all 4 quarters
+    const quarters = quarter ? [quarter] : [1, 2, 3, 4];
+    const results: Array<{
+      year: number;
+      quarter: number;
+      transactionCount: number;
+      totalRevenue: number;
+      currency: string;
+    }> = [];
 
-    const startMonth = (q - 1) * 3 + 1;
-    const startDate = new Date(y, startMonth - 1, 1);
-    const endDate = new Date(y, startMonth + 2, 0);
+    for (const q of quarters) {
+      const startMonth = (q - 1) * 3 + 1;
+      const startDate = new Date(y, startMonth - 1, 1);
+      const endDate = new Date(y, startMonth + 2, 0);
 
-    const result = await this.saleRepository
-      .createQueryBuilder('sale')
-      .select('COUNT(sale.id)', 'transactionCount')
-      .addSelect('SUM(sale.totalAmount)', 'totalRevenue')
-      .where('sale.createdAt BETWEEN :start AND :end', {
-        start: startDate,
-        end: endDate,
-      })
-      .getRawOne();
+      const result = await this.saleRepository
+        .createQueryBuilder('sale')
+        .select('COUNT(sale.id)', 'transactionCount')
+        .addSelect('SUM(sale.totalAmount)', 'totalRevenue')
+        .where('sale.createdAt BETWEEN :start AND :end', {
+          start: startDate,
+          end: endDate,
+        })
+        .getRawOne();
 
-    return {
-      year: y,
-      quarter: q,
-      transactionCount: parseInt(result.transactionCount || 0),
-      totalRevenue: result.totalRevenue ? parseFloat(result.totalRevenue) : 0,
-      currency: 'DOP',
-    };
+      results.push({
+        year: y,
+        quarter: q,
+        transactionCount: parseInt(result?.transactionCount || 0),
+        totalRevenue: result?.totalRevenue ? parseFloat(result.totalRevenue) : 0,
+        currency: 'DOP',
+      });
+    }
+
+    return results;
   }
 
   async getAnnualSalesStats(year?: number) {
@@ -139,11 +168,33 @@ export class DashboardService {
   }
 
   async getTopProducts(limit: number = 10) {
-    // This would require a join with products through sales items
-    // For now, returning a placeholder that can be enhanced
-    return {
-      message: 'Top products requires SaleItem entity relationship',
-      limit,
-    };
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+
+    const products = await this.saleRepository
+      .createQueryBuilder('sale')
+      .innerJoinAndSelect('sale.items', 'items')
+      .innerJoinAndSelect('items.product', 'product')
+      .where('sale.createdAt BETWEEN :startDate AND :endDate', {
+        startDate: startOfMonth,
+        endDate: endOfMonth,
+      })
+      .select('product.id', 'id')
+      .addSelect('product.name', 'name')
+      .addSelect('SUM(items.quantity)', 'quantity')
+      .addSelect('SUM(items.quantity * items.unitPrice)', 'revenue')
+      .groupBy('product.id')
+      .addGroupBy('product.name')
+      .orderBy('revenue', 'DESC')
+      .limit(limit)
+      .getRawMany();
+
+    return products.map((p) => ({
+      id: p.id,
+      name: p.name,
+      quantity: parseInt(p.quantity || '0'),
+      revenue: parseFloat(p.revenue || '0'),
+    }));
   }
 }

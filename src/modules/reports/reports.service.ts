@@ -119,16 +119,19 @@ export class ReportsService {
       .leftJoinAndSelect('item.sale', 'sale')
       .leftJoinAndSelect('item.product', 'product')
       .where('sale.createdAt BETWEEN :startDate AND :endDate', { startDate, endDate })
-      .select('product.name', 'product')
+      .select('product.name', 'name')
+      .addSelect('product.id', 'id')
       .addSelect('SUM(item.quantity)', 'quantity')
-      .addSelect('SUM(item.subtotal)', 'revenue')
+      .addSelect('SUM(item.quantity * item.unitPrice)', 'revenue')
       .groupBy('product.id')
+      .addGroupBy('product.name')
       .orderBy('revenue', 'DESC')
       .limit(limit)
       .getRawMany();
 
     return products.map((p) => ({
-      product: p.product,
+      productName: p.name,
+      productId: p.id,
       quantity: parseInt(p.quantity || '0'),
       revenue: parseFloat(p.revenue || '0'),
     }));
