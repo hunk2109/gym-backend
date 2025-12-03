@@ -19,7 +19,15 @@ export class MembershipsService {
 
   // Membership CRUD
   async createMembership(createMembershipDto: CreateMembershipDto): Promise<Membership> {
-    const membership = this.membershipRepository.create(createMembershipDto);
+    // Crear membership sin incluir id ni timestamps (TypeORM los generará)
+    const membership = this.membershipRepository.create({
+      name: createMembershipDto.name,
+      description: createMembershipDto.description,
+      price: createMembershipDto.price,
+      durationMonths: createMembershipDto.durationMonths,
+      benefits: createMembershipDto.benefits,
+      isActive: createMembershipDto.isActive !== undefined ? createMembershipDto.isActive : true,
+    });
     return this.membershipRepository.save(membership);
   }
 

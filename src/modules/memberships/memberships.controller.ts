@@ -24,7 +24,9 @@ export class MembershipsController {
   @Get()
   @HttpCode(HttpStatus.OK)
   async getAllMemberships(@Query('page') page: string = '1', @Query('limit') limit: string = '10') {
-    return this.membershipsService.getAllMemberships(parseInt(page), parseInt(limit));
+    const result = await this.membershipsService.getAllMemberships(parseInt(page), parseInt(limit));
+    console.log('[MembershipsController] GET /memberships - Retornando:', JSON.stringify(result, null, 2).substring(0, 200));
+    return result;
   }
 
   @Get('active')
