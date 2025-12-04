@@ -38,6 +38,9 @@ export class MemberMembership {
   @Column({ type: 'boolean', default: true })
   isActive: boolean;
 
+  @Column({ type: 'int', default: 0 })
+  classesUsed: number;
+
   @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
   amountPaid: number;
 

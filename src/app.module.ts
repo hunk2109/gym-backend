@@ -31,6 +31,7 @@ import { EmployeeModule } from './modules/employees/employee.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { MembersModule } from './modules/members/members.module';
 import { MembershipsModule } from './modules/memberships/memberships.module';
+import { MemberMembershipsModule } from './modules/member-memberships/member-memberships.module';
 import { ClassesModule } from './modules/classes/classes.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { ReportsModule } from './modules/reports/reports.module';
@@ -73,6 +74,7 @@ import { LoggerMiddleware } from './common/middleware';
     DashboardModule,
     MembersModule,
     MembershipsModule,
+    MemberMembershipsModule,
     ClassesModule,
     PaymentsModule,
     ReportsModule,

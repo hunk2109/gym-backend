@@ -67,6 +67,12 @@ export class Member {
   @Column({ type: 'boolean', default: false })
   isPaid: boolean;
 
+  @Column({ type: 'boolean', default: false })
+  hasMembership: boolean;
+
+  @Column({ type: 'boolean', default: false })
+  hasPendingPayment: boolean;
+
   @OneToMany(() => MemberMembership, (membership) => membership.member)
   memberships: MemberMembership[];
 
