@@ -16,13 +16,21 @@ export class GymSettingsController {
   @Roles(UserRole.ADMIN)
   @HttpCode(HttpStatus.CREATED)
   async create(@Body() createDto: CreateGymSettingsDto) {
-    return this.gymSettingsService.create(createDto);
+    const settings = await this.gymSettingsService.create(createDto);
+    return {
+      success: true,
+      data: settings,
+    };
   }
 
   // Ver configuración del gimnasio - Público
   @Get()
   async getSettings() {
-    return this.gymSettingsService.getSettings();
+    const settings = await this.gymSettingsService.getSettings();
+    return {
+      success: true,
+      data: settings,
+    };
   }
 
   // Actualizar configuración del gimnasio - Solo ADMIN/ENCARGADO
@@ -30,6 +38,10 @@ export class GymSettingsController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN, UserRole.ENCARGADO)
   async update(@Body() updateDto: UpdateGymSettingsDto) {
-    return this.gymSettingsService.update(updateDto);
+    const settings = await this.gymSettingsService.update(updateDto);
+    return {
+      success: true,
+      data: settings,
+    };
   }
 }

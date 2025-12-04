@@ -27,6 +27,9 @@ export class GymSettings {
   email: string;
 
   @Column({ type: 'varchar', nullable: true })
+  rnc: string;
+
+  @Column({ type: 'varchar', nullable: true })
   website: string;
 
   @Column({ type: 'varchar' })

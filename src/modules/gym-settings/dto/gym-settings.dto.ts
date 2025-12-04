@@ -1,38 +1,51 @@
-import { IsString, IsOptional, IsDecimal, IsEmail } from 'class-validator';
+import { IsString, IsOptional, IsNumber, IsEmail } from 'class-validator';
+import { Transform } from 'class-transformer';
 
 export class CreateGymSettingsDto {
+  @IsOptional()
   @IsString()
-  gymName: string;
+  gymName?: string;
 
   @IsOptional()
   @IsString()
-  description: string;
+  description?: string;
 
+  @IsOptional()
   @IsString()
-  address: string;
+  address?: string;
 
+  @IsOptional()
   @IsString()
-  phone: string;
+  phone?: string;
 
+  @IsOptional()
   @IsEmail()
-  email: string;
+  email?: string;
 
   @IsOptional()
   @IsString()
-  website: string;
-
-  @IsString()
-  openingTime: string;
-
-  @IsString()
-  closingTime: string;
-
-  @IsDecimal()
-  membershipPrice: number;
+  rnc?: string;
 
   @IsOptional()
   @IsString()
-  policies: string;
+  website?: string;
+
+  @IsOptional()
+  @IsString()
+  openingTime?: string;
+
+  @IsOptional()
+  @IsString()
+  closingTime?: string;
+
+  @IsOptional()
+  @Transform(({ value }) => value ? parseFloat(value) : undefined)
+  @IsNumber()
+  membershipPrice?: number;
+
+  @IsOptional()
+  @IsString()
+  policies?: string;
 }
 
 export class UpdateGymSettingsDto {
@@ -58,6 +71,10 @@ export class UpdateGymSettingsDto {
 
   @IsOptional()
   @IsString()
+  rnc?: string;
+
+  @IsOptional()
+  @IsString()
   website?: string;
 
   @IsOptional()
@@ -69,7 +86,8 @@ export class UpdateGymSettingsDto {
   closingTime?: string;
 
   @IsOptional()
-  @IsDecimal()
+  @Transform(({ value }) => value ? parseFloat(value) : undefined)
+  @IsNumber()
   membershipPrice?: number;
 
   @IsOptional()
