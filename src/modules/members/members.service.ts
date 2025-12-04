@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Like } from 'typeorm';
+import { v4 as uuidv4 } from 'uuid';
 import { Member } from '../../entities/member.entity';
 import { User } from '../../entities/user.entity';
 import { CreateMemberDto, UpdateMemberDto } from './dto/create-member.dto';
@@ -34,6 +35,7 @@ export class MembersService {
     }
 
     const member = this.memberRepository.create({
+      id: uuidv4(),
       ...createMemberDto,
       joinDate: createMemberDto.joinDate || new Date(),
     });

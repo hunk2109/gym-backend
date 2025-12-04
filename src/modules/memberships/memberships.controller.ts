@@ -134,7 +134,7 @@ export class MemberMembershipsController {
 
   // Asignar membresía a miembro
   @Post()
-  @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO)
+  @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO, UserRole.CLIENTE)
   @HttpCode(HttpStatus.CREATED)
   async assignMembership(@Body() assignMembershipDto: AssignMembershipDto) {
     // Sanitizar el DTO en caso de que venga serializado incorrectamente
@@ -157,7 +157,7 @@ export class MemberMembershipsController {
 
   // Obtener membresías con pago pendiente
   @Get('pending-payments')
-  @Roles(UserRole.ADMIN, UserRole.ENCARGADO)
+  @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.CLIENTE)
   @HttpCode(HttpStatus.OK)
   async getPendingPayments(@Query('daysOverdue') daysOverdue?: string) {
     console.log(`[MemberMembershipsController] GET /pending-payments - daysOverdue=${daysOverdue}`);

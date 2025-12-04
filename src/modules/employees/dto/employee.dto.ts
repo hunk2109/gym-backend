@@ -1,4 +1,5 @@
-import { IsString, IsEmail, IsDateString, IsDecimal, IsOptional, IsBoolean, IsEnum } from 'class-validator';
+import { IsString, IsEmail, IsDateString, IsNumber, IsOptional, IsBoolean, IsEnum } from 'class-validator';
+import { Type } from 'class-transformer';
 import { EmployeeRole } from '../../../entities/employee.entity';
 
 export class CreateEmployeeDto {
@@ -14,20 +15,19 @@ export class CreateEmployeeDto {
   @IsString()
   phone: string;
 
-  @IsString()
-  position: string;
-
-  @IsEnum(EmployeeRole)
+  @IsEnum(EmployeeRole, { message: `El rol debe ser uno de: ${Object.values(EmployeeRole).join(', ')}` })
   role: EmployeeRole;
 
+  @IsOptional()
   @IsDateString()
-  hireDate: string;
+  hireDate?: string;
 
   @IsOptional()
   @IsString()
   specialization?: string;
 
-  @IsDecimal()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
   salary: number;
 
   @IsOptional()
@@ -53,11 +53,7 @@ export class UpdateEmployeeDto {
   phone?: string;
 
   @IsOptional()
-  @IsString()
-  position?: string;
-
-  @IsOptional()
-  @IsEnum(EmployeeRole)
+  @IsEnum(EmployeeRole, { message: `El rol debe ser uno de: ${Object.values(EmployeeRole).join(', ')}` })
   role?: EmployeeRole;
 
   @IsOptional()
@@ -65,7 +61,8 @@ export class UpdateEmployeeDto {
   specialization?: string;
 
   @IsOptional()
-  @IsDecimal()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
   salary?: number;
 
   @IsOptional()

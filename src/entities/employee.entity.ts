@@ -12,6 +12,8 @@ export enum EmployeeRole {
   RECEPTIONIST = 'receptionist',
   CLEANER = 'cleaner',
   NUTRITIONIST = 'nutritionist',
+  SUPERVISOR = 'supervisor',
+  CASHIER = 'cashier',
 }
 
 @Entity('employees')
@@ -30,9 +32,6 @@ export class Employee {
 
   @Column({ type: 'varchar' })
   phone: string;
-
-  @Column({ type: 'varchar' })
-  position: string;
 
   @Column({
     type: 'enum',

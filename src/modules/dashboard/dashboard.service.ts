@@ -5,6 +5,8 @@ import { User, UserRole } from '../../entities/user.entity';
 import { Sale, SaleStatus } from '../../entities/sale.entity';
 import { Employee } from '../../entities/employee.entity';
 import { Member } from '../../entities/member.entity';
+import { MemberMembership } from '../../entities/member-membership.entity';
+import { Membership } from '../../entities/membership.entity';
 
 @Injectable()
 export class DashboardService {
@@ -17,6 +19,10 @@ export class DashboardService {
     private employeeRepository: Repository<Employee>,
     @InjectRepository(Member)
     private memberRepository: Repository<Member>,
+    @InjectRepository(MemberMembership)
+    private memberMembershipRepository: Repository<MemberMembership>,
+    @InjectRepository(Membership)
+    private membershipRepository: Repository<Membership>,
   ) {}
 
   async getMembersCount(): Promise<{ count: number }> {
@@ -32,14 +38,27 @@ export class DashboardService {
   }
 
   async getTotalRevenue(): Promise<{ total: number; currency: string }> {
-    const result = await this.saleRepository
+    // Ingresos de ventas completadas
+    const salesResult = await this.saleRepository
       .createQueryBuilder('sale')
       .select('SUM(sale.totalAmount)', 'total')
       .where('sale.status = :status', { status: SaleStatus.COMPLETED })
       .getRawOne();
 
+    const salesTotal = salesResult.total ? parseFloat(salesResult.total) : 0;
+
+    // Ingresos de membresías pagadas
+    const membershipResult = await this.memberMembershipRepository
+      .createQueryBuilder('mm')
+      .select('SUM(m.price)', 'total')
+      .leftJoin(Membership, 'm', 'm.id = mm.membershipId')
+      .where('mm.paymentStatus = :status', { status: 'paid' })
+      .getRawOne();
+
+    const membershipTotal = membershipResult.total ? parseFloat(membershipResult.total) : 0;
+
     return {
-      total: result.total ? parseFloat(result.total) : 0,
+      total: salesTotal + membershipTotal,
       currency: 'DOP',
     };
   }
@@ -172,6 +191,59 @@ export class DashboardService {
     };
   }
 
+  async getSalesRevenue(): Promise<number> {
+    const result = await this.saleRepository
+      .createQueryBuilder('sale')
+      .select('SUM(sale.totalAmount)', 'total')
+      .where('sale.status = :status', { status: SaleStatus.COMPLETED })
+      .getRawOne();
+    return result.total ? parseFloat(result.total) : 0;
+  }
+
+  async getMembershipRevenue(): Promise<number> {
+    try {
+      const result = await this.memberMembershipRepository.query(`
+        SELECT SUM(m.price) as total
+        FROM member_memberships mm
+        INNER JOIN memberships m ON m.id = mm.membershipId
+        WHERE mm.paymentStatus = 'paid'
+      `);
+      return result[0]?.total ? parseFloat(result[0].total) : 0;
+    } catch (error) {
+      console.error('[Dashboard] Error en getMembershipRevenue:', error);
+      return 0;
+    }
+  }
+
+  async getMembershipRevenueByType() {
+    try {
+      console.log('[Dashboard] Iniciando getMembershipRevenueByType');
+      const result = await this.memberMembershipRepository.query(`
+        SELECT 
+          m.name,
+          COUNT(mm.id) as count,
+          SUM(m.price) as revenue
+        FROM member_memberships mm
+        INNER JOIN memberships m ON m.id = mm.membershipId
+        WHERE mm.paymentStatus = 'paid'
+        GROUP BY m.id, m.name
+        ORDER BY revenue DESC
+      `);
+
+      console.log('[Dashboard] Resultado query:', result);
+      const mapped = result.map((r: any) => ({
+        name: r.name || 'Sin membresía',
+        count: parseInt(r.count || 0),
+        revenue: parseFloat(r.revenue || 0),
+      }));
+      console.log('[Dashboard] Mapped result:', mapped);
+      return mapped;
+    } catch (error) {
+      console.error('[Dashboard] Error en getMembershipRevenueByType:', error);
+      return [];
+    }
+  }
+
   async getTopProducts(limit: number = 10) {
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -202,5 +274,49 @@ export class DashboardService {
       quantity: parseInt(p.quantity || '0'),
       revenue: parseFloat(p.revenue || '0'),
     }));
+  }
+
+  async getRevenueComparison() {
+    try {
+      console.log('[Dashboard] Obteniendo comparación de ingresos (membresías vs ventas)');
+
+      // Ingresos de ventas
+      const salesResult = await this.saleRepository.query(`
+        SELECT SUM(totalAmount) as revenue
+        FROM sales
+        WHERE status = 'completed'
+      `);
+      const salesRevenue = salesResult[0]?.revenue ? parseFloat(salesResult[0].revenue) : 0;
+
+      // Ingresos de membresías
+      const membershipResult = await this.memberMembershipRepository.query(`
+        SELECT SUM(m.price) as revenue
+        FROM member_memberships mm
+        INNER JOIN memberships m ON m.id = mm.membershipId
+        WHERE mm.paymentStatus = 'paid'
+      `);
+      const membershipRevenue = membershipResult[0]?.revenue ? parseFloat(membershipResult[0].revenue) : 0;
+
+      const total = salesRevenue + membershipRevenue;
+
+      const result = [
+        {
+          name: 'Ventas',
+          revenue: salesRevenue,
+          percentage: total > 0 ? ((salesRevenue / total) * 100).toFixed(2) : 0,
+        },
+        {
+          name: 'Membresías',
+          revenue: membershipRevenue,
+          percentage: total > 0 ? ((membershipRevenue / total) * 100).toFixed(2) : 0,
+        },
+      ];
+
+      console.log('[Dashboard] Resultado:', result);
+      return result;
+    } catch (error) {
+      console.error('[Dashboard] Error en getRevenueComparison:', error);
+      return [];
+    }
   }
 }

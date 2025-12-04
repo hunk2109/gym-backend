@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { v4 as uuidv4 } from 'uuid';
 import { Membership } from '../../entities/membership.entity';
 import { MemberMembership } from '../../entities/member-membership.entity';
 import { Member } from '../../entities/member.entity';
@@ -145,6 +146,7 @@ export class MembershipsService {
 
     // Crear y guardar directamente
     const newMemberMembership = this.memberMembershipRepository.create({
+      id: uuidv4(),
       memberId: member.id,
       membershipId: membershipId as any,
       startDate: start,
@@ -201,6 +203,7 @@ export class MembershipsService {
     newEndDate.setMonth(newEndDate.getMonth() + currentMembership.membership.durationMonths);
 
     const newMembership = this.memberMembershipRepository.create({
+      id: uuidv4(),
       memberId: currentMembership.memberId,
       membershipId: currentMembership.membershipId,
       startDate: newStartDate,
@@ -286,6 +289,7 @@ export class MembershipsService {
           newEndDate.setMonth(newEndDate.getMonth() + currentMembership.membership.durationMonths);
 
           const newMembership = this.memberMembershipRepository.create({
+            id: uuidv4(),
             memberId: currentMembership.memberId,
             membershipId: currentMembership.membershipId,
             startDate: newStartDate,
@@ -305,6 +309,7 @@ export class MembershipsService {
         newEndDate.setMonth(newEndDate.getMonth() + currentMembership.membership.durationMonths);
 
         const newMembership = this.memberMembershipRepository.create({
+          id: uuidv4(),
           memberId: currentMembership.memberId,
           membershipId: currentMembership.membershipId,
           startDate: newStartDate,

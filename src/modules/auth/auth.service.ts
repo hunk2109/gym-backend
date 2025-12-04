@@ -3,6 +3,7 @@ import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
+import { v4 as uuidv4 } from 'uuid';
 import { User, UserRole } from '../../entities/user.entity';
 
 @Injectable()
@@ -25,6 +26,7 @@ export class AuthService {
     const hashedPassword = await bcrypt.hash(password, 10);
 
     const user = this.userRepository.create({
+      id: uuidv4(),
       email,
       passwordHash: hashedPassword,
       firstName,

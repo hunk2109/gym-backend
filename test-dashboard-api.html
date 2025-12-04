@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test API Dashboard</title>
+    <style>
+        body { font-family: monospace; margin: 20px; }
+        .log { border: 1px solid #ddd; padding: 10px; margin: 10px 0; background: #f5f5f5; }
+        .success { color: green; }
+        .error { color: red; }
+        .info { color: blue; }
+        button { padding: 10px 20px; margin: 5px; }
+    </style>
+</head>
+<body>
+    <h1>🧪 Test API Dashboard</h1>
+    
+    <div>
+        <h2>Endpoints para Probar:</h2>
+        <button onclick="testMembershipRevenue()">Test: Membership Revenue por Tipo</button>
+        <button onclick="testTokenStatus()">Test: Token Status</button>
+        <button onclick="clearLogs()">Limpiar Logs</button>
+    </div>
+    
+    <div id="logs"></div>
+
+    <script>
+        const apiBase = 'http://localhost:3000/api';
+        
+        function log(message, type = 'info') {
+            const logsDiv = document.getElementById('logs');
+            const logDiv = document.createElement('div');
+            logDiv.className = `log ${type}`;
+            logDiv.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            logsDiv.appendChild(logDiv);
+            console.log(message);
+        }
+        
+        function clearLogs() {
+            document.getElementById('logs').innerHTML = '';
+        }
+        
+        async function getToken() {
+            // Intenta obtener el token del localStorage o sessionStorage
+            let token = localStorage.getItem('auth_token') || sessionStorage.getItem('auth_token');
+            
+            if (!token) {
+                log('❌ No hay token guardado', 'error');
+                return null;
+            }
+            
+            log(`✅ Token encontrado: ${token.substring(0, 20)}...`, 'success');
+            return token;
+        }
+        
+        async function testMembershipRevenue() {
+            log('🔍 Iniciando test de Membership Revenue...', 'info');
+            
+            const token = await getToken();
+            if (!token) {
+                log('⚠️ Necesitas estar logueado primero', 'error');
+                return;
+            }
+            
+            try {
+                log('📤 Enviando GET /dashboard/revenue/memberships-by-type', 'info');
+                
+                const response = await fetch(`${apiBase}/dashboard/revenue/memberships-by-type`, {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                log(`📥 Response Status: ${response.status}`, response.status === 200 ? 'success' : 'error');
+                
+                const data = await response.json();
+                log(`📦 Response Data: ${JSON.stringify(data, null, 2)}`, 'info');
+                
+                if (response.status === 200) {
+                    const items = data.data || [];
+                    if (items.length === 0) {
+                        log('⚠️ Respuesta OK pero sin datos (lista vacía)', 'error');
+                    } else {
+                        log(`✅ ${items.length} tipos de membresía encontrados`, 'success');
+                        items.forEach((item, idx) => {
+                            log(`   [${idx+1}] ${item.name}: $${item.revenue} (${item.count} unidades)`, 'success');
+                        });
+                    }
+                } else if (response.status === 401) {
+                    log('❌ Error 401 - Token inválido o expirado', 'error');
+                } else if (response.status === 403) {
+                    log('❌ Error 403 - Sin permisos (requiere ADMIN o ENCARGADO)', 'error');
+                } else {
+                    log(`❌ Error ${response.status}`, 'error');
+                }
+                
+            } catch (error) {
+                log(`❌ Error en fetch: ${error.message}`, 'error');
+            }
+        }
+        
+        async function testTokenStatus() {
+            log('🔍 Verificando estado del token...', 'info');
+            
+            const token = localStorage.getItem('auth_token') || sessionStorage.getItem('auth_token');
+            if (token) {
+                log(`✅ Token en localStorage: ${token.substring(0, 30)}...`, 'success');
+                log(`   Longitud: ${token.length} caracteres`, 'info');
+            } else {
+                log('❌ No hay token guardado', 'error');
+            }
+        }
+        
+        // Auto-ejecutar tests si hay token
+        window.addEventListener('load', () => {
+            log('✅ Página cargada. Abre la consola (F12) para ver más detalles.', 'success');
+            setTimeout(() => {
+                const token = localStorage.getItem('auth_token') || sessionStorage.getItem('auth_token');
+                if (!token) {
+                    log('⚠️ Necesitas hacer login primero en la app', 'error');
+                }
+            }, 1000);
+        });
+    </script>
+</body>
+</html>

@@ -20,6 +20,7 @@ import { ClassEnrollment } from './entities/class-enrollment.entity';
 import { Payment } from './entities/payment.entity';
 import { GroupMembership } from './entities/group-membership.entity';
 import { GroupMembershipUser } from './entities/group-membership-user.entity';
+import { Payroll } from './entities/payroll.entity';
 
 import { AuthModule } from './modules/auth/auth.module';
 import { ProductsModule } from './modules/products/products.module';
@@ -35,6 +36,7 @@ import { PaymentsModule } from './modules/payments/payments.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { UserRolesModule } from './modules/user-roles/user-roles.module';
 import { GroupMembershipsModule } from './modules/group-memberships/group-memberships.module';
+import { PayrollModule } from './modules/payroll/payroll.module';
 
 import { ErrorHandlingInterceptor, ResponseInterceptor } from './common/interceptors';
 import { ResponseFilterInterceptor } from './modules/auth/interceptors/response-filter.interceptor';
@@ -53,7 +55,7 @@ import { LoggerMiddleware } from './common/middleware';
       username: process.env.DB_USERNAME || 'root',
       password: process.env.DB_PASSWORD || 'password',
       database: process.env.DB_NAME || 'gym_manager',
-      entities: [User, Product, Equipment, Sale, SaleItem, GymSettings, Employee, Member, Membership, MemberMembership, GymClass, ClassEnrollment, Payment, GroupMembership, GroupMembershipUser],
+      entities: [User, Product, Equipment, Sale, SaleItem, GymSettings, Employee, Member, Membership, MemberMembership, GymClass, ClassEnrollment, Payment, GroupMembership, GroupMembershipUser, Payroll],
       synchronize: true,
       logging: false,
     }),
@@ -76,6 +78,7 @@ import { LoggerMiddleware } from './common/middleware';
     ReportsModule,
     UserRolesModule,
     GroupMembershipsModule,
+    PayrollModule,
   ],
   controllers: [],
   providers: [

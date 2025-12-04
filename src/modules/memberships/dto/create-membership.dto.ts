@@ -50,11 +50,11 @@ export class UpdateMembershipDto {
 }
 
 export class AssignMembershipDto {
-  @IsNumber()
-  memberId: number;
+  @IsString()
+  memberId: string;
 
-  @IsNumber()
-  membershipId: number;
+  @IsString()
+  membershipId: string;
 
   @IsOptional()
   @IsString()
@@ -86,8 +86,8 @@ export function sanitizeAssignMembershipDto(dto: AssignMembershipDto): AssignMem
 }
 
 export class RenewMembershipDto {
-  @IsNumber()
-  membershipId: number;
+  @IsString()
+  membershipId: string;
 
   @IsOptional()
   @IsNumber()

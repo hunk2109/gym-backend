@@ -20,7 +20,10 @@ export class EmployeeService {
       throw new BadRequestException('Employee with this email already exists');
     }
 
-    const employee = this.employeeRepository.create(createDto);
+    const employee = this.employeeRepository.create({
+      ...createDto,
+      hireDate: createDto.hireDate ? new Date(createDto.hireDate) : new Date(),
+    });
     return this.employeeRepository.save(employee) as any;
   }
 

@@ -1,7 +1,7 @@
 import {
   Entity,
   Column,
-  PrimaryGeneratedColumn,
+  PrimaryColumn,
   CreateDateColumn,
   UpdateDateColumn,
   ManyToOne,
@@ -12,7 +12,7 @@ import { Membership } from './membership.entity';
 
 @Entity('member_memberships')
 export class MemberMembership {
-  @PrimaryGeneratedColumn('uuid')
+  @PrimaryColumn({ type: 'varchar', length: 36 })
   id: string;
 
   @ManyToOne(() => Member, { onDelete: 'CASCADE' })

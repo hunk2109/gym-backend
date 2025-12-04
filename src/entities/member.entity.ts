@@ -1,7 +1,7 @@
 import {
   Entity,
   Column,
-  PrimaryGeneratedColumn,
+  PrimaryColumn,
   CreateDateColumn,
   UpdateDateColumn,
   ManyToOne,
@@ -19,7 +19,7 @@ export enum MemberGender {
 
 @Entity('members')
 export class Member {
-  @PrimaryGeneratedColumn('uuid')
+  @PrimaryColumn({ type: 'varchar', length: 36 })
   id: string;
 
   @ManyToOne(() => User, { onDelete: 'CASCADE' })
