@@ -42,6 +42,7 @@ import { GroupMembershipsModule } from './modules/group-memberships/group-member
 import { PayrollModule } from './modules/payroll/payroll.module';
 import { AuditLogModule } from './modules/audit-logs/audit-log.module';
 import { ModulesManagementModule } from './modules/modules-management/modules-management.module';
+import { SystemParameterModule } from './modules/system-parameters/system-parameter.module';
 
 import { ErrorHandlingInterceptor, ResponseInterceptor } from './common/interceptors';
 import { ResponseFilterInterceptor } from './modules/auth/interceptors/response-filter.interceptor';
@@ -87,6 +88,7 @@ import { LoggerMiddleware } from './common/middleware';
     PayrollModule,
     AuditLogModule,
     ModulesManagementModule,
+    SystemParameterModule,
   ],
   controllers: [],
   providers: [

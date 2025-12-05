@@ -1,4 +1,4 @@
-import { Controller, Get, Put, Post, Param, Body, UseGuards, Req } from '@nestjs/common';
+import { Controller, Get, Put, Post, Param, Body, UseGuards, Req, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { ModulesManagementService } from './modules-management.service';
 import { UpdateModuleSettingsDto } from './dto/module-settings.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -21,7 +21,7 @@ export class ModulesManagementController {
   ): Promise<ModuleSettings> {
     // Verificar que sea admin
     if (req.user.role !== 'admin') {
-      throw new Error('Only admins can toggle modules');
+      throw new ForbiddenException('Only admins can toggle modules');
     }
     return this.modulesService.toggleModule(moduleName);
   }
@@ -30,7 +30,7 @@ export class ModulesManagementController {
   async enableAll(@Req() req: any): Promise<ModuleSettings[]> {
     // Verificar que sea admin
     if (req.user.role !== 'admin') {
-      throw new Error('Only admins can enable all modules');
+      throw new ForbiddenException('Only admins can enable all modules');
     }
     return this.modulesService.enableAllModules();
   }
@@ -39,7 +39,7 @@ export class ModulesManagementController {
   async disableAll(@Req() req: any): Promise<ModuleSettings[]> {
     // Verificar que sea admin
     if (req.user.role !== 'admin') {
-      throw new Error('Only admins can disable all modules');
+      throw new ForbiddenException('Only admins can disable all modules');
     }
     return this.modulesService.disableAllModules();
   }
@@ -57,7 +57,7 @@ export class ModulesManagementController {
   ): Promise<ModuleSettings> {
     // Verificar que sea admin
     if (req.user.role !== 'admin') {
-      throw new Error('Only admins can update module settings');
+      throw new ForbiddenException('Only admins can update module settings');
     }
     return this.modulesService.updateModule(moduleName, updateDto);
   }

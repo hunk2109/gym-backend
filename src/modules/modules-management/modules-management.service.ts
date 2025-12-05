@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ModuleSettings } from '../../entities/module-settings.entity';
@@ -58,7 +58,7 @@ export class ModulesManagementService {
     const module = await this.getModule(moduleName);
     
     if (!module) {
-      throw new Error(`Module ${moduleName} not found`);
+      throw new NotFoundException(`Module ${moduleName} not found`);
     }
 
     Object.assign(module, updateDto);
@@ -69,7 +69,7 @@ export class ModulesManagementService {
     const module = await this.getModule(moduleName);
     
     if (!module) {
-      throw new Error(`Module ${moduleName} not found`);
+      throw new NotFoundException(`Module ${moduleName} not found`);
     }
 
     module.isEnabled = !module.isEnabled;
@@ -79,14 +79,40 @@ export class ModulesManagementService {
   }
 
   async enableAllModules(): Promise<ModuleSettings[]> {
-    await this.moduleSettingsRepository.update({}, { isEnabled: true });
-    this.logger.log('All modules enabled');
-    return this.getAllModules();
+    try {
+      // Obtener todos los módulos primero
+      const allModules = await this.getAllModules();
+      
+      // Actualizar cada uno
+      for (const module of allModules) {
+        module.isEnabled = true;
+        await this.moduleSettingsRepository.save(module);
+      }
+      
+      this.logger.log('All modules enabled');
+      return this.getAllModules();
+    } catch (error) {
+      this.logger.error(`Error enabling all modules: ${error.message}`);
+      throw new BadRequestException('Error enabling all modules');
+    }
   }
 
   async disableAllModules(): Promise<ModuleSettings[]> {
-    await this.moduleSettingsRepository.update({}, { isEnabled: false });
-    this.logger.log('All modules disabled');
-    return this.getAllModules();
+    try {
+      // Obtener todos los módulos primero
+      const allModules = await this.getAllModules();
+      
+      // Actualizar cada uno
+      for (const module of allModules) {
+        module.isEnabled = false;
+        await this.moduleSettingsRepository.save(module);
+      }
+      
+      this.logger.log('All modules disabled');
+      return this.getAllModules();
+    } catch (error) {
+      this.logger.error(`Error disabling all modules: ${error.message}`);
+      throw new BadRequestException('Error disabling all modules');
+    }
   }
 }

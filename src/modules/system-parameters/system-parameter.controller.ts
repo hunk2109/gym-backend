@@ -2,7 +2,7 @@ import { Controller, Get, Post, Patch, Body, Param, UseGuards, Request } from '@
 import { SystemParameterService } from './system-parameter.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
-@Controller('system-parameters')
+@Controller('api/system-parameters')
 @UseGuards(JwtAuthGuard)
 export class SystemParameterController {
   constructor(private readonly paramService: SystemParameterService) {}
