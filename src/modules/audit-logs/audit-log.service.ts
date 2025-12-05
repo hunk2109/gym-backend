@@ -18,16 +18,23 @@ export class AuditLogService {
     oldValue?: any;
     newValue?: any;
     userId?: string;
+    userName?: string;
     ipAddress?: string;
     userAgent?: string;
+    status?: 'PENDING' | 'APPROVED' | 'REJECTED';
   }): Promise<AuditLog> {
-    const auditLog = this.auditLogRepository.create({
-      ...data,
-      status: 'COMPLETED',
-      createdAt: new Date(),
-    });
+    try {
+      const auditLog = this.auditLogRepository.create({
+        ...data,
+        status: data.status || 'PENDING',
+        createdAt: new Date(),
+      });
 
-    return await this.auditLogRepository.save(auditLog);
+      return await this.auditLogRepository.save(auditLog);
+    } catch (error) {
+      console.error('Error creating audit log:', error);
+      throw error;
+    }
   }
 
   async findAll(
@@ -41,7 +48,9 @@ export class AuditLogService {
     page: number = 1,
     limit: number = 50,
   ): Promise<{ data: AuditLog[]; total: number; page: number; lastPage: number }> {
-    let query = this.auditLogRepository.createQueryBuilder('audit');
+    let query = this.auditLogRepository
+      .createQueryBuilder('audit')
+      .leftJoinAndSelect('audit.user', 'user', 'user.id = audit.userId');
 
     if (filters?.module) {
       query = query.where('audit.module = :module', { module: filters.module });
@@ -72,10 +81,27 @@ export class AuditLogService {
       .take(limit)
       .getMany();
 
+    // Enriquecer los datos con el nombre del usuario
+    const enrichedData = data.map((log) => {
+      let userName = log.userName; // Usar el userName guardado en la auditoría
+      
+      // Si no hay userName guardado pero tenemos usuario relacionado, construir el nombre
+      if (!userName && log.user) {
+        userName = log.user.firstName && log.user.lastName
+          ? `${log.user.firstName} ${log.user.lastName}`
+          : log.user.email;
+      }
+      
+      return {
+        ...log,
+        userName: userName || 'Sistema',
+      };
+    });
+
     const lastPage = Math.ceil(total / limit);
 
     return {
-      data,
+      data: enrichedData as AuditLog[],
       total,
       page,
       lastPage,

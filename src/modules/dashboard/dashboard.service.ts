@@ -86,8 +86,35 @@ export class DashboardService {
   async getMonthlySalesStats(year?: number, month?: number) {
     const now = new Date();
     const y = year || now.getFullYear();
-    // If month is specified, return just that month; otherwise return all 12 months
-    const months = month ? [month] : Array.from({ length: 12 }, (_, i) => i + 1);
+    
+    // If month is specified, return just that month
+    if (month) {
+      const startDate = new Date(y, month - 1, 1);
+      const endDate = new Date(y, month, 0);
+
+      const result = await this.saleRepository
+        .createQueryBuilder('sale')
+        .select('COUNT(sale.id)', 'transactionCount')
+        .addSelect('SUM(sale.totalAmount)', 'totalRevenue')
+        .addSelect('AVG(sale.totalAmount)', 'averageTransaction')
+        .where('sale.createdAt BETWEEN :start AND :end', {
+          start: startDate,
+          end: endDate,
+        })
+        .andWhere('sale.status = :status', { status: SaleStatus.COMPLETED })
+        .getRawOne();
+
+      return [{
+        year: y,
+        month: month,
+        transactionCount: parseInt(result?.transactionCount || 0),
+        totalRevenue: result?.totalRevenue ? parseFloat(result.totalRevenue) : 0,
+        averageTransaction: result?.averageTransaction ? parseFloat(result.averageTransaction) : 0,
+        currency: 'DOP',
+      }];
+    }
+
+    // Return last 6 months instead of all 12
     const results: Array<{
       year: number;
       month: number;
@@ -97,9 +124,11 @@ export class DashboardService {
       currency: string;
     }> = [];
 
-    for (const m of months) {
-      const startDate = new Date(y, m - 1, 1);
-      const endDate = new Date(y, m, 0);
+    for (let i = 5; i >= 0; i--) {
+      const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const m = date.getMonth() + 1;
+      const startDate = new Date(date.getFullYear(), m - 1, 1);
+      const endDate = new Date(date.getFullYear(), m, 0);
 
       const result = await this.saleRepository
         .createQueryBuilder('sale')
@@ -114,7 +143,7 @@ export class DashboardService {
         .getRawOne();
 
       results.push({
-        year: y,
+        year: date.getFullYear(),
         month: m,
         transactionCount: parseInt(result?.transactionCount || 0),
         totalRevenue: result?.totalRevenue ? parseFloat(result.totalRevenue) : 0,
@@ -155,13 +184,18 @@ export class DashboardService {
         .andWhere('sale.status = :status', { status: SaleStatus.COMPLETED })
         .getRawOne();
 
-      results.push({
-        year: y,
-        quarter: q,
-        transactionCount: parseInt(result?.transactionCount || 0),
-        totalRevenue: result?.totalRevenue ? parseFloat(result.totalRevenue) : 0,
-        currency: 'DOP',
-      });
+      const totalRevenue = result?.totalRevenue ? parseFloat(result.totalRevenue) : 0;
+      
+      // Filtrar solo trimestres con ingresos > 0
+      if (totalRevenue > 0) {
+        results.push({
+          year: y,
+          quarter: q,
+          transactionCount: parseInt(result?.transactionCount || 0),
+          totalRevenue: totalRevenue,
+          currency: 'DOP',
+        });
+      }
     }
 
     return results;
@@ -227,6 +261,7 @@ export class DashboardService {
         INNER JOIN memberships m ON m.id = mm.membershipId
         WHERE mm.paymentStatus = 'paid'
         GROUP BY m.id, m.name
+        HAVING SUM(m.price) > 0
         ORDER BY revenue DESC
       `);
 
@@ -264,6 +299,7 @@ export class DashboardService {
       .addSelect('SUM(items.quantity * items.unitPrice)', 'revenue')
       .groupBy('product.id')
       .addGroupBy('product.name')
+      .having('SUM(items.quantity * items.unitPrice) > 0')
       .orderBy('revenue', 'DESC')
       .limit(limit)
       .getRawMany();
@@ -299,18 +335,22 @@ export class DashboardService {
 
       const total = salesRevenue + membershipRevenue;
 
-      const result = [
-        {
+      // Filtrar solo ingresos > 0
+      const result: Array<{ name: string; revenue: number; percentage: string | number }> = [];
+      if (salesRevenue > 0) {
+        result.push({
           name: 'Ventas',
           revenue: salesRevenue,
           percentage: total > 0 ? ((salesRevenue / total) * 100).toFixed(2) : 0,
-        },
-        {
+        });
+      }
+      if (membershipRevenue > 0) {
+        result.push({
           name: 'Membresías',
           revenue: membershipRevenue,
           percentage: total > 0 ? ((membershipRevenue / total) * 100).toFixed(2) : 0,
-        },
-      ];
+        });
+      }
 
       console.log('[Dashboard] Resultado:', result);
       return result;

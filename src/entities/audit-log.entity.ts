@@ -15,16 +15,19 @@ export class AuditLog {
   @Column()
   description: string; // Descripción legible del cambio
 
-  @Column('jsonb', { nullable: true })
+  @Column('json', { nullable: true })
   oldValue: any; // Valor anterior
 
-  @Column('jsonb', { nullable: true })
+  @Column('json', { nullable: true })
   newValue: any; // Valor nuevo
 
-  @Column()
+  @Column({ nullable: true })
   userId: string;
 
-  @ManyToOne(() => User)
+  @Column({ nullable: true })
+  userName: string; // Nombre/email del usuario para mostrar en auditoría
+
+  @ManyToOne(() => User, { nullable: true })
   @JoinColumn({ name: 'userId' })
   user: User;
 

@@ -1,26 +1,80 @@
-import { Controller, Post, Get, Body, Query, UseGuards, Request, Req } from '@nestjs/common';
+import { Controller, Post, Get, Body, Query, UseGuards, Request, Req, Param, Inject } from '@nestjs/common';
+import { getRepository, Repository } from 'typeorm';
 import { AuditLogService } from './audit-log.service';
-import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { User } from '../../entities/user.entity';
+import { InjectRepository } from '@nestjs/typeorm';
 
-@Controller('audit-logs')
+@Controller('api/audit-logs')
 export class AuditLogController {
-  constructor(private readonly auditLogService: AuditLogService) {}
+  constructor(
+    private readonly auditLogService: AuditLogService,
+    @InjectRepository(User) private readonly userRepository: Repository<User>,
+  ) {}
 
   @Post()
   async createAuditLog(
     @Body() createAuditLogDto: any,
     @Req() req: any,
   ) {
-    const userId = req.user?.id || null;
-    const ipAddress = req.ip || req.connection.remoteAddress;
-    const userAgent = req.get('user-agent');
+    try {
+      // Intentar obtener el usuario del JWT si está disponible
+      let userId = null;
+      
+      // Primero intentar desde req.user (si JWT guard pasó)
+      if (req.user) {
+        userId = req.user.userId || req.user.id || req.user.sub || null;
+      } 
+      // Si no hay req.user, intentar parsear manualmente el JWT
+      else if (req.headers.authorization) {
+        try {
+          const token = req.headers.authorization.replace('Bearer ', '');
+          // Decodificar JWT sin verificar firma (solo para obtener el payload)
+          const parts = token.split('.');
+          if (parts.length === 3) {
+            const payload = JSON.parse(
+              Buffer.from(parts[1], 'base64').toString('utf-8')
+            );
+            userId = payload.sub || payload.userId || null;
+          }
+        } catch (e) {
+          // Silenciar errores de parsing
+        }
+      }
+      
+      const ipAddress = req.ip || req.connection.remoteAddress || '127.0.0.1';
+      const userAgent = req.get('user-agent');
 
-    return await this.auditLogService.create({
-      ...createAuditLogDto,
-      userId,
-      ipAddress,
-      userAgent,
-    });
+      // Determinar el userId final (del JWT o del DTO)
+      const finalUserId = userId || createAuditLogDto.userId;
+
+      // Obtener el nombre del usuario si tenemos el userId
+      let userName: string | null = createAuditLogDto.userName || null;
+      if (finalUserId && !userName) {
+        try {
+          const user = await this.userRepository.findOne({ where: { id: finalUserId } });
+          if (user) {
+            // Construir nombre a partir de firstName y lastName, o usar email como fallback
+            userName = user.firstName && user.lastName 
+              ? `${user.firstName} ${user.lastName}` 
+              : user.email;
+          }
+        } catch (e) {
+          // Silenciar errores de búsqueda
+        }
+      }
+
+      return await this.auditLogService.create({
+        ...createAuditLogDto,
+        userId: finalUserId,
+        userName: userName || 'Sistema',
+        ipAddress,
+        userAgent,
+      });
+    } catch (error) {
+      console.error('Error creating audit log:', error);
+      throw error;
+    }
   }
 
   @Get()

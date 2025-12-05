@@ -66,13 +66,49 @@ export class UpdateProductDto {
   @IsOptional()
   description?: string;
 
+  @IsString()
+  @IsOptional()
+  category?: string;
+
   @IsNumber()
   @IsOptional()
   price?: number;
 
   @IsNumber()
   @IsOptional()
+  cost?: number;
+
+  @IsNumber()
+  @IsOptional()
+  quantity?: number;
+
+  @IsNumber()
+  @IsOptional()
   quantityAvailable?: number;
+
+  @IsNumber()
+  @IsOptional()
+  minStockLevel?: number;
+
+  @IsString()
+  @IsOptional()
+  sku?: string;
+
+  @IsString()
+  @IsOptional()
+  supplier?: string;
+
+  @IsDateString()
+  @IsOptional()
+  purchaseDate?: string;
+
+  @IsDateString()
+  @IsOptional()
+  expiryDate?: string;
+
+  @IsString()
+  @IsOptional()
+  imageUrl?: string;
 
   @IsOptional()
   isActive?: boolean;

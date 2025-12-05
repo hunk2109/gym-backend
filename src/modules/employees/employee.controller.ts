@@ -10,6 +10,7 @@ import {
   HttpCode,
   HttpStatus,
   Query,
+  Request,
 } from '@nestjs/common';
 import { EmployeeService } from './employee.service';
 import { CreateEmployeeDto, UpdateEmployeeDto } from './dto/employee.dto';
@@ -23,8 +24,8 @@ export class EmployeeController {
   @Post()
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.CREATED)
-  async create(@Body() createDto: CreateEmployeeDto) {
-    return this.employeeService.create(createDto);
+  async create(@Body() createDto: CreateEmployeeDto, @Request() req: any) {
+    return this.employeeService.create(createDto, req.user);
   }
 
   @Get()
@@ -57,20 +58,21 @@ export class EmployeeController {
   async update(
     @Param('id') id: string,
     @Body() updateDto: UpdateEmployeeDto,
+    @Request() req: any,
   ) {
-    return this.employeeService.update(id, updateDto);
+    return this.employeeService.update(id, updateDto, req.user);
   }
 
   @Delete(':id')
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.NO_CONTENT)
-  async delete(@Param('id') id: string) {
-    return this.employeeService.delete(id);
+  async delete(@Param('id') id: string, @Request() req: any) {
+    return this.employeeService.delete(id, req.user);
   }
 
   @Put(':id/toggle-active')
   @UseGuards(JwtAuthGuard)
-  async toggleActive(@Param('id') id: string) {
-    return this.employeeService.toggleActive(id);
+  async toggleActive(@Param('id') id: string, @Request() req: any) {
+    return this.employeeService.toggleActive(id, req.user);
   }
 }

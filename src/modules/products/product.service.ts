@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { Product } from '../../entities/product.entity';
 import { CreateProductDto, UpdateProductDto } from './dto/create-product.dto';
 import { PermissionsService } from '../auth/services/permissions.service';
+import { AuditLogService } from '../audit-logs/audit-log.service';
 
 @Injectable()
 export class ProductService {
@@ -13,6 +14,7 @@ export class ProductService {
     @InjectRepository(Product)
     private productRepository: Repository<Product>,
     private readonly permissionsService: PermissionsService,
+    private readonly auditLogService: AuditLogService,
   ) {}
 
   async getAllProducts(page = 1, limit = 10) {
@@ -55,8 +57,48 @@ export class ProductService {
     return saved;
   }
 
-  async updateProduct(id: string, updateProductDto: UpdateProductDto) {
-    await this.productRepository.update(id, updateProductDto);
+  async updateProduct(id: string, updateProductDto: UpdateProductDto, authUser?: any) {
+    this.logger.debug(`[Products] Attempting to update product ID: ${id}`, updateProductDto);
+    
+    // Validar que el producto existe
+    const oldProduct = await this.getProductById(id);
+    if (!oldProduct) {
+      throw new NotFoundException(`Product with ID ${id} not found`);
+    }
+    
+    const result = await this.productRepository.update(id, updateProductDto);
+    this.logger.debug(`[Products] Update result:`, result);
+    
+    if (result.affected === 0) {
+      throw new NotFoundException(`Product with ID ${id} not found or update failed`);
+    }
+    
+    // Registrar cambios en auditoría
+    try {
+      const userId = authUser?.id || authUser?.sub || authUser?.userId;
+      const userName = authUser?.email || 'Sistema';
+      
+      await this.auditLogService.create({
+        action: 'PRODUCT_UPDATED',
+        module: 'PRODUCTS',
+        description: `Producto actualizado: ${oldProduct.name} (ID: ${id})`,
+        userId: userId,
+        userName: userName,
+        oldValue: {
+          name: oldProduct.name,
+          description: oldProduct.description,
+          price: oldProduct.price,
+          quantityAvailable: oldProduct.quantityAvailable,
+          category: oldProduct.category,
+          cost: oldProduct.cost,
+        },
+        newValue: updateProductDto,
+      });
+    } catch (error) {
+      this.logger.error('Error logging product update:', error);
+      // No fallar la operación si el log falla
+    }
+    
     return this.getProductById(id);
   }
 

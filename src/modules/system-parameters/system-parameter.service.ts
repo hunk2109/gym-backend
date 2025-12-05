@@ -1,8 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { SystemParameter } from '../entities/system-parameter.entity';
-import { AuditLog } from '../entities/audit-log.entity';
+import { SystemParameter } from '../../entities/system-parameter.entity';
+import { AuditLog } from '../../entities/audit-log.entity';
 
 @Injectable()
 export class SystemParameterService {
@@ -108,7 +108,9 @@ export class SystemParameterService {
       auditLog.status = 'REJECTED';
       auditLog.approvedBy = approvedBy;
       auditLog.approvedAt = new Date();
-      auditLog.reason = rejectReason;
+      if (rejectReason) {
+        auditLog.reason = rejectReason;
+      }
     }
 
     await this.auditRepository.save(auditLog);

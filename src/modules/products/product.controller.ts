@@ -10,6 +10,7 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
+  Request,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -82,8 +83,9 @@ export class ProductController {
   async updateProduct(
     @Param('id') id: string,
     @Body() updateProductDto: UpdateProductDto,
+    @Request() req: any,
   ) {
-    return this.productService.updateProduct(id, updateProductDto);
+    return this.productService.updateProduct(id, updateProductDto, req.user);
   }
 
   // Eliminar producto - Solo ADMIN
