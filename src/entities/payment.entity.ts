@@ -43,6 +43,9 @@ export class Payment {
   @Column({ type: 'varchar' })
   memberId: string;
 
+  @Column({ type: 'varchar', nullable: true })
+  memberMembershipId: string;
+
   @Column({ type: 'decimal', precision: 10, scale: 2 })
   amount: number;
 

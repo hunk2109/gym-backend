@@ -14,12 +14,18 @@ export class ChartDataDto {
 export class SalesReportDto {
   totalSales: number;
   totalRevenue: number;
+  totalAmount?: number;
   averageSaleValue: number;
   salesCount: number;
   cancelledSales: number;
   cancelledRevenue: number;
   salesNote: string;
   salesTrend: ChartDataDto;
+  salesByPeriod?: {
+    date: string;
+    amount: number;
+    count: number;
+  }[];
   topProducts: {
     product: string;
     quantity: number;
@@ -40,6 +46,11 @@ export class MembershipReportDto {
   renewalRate: number;
   membershipMix: ChartDataDto;
   membershipGrowth: ChartDataDto;
+  membershipsByPeriod?: {
+    date: string;
+    count: number;
+    active: number;
+  }[];
   expiryForecast: {
     nextWeek: number;
     nextMonth: number;
@@ -56,9 +67,17 @@ export class PaymentReportDto {
   totalCollected: number;
   totalPending: number;
   totalFailed: number;
+  completedCount: number;
+  pendingCount: number;
+  failedCount: number;
   collectionRate: number;
   paymentMethodBreakdown: ChartDataDto;
   paymentTrend: ChartDataDto;
+  paymentsByPeriod?: {
+    date: string;
+    amount: number;
+    count: number;
+  }[];
   paymentTypeBreakdown: {
     type: string;
     count: number;
@@ -85,6 +104,10 @@ export class RevenueReportDto {
   revenueSources: ChartDataDto;
   monthlyTrend: ChartDataDto;
   quarterlyComparison: ChartDataDto;
+  revenueByPeriod?: {
+    date: string;
+    amount: number;
+  }[];
   yearlyComparison?: ChartDataDto;
   projectedRevenue?: number;
 }
@@ -95,6 +118,10 @@ export class MemberActivityReportDto {
   inactiveMembers: number;
   newMembersThisMonth: number;
   memberActivityChart: ChartDataDto;
+  activitiesByPeriod?: {
+    date: string;
+    count: number;
+  }[];
   classAttendanceRate: number;
   classEnrollmentTrend: ChartDataDto;
   topClasses: {

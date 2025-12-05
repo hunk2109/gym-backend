@@ -95,6 +95,18 @@ export class PaymentsController {
     return this.paymentsService.getPaymentsByMember(memberId, parseInt(page), parseInt(limit));
   }
 
+  @Get('all')
+  @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO)
+  async getAllPaymentsWithoutPagination(): Promise<any> {
+    console.log('[PaymentsController] GET /all - Obteniendo todos los pagos');
+    const payments = await this.paymentsService.getAllPaymentsWithoutPagination();
+    console.log(`[PaymentsController] Total de pagos: ${payments.length}`);
+    return {
+      data: payments,
+      total: payments.length,
+    };
+  }
+
   @Get(':id')
   @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO, UserRole.CLIENTE)
   async findOne(@Param('id') id: string): Promise<PaymentResponseDto> {

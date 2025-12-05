@@ -8,9 +8,10 @@ import { Employee } from '../../entities/employee.entity';
 import { Member } from '../../entities/member.entity';
 import { MemberMembership } from '../../entities/member-membership.entity';
 import { Membership } from '../../entities/membership.entity';
+import { Payment } from '../../entities/payment.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([User, Sale, Employee, Member, MemberMembership, Membership])],
+  imports: [TypeOrmModule.forFeature([User, Sale, Employee, Member, MemberMembership, Membership, Payment])],
   controllers: [DashboardController],
   providers: [DashboardService],
   exports: [DashboardService],

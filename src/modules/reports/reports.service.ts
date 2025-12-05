@@ -97,6 +97,9 @@ export class ReportsService {
       ? `Se encontraron ${cancelledCount} venta${cancelledCount !== 1 ? 's' : ''} anulada${cancelledCount !== 1 ? 's' : ''} en el período de reporte con un monto total de RD$${cancelledRevenue.toFixed(2)}.`
       : 'No hay ventas anuladas en el período de reporte.';
 
+    // Generar desglose por período (día)
+    const salesByPeriod = this.generateSalesByPeriod(completedSales, start, end);
+
     const salesTrend = this.generateBasicChart('Ventas Completadas', [totalSales]);
     const topProducts = await this.getTopProducts(start, end);
     const topEmployees: any[] = [];
@@ -104,15 +107,45 @@ export class ReportsService {
     return {
       totalSales,
       totalRevenue,
+      totalAmount: totalRevenue,
       averageSaleValue,
       salesCount: totalSales,
       cancelledSales: cancelledCount,
       cancelledRevenue,
       salesNote,
       salesTrend,
+      salesByPeriod,
       topProducts,
       topEmployees,
     };
+  }
+
+  private generateSalesByPeriod(sales: Sale[], startDate: Date, endDate: Date): any[] {
+    const salesByDay: Map<string, { amount: number; count: number }> = new Map();
+
+    // Inicializar todos los días en el rango
+    const current = new Date(startDate);
+    while (current <= endDate) {
+      const dateKey = current.toISOString().split('T')[0];
+      salesByDay.set(dateKey, { amount: 0, count: 0 });
+      current.setDate(current.getDate() + 1);
+    }
+
+    // Agrupar ventas por día
+    sales.forEach(sale => {
+      const dateKey = sale.createdAt.toISOString().split('T')[0];
+      const existing = salesByDay.get(dateKey) || { amount: 0, count: 0 };
+      existing.amount += parseFloat(sale.totalAmount.toString());
+      existing.count += 1;
+      salesByDay.set(dateKey, existing);
+    });
+
+    // Convertir a array
+    return Array.from(salesByDay.entries()).map(([date, data]) => ({
+      date,
+      amount: parseFloat(data.amount.toFixed(2)),
+      count: data.count,
+    }));
   }
 
   private generateBasicChart(label: string, data: number[]): ChartDataDto {
@@ -173,6 +206,12 @@ export class ReportsService {
     const membershipGrowth = this.generateBasicChart('Nuevas Membresías', [0]);
     const expiryForecast = await this.generateExpiryForecast();
     const topMemberships = await this.getTopMemberships();
+    
+    // Generar desglose por período (últimos 30 días)
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - 30);
+    const endDate = new Date();
+    const membershipsByPeriod = await this.generateMembershipsByPeriod(startDate, endDate);
 
     return {
       totalMembers,
@@ -181,9 +220,46 @@ export class ReportsService {
       renewalRate: parseFloat(renewalRate.toFixed(2)),
       membershipMix,
       membershipGrowth,
+      membershipsByPeriod,
       expiryForecast,
       topMemberships,
     };
+  }
+
+  private async generateMembershipsByPeriod(startDate: Date, endDate: Date): Promise<any[]> {
+    const membershipsByDay: Map<string, { count: number; active: number }> = new Map();
+
+    // Inicializar todos los días en el rango
+    const current = new Date(startDate);
+    while (current <= endDate) {
+      const dateKey = current.toISOString().split('T')[0];
+      membershipsByDay.set(dateKey, { count: 0, active: 0 });
+      current.setDate(current.getDate() + 1);
+    }
+
+    // Obtener membresías creadas en el rango
+    const memberships = await this.memberMembershipRepository
+      .createQueryBuilder('mm')
+      .where('mm.createdAt BETWEEN :startDate AND :endDate', { startDate, endDate })
+      .getMany();
+
+    // Agrupar por día de creación
+    memberships.forEach(membership => {
+      const dateKey = membership.createdAt.toISOString().split('T')[0];
+      const existing = membershipsByDay.get(dateKey) || { count: 0, active: 0 };
+      existing.count += 1;
+      if (membership.isActive) {
+        existing.active += 1;
+      }
+      membershipsByDay.set(dateKey, existing);
+    });
+
+    // Convertir a array
+    return Array.from(membershipsByDay.entries()).map(([date, data]) => ({
+      date,
+      count: data.count,
+      active: data.active,
+    }));
   }
 
   private async generateMembershipMixChart(): Promise<ChartDataDto> {
@@ -259,124 +335,256 @@ export class ReportsService {
   }
 
   async getPaymentReport(dto: ReportRequestDto = {}): Promise<PaymentReportDto> {
-    const { start, end } = this.getDateRange(dto.dateRange, dto.startDate, dto.endDate);
+    try {
+      const { start, end } = this.getDateRange(dto.dateRange, dto.startDate, dto.endDate);
+      
+      console.log(`[ReportsService] getPaymentReport - Consultando pagos entre ${start.toISOString()} y ${end.toISOString()}`);
 
-    const payments = await this.paymentRepository.find({
-      where: { paymentDate: Between(start, end) },
-    });
+      const payments = await this.paymentRepository.find({
+        where: { paymentDate: Between(start, end) },
+      });
 
-    const completed = payments.filter((p) => p.status === PaymentStatus.COMPLETED);
-    const pending = payments.filter((p) => p.status === PaymentStatus.PENDING);
-    const failed = payments.filter((p) => p.status === PaymentStatus.FAILED);
+      console.log(`[ReportsService] Total de pagos encontrados: ${payments.length}`);
+      console.log(`[ReportsService] Pagos por estado:`, {
+        COMPLETED: payments.filter(p => p.status === PaymentStatus.COMPLETED).length,
+        PENDING: payments.filter(p => p.status === PaymentStatus.PENDING).length,
+        FAILED: payments.filter(p => p.status === PaymentStatus.FAILED).length,
+      });
 
-    const totalCollected = completed.reduce((sum, p) => sum + parseFloat(p.amount.toString()), 0);
-    const totalPending = pending.reduce((sum, p) => sum + parseFloat(p.amount.toString()), 0);
-    const totalFailed = failed.reduce((sum, p) => sum + parseFloat(p.amount.toString()), 0);
-    const collectionRate = payments.length > 0 ? (completed.length / payments.length) * 100 : 0;
+      const completed = payments.filter((p) => p.status === PaymentStatus.COMPLETED);
+      const pending = payments.filter((p) => p.status === PaymentStatus.PENDING);
+      const failed = payments.filter((p) => p.status === PaymentStatus.FAILED);
 
-    const paymentMethodBreakdown = await this.generatePaymentMethodChart(start, end);
-    const paymentTrend = this.generateBasicChart('Pagos (RD$)', [totalCollected]);
-    const paymentTypeBreakdown = await this.getPaymentTypeBreakdown(start, end);
-    const topPaymentMethods = await this.getTopPaymentMethods(start, end);
-    const overduePayments = await this.getOverduePayments();
+      const totalCollected = completed.reduce((sum, p) => sum + parseFloat(p.amount.toString()), 0);
+      const totalPending = pending.reduce((sum, p) => sum + parseFloat(p.amount.toString()), 0);
+      const totalFailed = failed.reduce((sum, p) => sum + parseFloat(p.amount.toString()), 0);
+      const collectionRate = payments.length > 0 ? (completed.length / payments.length) * 100 : 0;
 
-    return {
-      totalCollected,
-      totalPending,
-      totalFailed,
-      collectionRate: parseFloat(collectionRate.toFixed(2)),
-      paymentMethodBreakdown,
-      paymentTrend,
-      paymentTypeBreakdown,
-      topPaymentMethods,
-      overduePayments,
-    };
+      console.log(`[ReportsService] Totales calculados:`, {
+        totalCollected,
+        totalPending,
+        totalFailed,
+        completedCount: completed.length,
+        collectionRate,
+      });
+
+      const paymentMethodBreakdown = await this.generatePaymentMethodChart(start, end);
+      const paymentTrend = this.generateBasicChart('Pagos (RD$)', [totalCollected]);
+      const paymentTypeBreakdown = await this.getPaymentTypeBreakdown(start, end);
+      const topPaymentMethods = await this.getTopPaymentMethods(start, end);
+      const overduePayments = await this.getOverduePayments();
+      const paymentsByPeriod = await this.generatePaymentsByPeriod(completed, start, end);
+
+      return {
+        totalCollected,
+        totalPending,
+        totalFailed,
+        completedCount: completed.length,
+        pendingCount: pending.length,
+        failedCount: failed.length,
+        collectionRate: parseFloat(collectionRate.toFixed(2)),
+        paymentMethodBreakdown,
+        paymentTrend,
+        paymentsByPeriod,
+        paymentTypeBreakdown,
+        topPaymentMethods,
+        overduePayments,
+      };
+    } catch (error) {
+      console.error('[ReportsService] Error en getPaymentReport:', error);
+      throw new Error(`Tipo de dato inválido: ${error.message}`);
+    }
+  }
+
+  private async generatePaymentsByPeriod(payments: Payment[], startDate: Date, endDate: Date): Promise<any[]> {
+    try {
+      const paymentsByDay: Map<string, { amount: number; count: number }> = new Map();
+
+      // Inicializar todos los días en el rango
+      const current = new Date(startDate);
+      while (current <= endDate) {
+        const dateKey = current.toISOString().split('T')[0];
+        paymentsByDay.set(dateKey, { amount: 0, count: 0 });
+        current.setDate(current.getDate() + 1);
+      }
+
+      // Agrupar pagos por día
+      payments.forEach(payment => {
+        try {
+          // Convertir a Date si es string
+          let paymentDate = payment.paymentDate;
+          if (typeof paymentDate === 'string') {
+            paymentDate = new Date(paymentDate);
+          }
+          
+          const dateKey = paymentDate instanceof Date 
+            ? paymentDate.toISOString().split('T')[0]
+            : new Date(paymentDate).toISOString().split('T')[0];
+          
+          const existing = paymentsByDay.get(dateKey) || { amount: 0, count: 0 };
+          existing.amount += parseFloat(payment.amount.toString());
+          existing.count += 1;
+          paymentsByDay.set(dateKey, existing);
+        } catch (err) {
+          console.error('[ReportsService] Error procesando payment:', err);
+        }
+      });
+
+      // Convertir a array
+      return Array.from(paymentsByDay.entries()).map(([date, data]) => ({
+        date,
+        amount: parseFloat(data.amount.toFixed(2)),
+        count: data.count,
+      }));
+    } catch (error) {
+      console.error('[ReportsService] Error en generatePaymentsByPeriod:', error);
+      return [];
+    }
   }
 
   private async generatePaymentMethodChart(startDate: Date, endDate: Date): Promise<ChartDataDto> {
-    const methods = await this.paymentRepository
-      .createQueryBuilder('payment')
-      .select('payment.paymentMethod', 'method')
-      .addSelect('COUNT(payment.id)', 'count')
-      .addSelect('SUM(payment.amount)', 'total')
-      .where('payment.paymentDate BETWEEN :startDate AND :endDate', { startDate, endDate })
-      .andWhere('payment.status = :status', { status: PaymentStatus.COMPLETED })
-      .groupBy('payment.paymentMethod')
-      .getRawMany();
+    try {
+      const methods = await this.paymentRepository
+        .createQueryBuilder('payment')
+        .select('payment.paymentMethod', 'method')
+        .addSelect('COUNT(payment.id)', 'count')
+        .addSelect('SUM(CAST(payment.amount as DECIMAL))', 'total')
+        .where('payment.paymentDate >= :startDate', { startDate })
+        .andWhere('payment.paymentDate <= :endDate', { endDate })
+        .andWhere('payment.status = :status', { status: PaymentStatus.COMPLETED })
+        .groupBy('payment.paymentMethod')
+        .getRawMany();
 
-    const labels = methods.map((m) => m.method);
-    const data = methods.map((m) => parseInt(m.count || '0'));
-    const colors = ['#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0'];
+      if (!methods || methods.length === 0) {
+        return {
+          labels: [],
+          datasets: [{ label: 'Métodos de Pago', data: [], backgroundColor: [] }],
+        };
+      }
 
-    return {
-      labels,
-      datasets: [
-        {
-          label: 'Métodos de Pago',
-          data,
-          backgroundColor: colors.slice(0, labels.length),
-        },
-      ],
-    };
+      const labels = methods
+        .map((m) => m.method)
+        .filter((m) => m !== null && m !== undefined);
+      const data = methods.map((m) => parseInt(m.count || '0'));
+      const colors = ['#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0'];
+
+      return {
+        labels,
+        datasets: [
+          {
+            label: 'Métodos de Pago',
+            data,
+            backgroundColor: colors.slice(0, labels.length),
+          },
+        ],
+      };
+    } catch (error) {
+      console.error('[ReportsService] Error en generatePaymentMethodChart:', error);
+      return {
+        labels: [],
+        datasets: [{ label: 'Métodos de Pago', data: [], backgroundColor: [] }],
+      };
+    }
   }
 
   private async getPaymentTypeBreakdown(startDate: Date, endDate: Date): Promise<any[]> {
-    const types = await this.paymentRepository
-      .createQueryBuilder('payment')
-      .select('payment.paymentType', 'type')
-      .addSelect('COUNT(payment.id)', 'count')
-      .addSelect('SUM(payment.amount)', 'amount')
-      .where('payment.paymentDate BETWEEN :startDate AND :endDate', { startDate, endDate })
-      .groupBy('payment.paymentType')
-      .getRawMany();
+    try {
+      const types = await this.paymentRepository
+        .createQueryBuilder('payment')
+        .select('payment.paymentType', 'type')
+        .addSelect('COUNT(payment.id)', 'count')
+        .addSelect('SUM(CAST(payment.amount as DECIMAL))', 'amount')
+        .where('payment.paymentDate >= :startDate', { startDate })
+        .andWhere('payment.paymentDate <= :endDate', { endDate })
+        .groupBy('payment.paymentType')
+        .getRawMany();
 
-    const total = types.reduce((sum, t) => sum + parseFloat(t.amount || '0'), 0);
+      if (!types || types.length === 0) {
+        return [];
+      }
 
-    return types.map((t) => ({
-      type: t.type,
-      count: parseInt(t.count || '0'),
-      amount: parseFloat(t.amount || '0'),
-      percentage: total > 0 ? parseFloat(((parseFloat(t.amount || '0') / total) * 100).toFixed(2)) : 0,
-    }));
+      const total = types.reduce((sum, t) => sum + parseFloat(t.amount || '0'), 0);
+
+      return types
+        .filter((t) => t.type !== null && t.type !== undefined)
+        .map((t) => ({
+          type: t.type,
+          count: parseInt(t.count || '0'),
+          amount: parseFloat(t.amount || '0'),
+          percentage: total > 0 ? parseFloat(((parseFloat(t.amount || '0') / total) * 100).toFixed(2)) : 0,
+        }));
+    } catch (error) {
+      console.error('[ReportsService] Error en getPaymentTypeBreakdown:', error);
+      return [];
+    }
   }
 
   private async getTopPaymentMethods(startDate: Date, endDate: Date, limit: number = 5): Promise<any[]> {
-    const methods = await this.paymentRepository
-      .createQueryBuilder('payment')
-      .select('payment.paymentMethod', 'method')
-      .addSelect('COUNT(payment.id)', 'count')
-      .addSelect('SUM(payment.amount)', 'amount')
-      .where('payment.paymentDate BETWEEN :startDate AND :endDate', { startDate, endDate })
-      .andWhere('payment.status = :status', { status: PaymentStatus.COMPLETED })
-      .groupBy('payment.paymentMethod')
-      .orderBy('amount', 'DESC')
-      .limit(limit)
-      .getRawMany();
+    try {
+      const methods = await this.paymentRepository
+        .createQueryBuilder('payment')
+        .select('payment.paymentMethod', 'method')
+        .addSelect('COUNT(payment.id)', 'count')
+        .addSelect('SUM(CAST(payment.amount as DECIMAL))', 'amount')
+        .where('payment.paymentDate >= :startDate', { startDate })
+        .andWhere('payment.paymentDate <= :endDate', { endDate })
+        .andWhere('payment.status = :status', { status: PaymentStatus.COMPLETED })
+        .groupBy('payment.paymentMethod')
+        .orderBy('amount', 'DESC')
+        .limit(limit)
+        .getRawMany();
 
-    return methods.map((m) => ({
-      method: m.method,
-      count: parseInt(m.count || '0'),
-      amount: parseFloat(m.amount || '0'),
-    }));
+      if (!methods || methods.length === 0) {
+        return [];
+      }
+
+      return methods
+        .filter((m) => m.method !== null && m.method !== undefined)
+        .map((m) => ({
+          method: m.method,
+          count: parseInt(m.count || '0'),
+          amount: parseFloat(m.amount || '0'),
+        }));
+    } catch (error) {
+      console.error('[ReportsService] Error en getTopPaymentMethods:', error);
+      return [];
+    }
   }
 
   private async getOverduePayments(): Promise<any> {
-    const now = new Date();
-    const overduePayments = await this.paymentRepository.find({
-      where: {
-        status: PaymentStatus.PENDING,
-        dueDate: LessThan(now),
-      },
-    });
+    try {
+      const now = new Date();
+      const overduePayments = await this.paymentRepository.find({
+        where: {
+          status: PaymentStatus.PENDING,
+          dueDate: LessThan(now),
+        },
+      });
 
-    const members = new Set(overduePayments.map((p) => p.memberId));
-    const totalAmount = overduePayments.reduce((sum, p) => sum + parseFloat(p.amount.toString()), 0);
+      if (!overduePayments || overduePayments.length === 0) {
+        return {
+          total: 0,
+          amount: 0,
+          members: 0,
+        };
+      }
 
-    return {
-      total: overduePayments.length,
-      amount: totalAmount,
-      members: members.size,
-    };
+      const members = new Set(overduePayments.map((p) => p.memberId).filter((m) => m !== null && m !== undefined));
+      const totalAmount = overduePayments.reduce((sum, p) => sum + parseFloat(p.amount.toString()), 0);
+
+      return {
+        total: overduePayments.length,
+        amount: totalAmount,
+        members: members.size,
+      };
+    } catch (error) {
+      console.error('[ReportsService] Error en getOverduePayments:', error);
+      return {
+        total: 0,
+        amount: 0,
+        members: 0,
+      };
+    }
   }
 
   async getRevenueReport(dto: ReportRequestDto = {}): Promise<RevenueReportDto> {
@@ -396,6 +604,7 @@ export class ReportsService {
     const revenueSources = await this.generateRevenueSourcesChart(start, end);
     const monthlyTrend = this.generateBasicChart('Ingresos Mensuales', [totalRevenue]);
     const quarterlyComparison = this.generateQuarterlyChart();
+    const revenueByPeriod = await this.generateRevenueByPeriod(sales, payments, start, end);
 
     return {
       totalRevenue,
@@ -405,8 +614,41 @@ export class ReportsService {
       revenueSources,
       monthlyTrend,
       quarterlyComparison,
+      revenueByPeriod,
       projectedRevenue: this.projectRevenue(totalRevenue),
     };
+  }
+
+  private async generateRevenueByPeriod(sales: Sale[], payments: Payment[], startDate: Date, endDate: Date): Promise<any[]> {
+    const revenueByDay: Map<string, number> = new Map();
+
+    // Inicializar todos los días en el rango
+    const current = new Date(startDate);
+    while (current <= endDate) {
+      const dateKey = current.toISOString().split('T')[0];
+      revenueByDay.set(dateKey, 0);
+      current.setDate(current.getDate() + 1);
+    }
+
+    // Agrupar ventas por día
+    sales.forEach(sale => {
+      const dateKey = sale.createdAt.toISOString().split('T')[0];
+      const existing = revenueByDay.get(dateKey) || 0;
+      revenueByDay.set(dateKey, existing + parseFloat(sale.totalAmount.toString()));
+    });
+
+    // Agrupar pagos por día
+    payments.forEach(payment => {
+      const dateKey = payment.paymentDate.toISOString().split('T')[0];
+      const existing = revenueByDay.get(dateKey) || 0;
+      revenueByDay.set(dateKey, existing + parseFloat(payment.amount.toString()));
+    });
+
+    // Convertir a array
+    return Array.from(revenueByDay.entries()).map(([date, amount]) => ({
+      date,
+      amount: parseFloat(amount.toFixed(2)),
+    }));
   }
 
   private async generateRevenueSourcesChart(startDate: Date, endDate: Date): Promise<ChartDataDto> {
@@ -478,6 +720,7 @@ export class ReportsService {
     const memberActivityChart = this.generateBasicChart('Miembros Activos', [activeMembers]);
     const classEnrollmentTrend = await this.generateEnrollmentTrendChart(start, end);
     const topClasses = await this.getTopClasses(start, end);
+    const activitiesByPeriod = await this.generateActivitiesByPeriod(start, end);
 
     return {
       totalMembers,
@@ -485,10 +728,41 @@ export class ReportsService {
       inactiveMembers: totalMembers - activeMembers,
       newMembersThisMonth: newMembers,
       memberActivityChart,
+      activitiesByPeriod,
       classAttendanceRate: 75,
       classEnrollmentTrend,
       topClasses,
     };
+  }
+
+  private async generateActivitiesByPeriod(startDate: Date, endDate: Date): Promise<any[]> {
+    const activitiesByDay: Map<string, number> = new Map();
+
+    // Inicializar todos los días en el rango
+    const current = new Date(startDate);
+    while (current <= endDate) {
+      const dateKey = current.toISOString().split('T')[0];
+      activitiesByDay.set(dateKey, 0);
+      current.setDate(current.getDate() + 1);
+    }
+
+    // Obtener inscripciones en clases en el rango
+    const enrollments = await this.enrollmentRepository.find({
+      where: { enrollmentDate: Between(startDate, endDate) },
+    });
+
+    // Agrupar por día
+    enrollments.forEach(enrollment => {
+      const dateKey = enrollment.enrollmentDate.toISOString().split('T')[0];
+      const existing = activitiesByDay.get(dateKey) || 0;
+      activitiesByDay.set(dateKey, existing + 1);
+    });
+
+    // Convertir a array
+    return Array.from(activitiesByDay.entries()).map(([date, count]) => ({
+      date,
+      count,
+    }));
   }
 
   private async generateEnrollmentTrendChart(startDate: Date, endDate: Date): Promise<ChartDataDto> {

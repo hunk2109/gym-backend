@@ -323,4 +323,24 @@ export class PaymentsService {
 
     return allPending;
   }
+
+  /**
+   * Obtener TODOS los pagos sin paginación (para historial)
+   */
+  async getAllPaymentsWithoutPagination(): Promise<Payment[]> {
+    try {
+      this.logger.log(`[Payments] getAllPaymentsWithoutPagination - Obteniendo todos los pagos`);
+
+      const payments = await this.paymentRepository.find({
+        relations: ['member', 'member.user'],
+        order: { paymentDate: 'DESC' },
+      });
+
+      this.logger.log(`[Payments] Total de pagos encontrados: ${payments.length}`);
+      return payments;
+    } catch (error) {
+      this.logger.error(`[Payments] Error en getAllPaymentsWithoutPagination: ${error.message}`);
+      return [];
+    }
+  }
 }

@@ -7,9 +7,10 @@ import { MembershipsCronService } from './memberships.cron';
 import { Membership } from '../../entities/membership.entity';
 import { MemberMembership } from '../../entities/member-membership.entity';
 import { Member } from '../../entities/member.entity';
+import { Payment } from '../../entities/payment.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Membership, MemberMembership, Member])],
+  imports: [TypeOrmModule.forFeature([Membership, MemberMembership, Member, Payment])],
   controllers: [MembershipsController, MemberMembershipsController],
   providers: [MembershipsService, MembershipsSeeder, MembershipsCronService],
   exports: [MembershipsService],

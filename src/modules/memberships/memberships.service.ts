@@ -5,6 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { Membership } from '../../entities/membership.entity';
 import { MemberMembership } from '../../entities/member-membership.entity';
 import { Member } from '../../entities/member.entity';
+import { Payment, PaymentStatus, PaymentMethod, PaymentType } from '../../entities/payment.entity';
 import { CreateMembershipDto, UpdateMembershipDto, AssignMembershipDto, RenewMembershipDto } from './dto/create-membership.dto';
 
 @Injectable()
@@ -16,9 +17,9 @@ export class MembershipsService {
     private memberMembershipRepository: Repository<MemberMembership>,
     @InjectRepository(Member)
     private memberRepository: Repository<Member>,
-  ) {
-    // Inyectar Payment si es necesario en el futuro
-  }
+    @InjectRepository(Payment)
+    private paymentRepository: Repository<Payment>,
+  ) {}
 
   // Membership CRUD
   async createMembership(createMembershipDto: CreateMembershipDto): Promise<Membership> {
@@ -160,6 +161,22 @@ export class MembershipsService {
 
     const result = await this.memberMembershipRepository.save(newMemberMembership);
     console.log(`[MembershipsService] Membresía insertada con ID: ${result.id}`);
+
+    // Crear registro en tabla payments (completado o pendiente)
+    const payment = new Payment();
+    payment.id = uuidv4();
+    payment.memberId = member.id;
+    payment.memberMembershipId = result.id;
+    payment.amount = (amountPaid || membership.price) as any;
+    payment.paymentDate = parsedPaymentDate || new Date();
+    payment.dueDate = end;
+    payment.status = amountPaid && parsedPaymentDate ? PaymentStatus.COMPLETED : PaymentStatus.PENDING;
+    payment.paymentMethod = PaymentMethod.CASH;
+    payment.paymentType = PaymentType.MEMBERSHIP;
+    
+    await this.paymentRepository.save(payment);
+    console.log(`[MembershipsService] Pago registrado: ${payment.id} - Estado: ${payment.status}`);
+    
 
     // Recuperar el registro con relaciones para retornar
     const saved = await this.memberMembershipRepository.findOne({
@@ -337,6 +354,7 @@ export class MembershipsService {
   ): Promise<MemberMembership> {
     const membership = await this.memberMembershipRepository.findOne({
       where: { id: memberMembershipId },
+      relations: ['member'],
     });
 
     if (!membership) {
@@ -345,8 +363,14 @@ export class MembershipsService {
 
     const wasSuspended = membership.paymentStatus === 'suspended';
 
+    // Parsear paymentDate si es string
+    let parsedPaymentDate = paymentDate;
+    if (typeof paymentDate === 'string') {
+      parsedPaymentDate = new Date(paymentDate);
+    }
+
     membership.amountPaid = amountPaid;
-    membership.paymentDate = paymentDate;
+    membership.paymentDate = parsedPaymentDate;
     membership.paymentStatus = 'paid';
 
     // Si estaba suspendida, reactivar
@@ -354,6 +378,19 @@ export class MembershipsService {
       membership.isActive = true;
       membership.suspensionDate = null as any;
     }
+
+    // Crear registro en la tabla payments
+    const payment = new Payment();
+    payment.id = uuidv4();
+    payment.memberId = membership.memberId;
+    payment.memberMembershipId = memberMembershipId;
+    payment.amount = amountPaid as any;
+    payment.paymentDate = parsedPaymentDate;
+    payment.status = PaymentStatus.COMPLETED;
+    payment.paymentMethod = PaymentMethod.CASH;
+    payment.paymentType = PaymentType.MEMBERSHIP;
+
+    await this.paymentRepository.save(payment);
 
     return this.memberMembershipRepository.save(membership);
   }

@@ -115,4 +115,14 @@ export class DashboardController {
       data: data,
     };
   }
+
+  @Get('payments/pending')
+  @Roles(UserRole.ADMIN, UserRole.ENCARGADO)
+  @HttpCode(HttpStatus.OK)
+  async getPendingPayments() {
+    console.log('[DashboardController] getPendingPayments endpoint llamado');
+    const data = await this.dashboardService.getPendingPaymentsCount();
+    console.log('[DashboardController] Pagos pendientes:', data);
+    return data;
+  }
 }
