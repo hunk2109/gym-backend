@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Between } from 'typeorm';
+import { Repository, Between, IsNull } from 'typeorm';
 import { Sale, SaleStatus } from '../../entities/sale.entity';
 import { SaleItem } from '../../entities/sale-item.entity';
 import { CreateSaleDto, UpdateSaleDto } from './dto/create-sale.dto';
@@ -50,6 +50,7 @@ export class SalesService {
 
   async createSale(createSaleDto: CreateSaleDto) {
     this.logger.debug('[SalesService] Creating sale with DTO:', createSaleDto);
+    console.log('[🔴 SalesService.createSale] Received DTO:', JSON.stringify(createSaleDto, null, 2));
     
     // Validar que paymentMethod existe
     if (!createSaleDto.paymentMethod) {
@@ -60,14 +61,19 @@ export class SalesService {
 
     // Validate products and stock
     for (const item of createSaleDto.items) {
+      console.log(`[🔴 SalesService.createSale] Processing item: productId=${item.productId}, quantity=${item.quantity}, unitPrice=${item.unitPrice}`);
       const product = await this.productService.getProductById(item.productId);
       if (product.quantityAvailable < item.quantity) {
         throw new BadRequestException(
           `Insufficient stock for ${product.name}`,
         );
       }
-      totalAmount += item.quantity * item.unitPrice;
+      const itemTotal = item.quantity * item.unitPrice;
+      console.log(`[🔴 SalesService.createSale] Item total: ${item.quantity} * ${item.unitPrice} = ${itemTotal}`);
+      totalAmount += itemTotal;
     }
+    
+    console.log(`[🔴 SalesService.createSale] ✓ Final totalAmount: ${totalAmount}`);
 
     // Create sale
     const sale = this.saleRepository.create({
@@ -179,7 +185,8 @@ export class SalesService {
     
     this.logger.debug(`[getSalesByDateRange] Parsed dates: start=${start.toISOString()}, end=${end.toISOString()}`);
     
-    const sales = await this.saleRepository.find({
+    // DEBUG: Obtener TODAS las ventas en el rango para ver estados
+    const allSales = await this.saleRepository.find({
       where: {
         createdAt: Between(start, end),
       },
@@ -187,7 +194,23 @@ export class SalesService {
       order: { createdAt: 'DESC' },
     });
     
-    this.logger.debug(`[getSalesByDateRange] Found ${sales.length} sales`);
+    this.logger.debug(`[getSalesByDateRange] DEBUG: Total sales in range (all statuses): ${allSales.length}`);
+    allSales.forEach((sale, index) => {
+      this.logger.debug(`[getSalesByDateRange] DEBUG Sale ${index}: id=${sale.id}, status=${sale.status}, amount=${sale.totalAmount}`);
+    });
+    
+    // Solo obtener ventas completadas SIN asignar a un cierre (del turno actual)
+    const sales = await this.saleRepository.find({
+      where: {
+        createdAt: Between(start, end),
+        status: SaleStatus.COMPLETED, // Solo ventas completadas
+        cashRegisterId: IsNull(), // Solo ventas del turno actual (sin asignar a cierre)
+      },
+      relations: ['items', 'items.product', 'member'],
+      order: { createdAt: 'DESC' },
+    });
+    
+    this.logger.debug(`[getSalesByDateRange] Found ${sales.length} completed sales with status=${SaleStatus.COMPLETED}`);
     
     if (sales.length > 0) {
       this.logger.debug(`[getSalesByDateRange] First sale: id=${sales[0].id}, amount=${sales[0].totalAmount}, status=${sales[0].status}, date=${sales[0].createdAt}`);

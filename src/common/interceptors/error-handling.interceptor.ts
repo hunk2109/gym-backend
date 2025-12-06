@@ -12,6 +12,16 @@ export class ErrorHandlingInterceptor implements NestInterceptor {
 
     return next.handle().pipe(
       catchError((error) => {
+        // Log full error stack
+        console.error('[ErrorHandlingInterceptor] Full error:', {
+          message: error.message,
+          stack: error.stack,
+          code: error.code,
+          status: error.status,
+          name: error.name,
+          toString: error.toString(),
+        });
+        
         const errorResponse = this.formatErrorResponse(error, request, response);
         response.status(errorResponse.statusCode);
         return throwError(() => errorResponse);

@@ -23,6 +23,7 @@ import { GroupMembershipUser } from './entities/group-membership-user.entity';
 import { Payroll } from './entities/payroll.entity';
 import { AuditLog } from './entities/audit-log.entity';
 import { ModuleSettings } from './entities/module-settings.entity';
+import { CashRegister } from './entities/cash-register.entity';
 
 import { AuthModule } from './modules/auth/auth.module';
 import { ProductsModule } from './modules/products/products.module';
@@ -43,6 +44,7 @@ import { PayrollModule } from './modules/payroll/payroll.module';
 import { AuditLogModule } from './modules/audit-logs/audit-log.module';
 import { ModulesManagementModule } from './modules/modules-management/modules-management.module';
 import { SystemParameterModule } from './modules/system-parameters/system-parameter.module';
+import { CashRegisterModule } from './modules/cash-register/cash-register.module';
 
 import { ErrorHandlingInterceptor, ResponseInterceptor } from './common/interceptors';
 import { ResponseFilterInterceptor } from './modules/auth/interceptors/response-filter.interceptor';
@@ -61,7 +63,7 @@ import { LoggerMiddleware } from './common/middleware';
       username: process.env.DB_USERNAME || 'root',
       password: process.env.DB_PASSWORD || 'password',
       database: process.env.DB_NAME || 'gym_manager',
-      entities: [User, Product, Equipment, Sale, SaleItem, GymSettings, Employee, Member, Membership, MemberMembership, GymClass, ClassEnrollment, Payment, GroupMembership, GroupMembershipUser, Payroll, AuditLog, ModuleSettings],
+      entities: [User, Product, Equipment, Sale, SaleItem, GymSettings, Employee, Member, Membership, MemberMembership, GymClass, ClassEnrollment, Payment, GroupMembership, GroupMembershipUser, Payroll, AuditLog, ModuleSettings, CashRegister],
       synchronize: true,
       logging: false,
     }),
@@ -89,6 +91,7 @@ import { LoggerMiddleware } from './common/middleware';
     AuditLogModule,
     ModulesManagementModule,
     SystemParameterModule,
+    CashRegisterModule,
   ],
   controllers: [],
   providers: [

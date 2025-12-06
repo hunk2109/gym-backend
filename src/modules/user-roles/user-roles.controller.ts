@@ -20,25 +20,52 @@ export class UserRolesController {
   ) {
     const requestingUserId = req.user.sub;
     const updatedUser = await this.userRolesService.assignRole(userId, role, requestingUserId);
+    
+    const userData = {
+      id: updatedUser.id,
+      email: updatedUser.email,
+      firstName: updatedUser.firstName,
+      lastName: updatedUser.lastName,
+      phone: updatedUser.phone,
+      role: updatedUser.role,
+      isActive: updatedUser.isActive,
+      createdAt: updatedUser.createdAt,
+      updatedAt: updatedUser.updatedAt,
+    };
+    
     return {
       statusCode: 200,
       success: true,
       message: 'Role assigned successfully',
-      data: updatedUser,
+      data: userData,
       timestamp: new Date().toISOString(),
       path: req.path,
     };
   }
 
   @Get('clients')
-  @Roles(UserRole.ADMIN, UserRole.ENCARGADO)
+  @Roles(UserRole.ADMIN)
   async getActiveClients(@Req() req: any) {
     const clients = await this.userRolesService.getActiveClients();
+    
+    // Mapear a objetos simples sin campos sensibles
+    const clientsData = clients.map(client => ({
+      id: client.id,
+      email: client.email,
+      firstName: client.firstName,
+      lastName: client.lastName,
+      phone: client.phone,
+      role: client.role,
+      isActive: client.isActive,
+      createdAt: client.createdAt,
+      updatedAt: client.updatedAt,
+    }));
+    
     return {
       statusCode: 200,
       success: true,
       message: 'Active clients retrieved successfully',
-      data: clients,
+      data: clientsData,
       timestamp: new Date().toISOString(),
       path: req.path,
     };

@@ -15,23 +15,9 @@ export class UserRolesService {
   ) {}
 
   async assignRole(userId: string, newRole: UserRole, requestingUserId: string): Promise<User> {
-    // DOBLE VERIFICACIÓN: Guards + Service
-    // Verificar que el usuario que hace la solicitud es ADMIN
-    const requestingUser = await this.userRepository.findOne({
-      where: { id: requestingUserId },
-    });
-
-    if (!requestingUser) {
-      throw new NotFoundException('Requesting user not found');
-    }
-
-    // Verificación doble: Solo ADMIN puede asignar roles
-    this.permissionsService.requireAdmin(
-      requestingUser.role,
-      requestingUserId,
-      `assignRole to ${userId}`,
-    );
-
+    // El RolesGuard ya verificó que el usuario tiene rol ADMIN
+    // Confiar en el token JWT validado
+    
     // Buscar al usuario cuyo rol será cambiado
     const user = await this.userRepository.findOne({
       where: { id: userId },
@@ -54,7 +40,7 @@ export class UserRolesService {
     // Log de acción sensible
     this.permissionsService.logSensitiveAction(
       requestingUserId,
-      requestingUser.role,
+      UserRole.ADMIN,
       'Assign Role',
       userId,
       { oldRole, newRole },
@@ -79,7 +65,7 @@ export class UserRolesService {
 
   async getActiveClients(): Promise<User[]> {
     return this.userRepository.find({
-      where: { role: UserRole.CLIENTE, isActive: true },
+      where: { isActive: true },
       order: { lastName: 'ASC' },
     });
   }

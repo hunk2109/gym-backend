@@ -41,10 +41,18 @@ export class ReportsService {
   ) {}
 
   private getDateRange(dateRange?: string, startDate?: string, endDate?: string): { start: Date; end: Date } {
-    const end = endDate ? new Date(endDate) : new Date();
+    let end = new Date();
     let start = new Date();
 
-    const range = dateRange || 'monthly';
+    // Validar y crear fecha de fin
+    if (endDate && endDate.trim()) {
+      const parsedEnd = new Date(endDate);
+      if (!isNaN(parsedEnd.getTime())) {
+        end = parsedEnd;
+      }
+    }
+
+    const range = (dateRange && dateRange.trim()) ? dateRange.trim() : 'monthly';
 
     switch (range) {
       case 'daily':
@@ -63,7 +71,16 @@ export class ReportsService {
         start.setFullYear(start.getFullYear() - 1);
         break;
       case 'custom':
-        start = startDate ? new Date(startDate) : new Date(start.getFullYear(), start.getMonth(), 1);
+        if (startDate && startDate.trim()) {
+          const parsedStart = new Date(startDate);
+          if (!isNaN(parsedStart.getTime())) {
+            start = parsedStart;
+          } else {
+            start = new Date(start.getFullYear(), start.getMonth(), 1);
+          }
+        } else {
+          start = new Date(start.getFullYear(), start.getMonth(), 1);
+        }
         break;
       default:
         start.setMonth(start.getMonth() - 1);
@@ -588,35 +605,40 @@ export class ReportsService {
   }
 
   async getRevenueReport(dto: ReportRequestDto = {}): Promise<RevenueReportDto> {
-    const { start, end } = this.getDateRange(dto.dateRange, dto.startDate, dto.endDate);
+    try {
+      const { start, end } = this.getDateRange(dto.dateRange, dto.startDate, dto.endDate);
 
-    const sales = await this.saleRepository.find({
-      where: { createdAt: Between(start, end), status: SaleStatus.COMPLETED },
-    });
+      const sales = await this.saleRepository.find({
+        where: { createdAt: Between(start, end), status: SaleStatus.COMPLETED },
+      });
 
-    const payments = await this.paymentRepository.find({
-      where: { paymentDate: Between(start, end), status: PaymentStatus.COMPLETED },
-    });
+      const payments = await this.paymentRepository.find({
+        where: { paymentDate: Between(start, end), status: PaymentStatus.COMPLETED },
+      });
 
-    const totalRevenue = sales.reduce((sum, s) => sum + parseFloat(s.totalAmount.toString()), 0) +
-      payments.reduce((sum, p) => sum + parseFloat(p.amount.toString()), 0);
+      const totalRevenue = sales.reduce((sum, s) => sum + parseFloat(s.totalAmount.toString()), 0) +
+        payments.reduce((sum, p) => sum + parseFloat(p.amount.toString()), 0);
 
-    const revenueSources = await this.generateRevenueSourcesChart(start, end);
-    const monthlyTrend = this.generateBasicChart('Ingresos Mensuales', [totalRevenue]);
-    const quarterlyComparison = this.generateQuarterlyChart();
-    const revenueByPeriod = await this.generateRevenueByPeriod(sales, payments, start, end);
+      const revenueSources = await this.generateRevenueSourcesChart(start, end);
+      const monthlyTrend = this.generateBasicChart('Ingresos Mensuales', [totalRevenue]);
+      const quarterlyComparison = this.generateQuarterlyChart();
+      const revenueByPeriod = await this.generateRevenueByPeriod(sales, payments, start, end);
 
-    return {
-      totalRevenue,
-      totalExpenses: 0,
-      netIncome: totalRevenue,
-      profitMargin: 100,
-      revenueSources,
-      monthlyTrend,
-      quarterlyComparison,
-      revenueByPeriod,
-      projectedRevenue: this.projectRevenue(totalRevenue),
-    };
+      return {
+        totalRevenue,
+        totalExpenses: 0,
+        netIncome: totalRevenue,
+        profitMargin: 100,
+        revenueSources,
+        monthlyTrend,
+        quarterlyComparison,
+        revenueByPeriod,
+        projectedRevenue: this.projectRevenue(totalRevenue),
+      };
+    } catch (error) {
+      console.error('[ReportsService] Error en getRevenueReport:', error);
+      throw new Error(`Error al generar reporte de ingresos: ${error.message}`);
+    }
   }
 
   private async generateRevenueByPeriod(sales: Sale[], payments: Payment[], startDate: Date, endDate: Date): Promise<any[]> {
@@ -632,16 +654,26 @@ export class ReportsService {
 
     // Agrupar ventas por día
     sales.forEach(sale => {
-      const dateKey = sale.createdAt.toISOString().split('T')[0];
-      const existing = revenueByDay.get(dateKey) || 0;
-      revenueByDay.set(dateKey, existing + parseFloat(sale.totalAmount.toString()));
+      try {
+        const createdAt = sale.createdAt instanceof Date ? sale.createdAt : new Date(sale.createdAt);
+        const dateKey = createdAt.toISOString().split('T')[0];
+        const existing = revenueByDay.get(dateKey) || 0;
+        revenueByDay.set(dateKey, existing + parseFloat(sale.totalAmount.toString()));
+      } catch (e) {
+        console.warn('[ReportsService] Error procesando venta:', e);
+      }
     });
 
     // Agrupar pagos por día
     payments.forEach(payment => {
-      const dateKey = payment.paymentDate.toISOString().split('T')[0];
-      const existing = revenueByDay.get(dateKey) || 0;
-      revenueByDay.set(dateKey, existing + parseFloat(payment.amount.toString()));
+      try {
+        const paymentDate = payment.paymentDate instanceof Date ? payment.paymentDate : new Date(payment.paymentDate);
+        const dateKey = paymentDate.toISOString().split('T')[0];
+        const existing = revenueByDay.get(dateKey) || 0;
+        revenueByDay.set(dateKey, existing + parseFloat(payment.amount.toString()));
+      } catch (e) {
+        console.warn('[ReportsService] Error procesando pago:', e);
+      }
     });
 
     // Convertir a array

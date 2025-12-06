@@ -28,6 +28,12 @@ export class Sale {
   @JoinColumn({ name: 'memberId' })
   member: User | null;
 
+  @Column({ type: 'uuid', nullable: true })
+  cashRegisterId: string | null;
+
+  @Column({ type: 'uuid', nullable: true })
+  userId: string | null; // ID del cajero que realizó la venta
+
   @Column({ type: 'decimal', precision: 10, scale: 2 })
   totalAmount: number;
 
