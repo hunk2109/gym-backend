@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Between } from 'typeorm';
+import { Repository, Between, IsNull } from 'typeorm';
 import { Payment, PaymentStatus, PaymentType } from '../../entities/payment.entity';
 import { Member } from '../../entities/member.entity';
 import { MemberMembership } from '../../entities/member-membership.entity';
@@ -156,7 +156,7 @@ export class PaymentsService {
     const [totalPayments, completedPayments, pendingPayments, failedPayments] = await Promise.all([
       this.paymentRepository.count(),
       this.paymentRepository.count({ where: { status: PaymentStatus.COMPLETED } }),
-      this.paymentRepository.count({ where: { status: PaymentStatus.PENDING } }),
+      this.paymentRepository.count({ where: { status: PaymentStatus.PENDING, memberMembershipId: IsNull() } }),
       this.paymentRepository.count({ where: { status: PaymentStatus.FAILED } }),
     ]);
 
@@ -251,6 +251,7 @@ export class PaymentsService {
     return this.paymentRepository
       .createQueryBuilder('payment')
       .where('payment.status = :status', { status: PaymentStatus.PENDING })
+      .andWhere('payment.memberMembershipId IS NULL')
       .andWhere('payment.dueDate <= :cutoffDate', { cutoffDate })
       .orderBy('payment.dueDate', 'ASC')
       .getMany();
@@ -265,12 +266,14 @@ export class PaymentsService {
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - daysOverdue);
 
-    // Obtener pagos pendientes de la tabla Payment
+    // Obtener pagos pendientes de la tabla Payment (SIN los de membresías)
+    // Los pagos PENDING con memberMembershipId se cuentan desde MemberMembership para evitar duplicados
     const paymentRecords = await this.paymentRepository
       .createQueryBuilder('payment')
       .leftJoinAndSelect('payment.member', 'member')
       .leftJoinAndSelect('member.user', 'user')
       .where('payment.status = :status', { status: PaymentStatus.PENDING })
+      .andWhere('payment.memberMembershipId IS NULL')
       .andWhere('payment.dueDate <= :cutoffDate', { cutoffDate })
       .orderBy('payment.dueDate', 'ASC')
       .getMany();

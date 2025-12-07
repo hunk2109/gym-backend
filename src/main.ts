@@ -11,6 +11,9 @@ async function bootstrap() {
     allowedHeaders: ['Content-Type', 'Authorization'],
   });
 
+  // Global prefix para todas las rutas
+  app.setGlobalPrefix('api');
+
   // ValidationPipe deshabilitado temporalmente para debug
   // app.useGlobalPipes(
   //   new ValidationPipe({

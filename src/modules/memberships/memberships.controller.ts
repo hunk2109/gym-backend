@@ -18,7 +18,7 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../../entities/user.entity';
 
-@Controller('api/memberships')
+@Controller('memberships')
 export class MembershipsController {
   constructor(private readonly membershipsService: MembershipsService) {}
 
@@ -127,30 +127,22 @@ export class MembershipsController {
   }
 }
 
-@Controller('api/member-memberships')
+@Controller('member-memberships')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class MemberMembershipsController {
   constructor(private readonly membershipsService: MembershipsService) {}
 
-  // Asignar membresía a miembro
+  // DEPRECATED: Usar /api/member-memberships POST en su lugar
+  // Este endpoint ha sido reemplazado por MemberMembershipsController para soportar descuentos
   @Post()
-  @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO, UserRole.CLIENTE)
-  @HttpCode(HttpStatus.CREATED)
-  async assignMembership(@Body() assignMembershipDto: AssignMembershipDto) {
-    // Sanitizar el DTO en caso de que venga serializado incorrectamente
-    const sanitized = sanitizeAssignMembershipDto(assignMembershipDto);
-    
-    console.log('[MemberMembershipsController] POST memberId SANITIZADO:', sanitized.memberId);
-    console.log('[MemberMembershipsController] POST membershipId SANITIZADO:', sanitized.membershipId);
-    
-    try {
-      const result = await this.membershipsService.assignMembership(sanitized);
-      console.log('[MemberMembershipsController] Membresía asignada exitosamente:', result.id);
-      return result;
-    } catch (error) {
-      console.log('[MemberMembershipsController] ERROR en assignMembership:', error.message);
-      throw error;
-    }
+  @HttpCode(HttpStatus.GONE)
+  async assignMembership() {
+    return {
+      statusCode: 410,
+      success: false,
+      message: 'Este endpoint ha sido deprecado. Por favor usa POST /api/member-memberships en su lugar.',
+      error: 'Gone',
+    };
   }
 
   // ======== RUTAS GET/DELETE CON SLUG ESPECÍFICO (ANTES QUE :id) ========

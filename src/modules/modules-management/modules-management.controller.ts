@@ -4,7 +4,7 @@ import { UpdateModuleSettingsDto } from './dto/module-settings.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { ModuleSettings } from '../../entities/module-settings.entity';
 
-@Controller('api/modules-management')
+@Controller('modules-management')
 @UseGuards(JwtAuthGuard)
 export class ModulesManagementController {
   constructor(private readonly modulesService: ModulesManagementService) {}

@@ -6,7 +6,7 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../../entities/user.entity';
 import { RolesGuard } from '../auth/guards/roles.guard';
 
-@Controller('api/cash-register')
+@Controller('cash-register')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class CashRegisterController {
   constructor(private cashRegisterService: CashRegisterService) {}

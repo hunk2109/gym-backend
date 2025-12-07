@@ -5,7 +5,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { User } from '../../entities/user.entity';
 import { InjectRepository } from '@nestjs/typeorm';
 
-@Controller('api/audit-logs')
+@Controller('audit-logs')
 export class AuditLogController {
   constructor(
     private readonly auditLogService: AuditLogService,

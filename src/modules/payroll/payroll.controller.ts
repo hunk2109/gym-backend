@@ -16,7 +16,7 @@ import { CreatePayrollDto, UpdatePayrollDto, GeneratePayrollDto } from './dto/pa
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PayrollStatus } from '../../entities/payroll.entity';
 
-@Controller('api/payroll')
+@Controller('payroll')
 export class PayrollController {
   constructor(private readonly payrollService: PayrollService) {}
 

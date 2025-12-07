@@ -1,7 +1,7 @@
 import { Module, OnModuleInit } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { MembershipsService } from './memberships.service';
-import { MembershipsController, MemberMembershipsController } from './memberships.controller';
+import { MembershipsController } from './memberships.controller';
 import { MembershipsSeeder } from './memberships.seeder';
 import { MembershipsCronService } from './memberships.cron';
 import { Membership } from '../../entities/membership.entity';
@@ -11,7 +11,7 @@ import { Payment } from '../../entities/payment.entity';
 
 @Module({
   imports: [TypeOrmModule.forFeature([Membership, MemberMembership, Member, Payment])],
-  controllers: [MembershipsController, MemberMembershipsController],
+  controllers: [MembershipsController],
   providers: [MembershipsService, MembershipsSeeder, MembershipsCronService],
   exports: [MembershipsService],
 })

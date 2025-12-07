@@ -1,6 +1,11 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { ReportsService } from './reports.service';
+import { PromotionsReportService } from './promotions-report.service';
+import { BirthdayReportService } from './birthday-report.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { UserRole } from '../../entities/user.entity';
 import {
   SalesReportDto,
   MembershipReportDto,
@@ -13,10 +18,14 @@ import {
 } from './dto/report-response.dto';
 import { ReportRequestDto, SalesReportRequestDto, MembershipReportRequestDto, PaymentReportRequestDto } from './dto/report-request.dto';
 
-@Controller('api/reports')
-@UseGuards(JwtAuthGuard)
+@Controller('reports')
+@UseGuards(JwtAuthGuard, RolesGuard)
 export class ReportsController {
-  constructor(private reportsService: ReportsService) {}
+  constructor(
+    private reportsService: ReportsService,
+    private promotionsReportService: PromotionsReportService,
+    private birthdayReportService: BirthdayReportService,
+  ) {}
 
   @Get('sales')
   async getSalesReport(
@@ -94,5 +103,73 @@ export class ReportsController {
   ): Promise<ComprehensiveReportDto> {
     const dto: ReportRequestDto = { dateRange: dateRange as any, startDate, endDate };
     return this.reportsService.getComprehensiveReport(dto);
+  }
+
+  // ========== PROMOTIONS REPORTS ==========
+
+  @Get('promotions')
+  @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO)
+  async getPromotionsReport(
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+  ) {
+    const start = startDate ? new Date(startDate) : undefined;
+    const end = endDate ? new Date(endDate) : undefined;
+    
+    return this.promotionsReportService.getPromotionsReport(start, end);
+  }
+
+  @Get('promotions/summary')
+  @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO)
+  async getPromotionsSummary(
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+  ) {
+    const start = startDate ? new Date(startDate) : undefined;
+    const end = endDate ? new Date(endDate) : undefined;
+    
+    return this.promotionsReportService.getDiscountsSummary(start, end);
+  }
+
+  @Get('promotions/popularity')
+  @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO)
+  async getPromotionsByPopularity() {
+    return this.promotionsReportService.getPromotionsByPopularity();
+  }
+
+  @Get('promotions/expiring')
+  @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO)
+  async getExpiringPromotions(
+    @Query('days') days: number = 7,
+  ) {
+    return this.promotionsReportService.getExpiringPromotions(days);
+  }
+
+  @Get('promotions/expired')
+  @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO)
+  async getExpiredPromotions() {
+    return this.promotionsReportService.getExpiredPromotions();
+  }
+
+  // ========== BIRTHDAY REPORTS ==========
+
+  @Get('birthdays/today')
+  @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO)
+  async getTodaysBirthdays() {
+    return this.birthdayReportService.getTodaysBirthdays();
+  }
+
+  @Get('birthdays/upcoming')
+  @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO)
+  async getUpcomingBirthdays(
+    @Query('days') days: number = 7,
+  ) {
+    return this.birthdayReportService.getUpcomingBirthdays(days);
+  }
+
+  @Get('birthdays/month')
+  @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO)
+  async getBirthdaysThisMonth() {
+    return this.birthdayReportService.getBirthdaysThisMonth();
   }
 }

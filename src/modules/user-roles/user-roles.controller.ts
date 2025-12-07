@@ -5,7 +5,7 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../../entities/user.entity';
 
-@Controller('api/user-roles')
+@Controller('user-roles')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class UserRolesController {
   constructor(private readonly userRolesService: UserRolesService) {}

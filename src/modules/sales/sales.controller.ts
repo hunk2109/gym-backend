@@ -18,7 +18,7 @@ import { UserRole } from '../../entities/user.entity';
 import { CreateSaleDto, UpdateSaleDto } from './dto/create-sale.dto';
 import { SalesService } from './sales.service';
 
-@Controller('api/sales')
+@Controller('sales')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class SalesController {
   constructor(private readonly salesService: SalesService) {}

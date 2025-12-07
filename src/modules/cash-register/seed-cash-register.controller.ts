@@ -1,7 +1,7 @@
 import { Controller, Get, Inject } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 
-@Controller('api/seed')
+@Controller('seed')
 export class SeedCashRegisterController {
   constructor(@Inject(DataSource) private dataSource: DataSource) {}
 

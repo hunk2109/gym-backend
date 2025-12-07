@@ -56,6 +56,18 @@ export class MemberMembership {
   @Column({ type: 'date', nullable: true })
   suspensionDate: Date;
 
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  appliedPromotionCode?: string | null; // Código de cupón/promoción aplicado
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
+  discountAmount: number; // Monto total del descuento en pesos
+
+  @Column({ type: 'decimal', precision: 5, scale: 2, default: 0 })
+  discountPercentage: number; // Porcentaje total de descuento aplicado
+
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  discountReason?: string | null; // Razón del descuento adicional
+
   @CreateDateColumn()
   createdAt: Date;
 

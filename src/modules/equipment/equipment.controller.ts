@@ -23,7 +23,7 @@ import {
 } from './dto/create-equipment.dto';
 import { EquipmentService } from './equipment.service';
 
-@Controller('api/equipment')
+@Controller('equipment')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class EquipmentController {
   constructor(private readonly equipmentService: EquipmentService) {}

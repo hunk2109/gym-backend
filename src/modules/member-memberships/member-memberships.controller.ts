@@ -14,12 +14,27 @@ import { MemberMembershipsService } from './member-memberships.service';
 import { CreateMemberMembershipDto } from './dto/create-member-membership.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
-@Controller('api/member-memberships')
+@Controller('member-memberships')
 @UseGuards(JwtAuthGuard)
 export class MemberMembershipsController {
   constructor(
     private readonly memberMembershipsService: MemberMembershipsService,
   ) {}
+
+  /**
+   * GET /api/member-memberships/health-check
+   * Health check para ver si el servidor tiene los últimos cambios
+   */
+  @Get('health-check')
+  @HttpCode(HttpStatus.OK)
+  async healthCheck() {
+    return {
+      status: 'ok',
+      message: 'MemberMembershipsService cargado con cambios de descuento',
+      timestamp: new Date(),
+      version: '1.1.0-con-descuentos',
+    };
+  }
 
   /**
    * GET /api/member-memberships/member/:memberId

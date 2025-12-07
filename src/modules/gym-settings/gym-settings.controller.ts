@@ -6,7 +6,7 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../../entities/user.entity';
 
-@Controller('api/gym-settings')
+@Controller('gym-settings')
 export class GymSettingsController {
   constructor(private readonly gymSettingsService: GymSettingsService) {}
 

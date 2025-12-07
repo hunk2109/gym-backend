@@ -24,8 +24,11 @@ import { Payroll } from './entities/payroll.entity';
 import { AuditLog } from './entities/audit-log.entity';
 import { ModuleSettings } from './entities/module-settings.entity';
 import { CashRegister } from './entities/cash-register.entity';
+import { Promotion } from './modules/promotions/entities/promotion.entity';
+import { EmailConfig, EmailTemplate, EmailLog, PaymentReminder } from './modules/email-settings/entities';
 
 import { AuthModule } from './modules/auth/auth.module';
+import { EmailSettingsModule } from './modules/email-settings/email-settings.module';
 import { ProductsModule } from './modules/products/products.module';
 import { EquipmentModule } from './modules/equipment/equipment.module';
 import { SalesModule } from './modules/sales/sales.module';
@@ -45,6 +48,7 @@ import { AuditLogModule } from './modules/audit-logs/audit-log.module';
 import { ModulesManagementModule } from './modules/modules-management/modules-management.module';
 import { SystemParameterModule } from './modules/system-parameters/system-parameter.module';
 import { CashRegisterModule } from './modules/cash-register/cash-register.module';
+import { PromotionsModule } from './modules/promotions/promotions.module';
 
 import { ErrorHandlingInterceptor, ResponseInterceptor } from './common/interceptors';
 import { ResponseFilterInterceptor } from './modules/auth/interceptors/response-filter.interceptor';
@@ -63,7 +67,7 @@ import { LoggerMiddleware } from './common/middleware';
       username: process.env.DB_USERNAME || 'root',
       password: process.env.DB_PASSWORD || 'password',
       database: process.env.DB_NAME || 'gym_manager',
-      entities: [User, Product, Equipment, Sale, SaleItem, GymSettings, Employee, Member, Membership, MemberMembership, GymClass, ClassEnrollment, Payment, GroupMembership, GroupMembershipUser, Payroll, AuditLog, ModuleSettings, CashRegister],
+      entities: [User, Product, Equipment, Sale, SaleItem, GymSettings, Employee, Member, Membership, MemberMembership, GymClass, ClassEnrollment, Payment, GroupMembership, GroupMembershipUser, Payroll, AuditLog, ModuleSettings, CashRegister, Promotion, EmailConfig, EmailTemplate, EmailLog, PaymentReminder],
       synchronize: true,
       logging: false,
     }),
@@ -92,6 +96,8 @@ import { LoggerMiddleware } from './common/middleware';
     ModulesManagementModule,
     SystemParameterModule,
     CashRegisterModule,
+    PromotionsModule,
+    EmailSettingsModule,
   ],
   controllers: [],
   providers: [

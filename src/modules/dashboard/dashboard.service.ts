@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, IsNull } from 'typeorm';
 import { User, UserRole } from '../../entities/user.entity';
 import { Sale, SaleStatus } from '../../entities/sale.entity';
 import { Employee } from '../../entities/employee.entity';
@@ -240,9 +240,8 @@ export class DashboardService {
   async getMembershipRevenue(): Promise<number> {
     try {
       const result = await this.memberMembershipRepository.query(`
-        SELECT SUM(m.price) as total
+        SELECT SUM(mm.amountPaid) as total
         FROM member_memberships mm
-        INNER JOIN memberships m ON m.id = mm.membershipId
         WHERE mm.paymentStatus = 'paid'
       `);
       return result[0]?.total ? parseFloat(result[0].total) : 0;
@@ -259,12 +258,12 @@ export class DashboardService {
         SELECT 
           m.name,
           COUNT(mm.id) as count,
-          SUM(m.price) as revenue
+          SUM(mm.amountPaid) as revenue
         FROM member_memberships mm
         INNER JOIN memberships m ON m.id = mm.membershipId
         WHERE mm.paymentStatus = 'paid'
         GROUP BY m.id, m.name
-        HAVING SUM(m.price) > 0
+        HAVING SUM(mm.amountPaid) > 0
         ORDER BY revenue DESC
       `);
 
@@ -370,28 +369,32 @@ export class DashboardService {
   async getPendingPaymentsCount(): Promise<{ count: number; totalAmount: number }> {
     console.log('[Dashboard] Obteniendo pagos pendientes...');
 
-    // 1. Contar pagos pendientes de la tabla Payment
+    // 1. Contar pagos pendientes de la tabla Payment que NO sean de membresías
+    // (Los pagos PENDING con memberMembershipId se cuentan desde MemberMembership para evitar duplicados)
     const paymentCount = await this.paymentRepository.count({
-      where: { status: PaymentStatus.PENDING },
+      where: {
+        status: PaymentStatus.PENDING,
+        memberMembershipId: IsNull(),
+      },
     });
 
     const paymentAmountResult = await this.paymentRepository
       .createQueryBuilder('payment')
       .select('SUM(payment.amount)', 'total')
       .where('payment.status = :status', { status: PaymentStatus.PENDING })
+      .andWhere('payment.memberMembershipId IS NULL')
       .getRawOne();
 
     const paymentAmount = paymentAmountResult?.total ? parseFloat(paymentAmountResult.total) : 0;
 
-    // 2. Contar membresías con pago pendiente
+    // 2. Contar membresías con pago pendiente (SOLO estas se cuentan para evitar duplicados)
     const membershipCount = await this.memberMembershipRepository.count({
       where: { paymentStatus: 'pending' },
     });
 
     const membershipAmountResult = await this.memberMembershipRepository
       .createQueryBuilder('mm')
-      .select('SUM(m.price)', 'total')
-      .leftJoin(Membership, 'm', 'm.id = mm.membershipId')
+      .select('SUM(mm.amountPaid)', 'total')
       .where('mm.paymentStatus = :status', { status: 'pending' })
       .getRawOne();
 
@@ -400,7 +403,7 @@ export class DashboardService {
     const totalCount = paymentCount + membershipCount;
     const totalAmount = paymentAmount + membershipAmount;
 
-    console.log(`[Dashboard] Pagos pendientes encontrados: ${paymentCount} (Payment) + ${membershipCount} (MemberMembership) = ${totalCount} total`);
+    console.log(`[Dashboard] Pagos pendientes encontrados: ${paymentCount} (Payment sin membresía) + ${membershipCount} (MemberMembership) = ${totalCount} total`);
     console.log(`[Dashboard] Monto pendiente: $${paymentAmount} (Payment) + $${membershipAmount} (MemberMembership) = $${totalAmount} total`);
 
     return {

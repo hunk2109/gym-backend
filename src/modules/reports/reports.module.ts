@@ -7,7 +7,10 @@ import { MemberMembership } from '../../entities/member-membership.entity';
 import { GymClass } from '../../entities/gym-class.entity';
 import { ClassEnrollment } from '../../entities/class-enrollment.entity';
 import { SaleItem } from '../../entities/sale-item.entity';
+import { Promotion } from '../promotions/entities/promotion.entity';
 import { ReportsService } from './reports.service';
+import { PromotionsReportService } from './promotions-report.service';
+import { BirthdayReportService } from './birthday-report.service';
 import { ReportsController } from './reports.controller';
 
 @Module({
@@ -20,10 +23,11 @@ import { ReportsController } from './reports.controller';
       GymClass,
       ClassEnrollment,
       SaleItem,
+      Promotion,
     ]),
   ],
-  providers: [ReportsService],
+  providers: [ReportsService, PromotionsReportService, BirthdayReportService],
   controllers: [ReportsController],
-  exports: [ReportsService],
+  exports: [ReportsService, PromotionsReportService, BirthdayReportService],
 })
 export class ReportsModule {}

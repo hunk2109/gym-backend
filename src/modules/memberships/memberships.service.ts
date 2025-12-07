@@ -162,7 +162,7 @@ export class MembershipsService {
     const result = await this.memberMembershipRepository.save(newMemberMembership);
     console.log(`[MembershipsService] Membresía insertada con ID: ${result.id}`);
 
-    // Crear registro en tabla payments (completado o pendiente)
+    // Crear registro en tabla payments (completado o pendiente) - para historial
     const payment = new Payment();
     payment.id = uuidv4();
     payment.memberId = member.id;
@@ -379,18 +379,31 @@ export class MembershipsService {
       membership.suspensionDate = null as any;
     }
 
-    // Crear registro en la tabla payments
-    const payment = new Payment();
-    payment.id = uuidv4();
-    payment.memberId = membership.memberId;
-    payment.memberMembershipId = memberMembershipId;
-    payment.amount = amountPaid as any;
-    payment.paymentDate = parsedPaymentDate;
-    payment.status = PaymentStatus.COMPLETED;
-    payment.paymentMethod = PaymentMethod.CASH;
-    payment.paymentType = PaymentType.MEMBERSHIP;
+    // Actualizar el registro existente en la tabla payments (cambiar de PENDING a COMPLETED)
+    const existingPayment = await this.paymentRepository.findOne({
+      where: { memberMembershipId: memberMembershipId },
+    });
 
-    await this.paymentRepository.save(payment);
+    if (existingPayment) {
+      console.log(`[MembershipsService] Actualizando pago existente: ${existingPayment.id}`);
+      existingPayment.amount = amountPaid as any;
+      existingPayment.paymentDate = parsedPaymentDate;
+      existingPayment.status = PaymentStatus.COMPLETED;
+      await this.paymentRepository.save(existingPayment);
+      console.log(`[MembershipsService] Pago actualizado a COMPLETED`);
+    } else {
+      console.log(`[MembershipsService] No se encontró pago previo, creando uno nuevo`);
+      const payment = new Payment();
+      payment.id = uuidv4();
+      payment.memberId = membership.memberId;
+      payment.memberMembershipId = memberMembershipId;
+      payment.amount = amountPaid as any;
+      payment.paymentDate = parsedPaymentDate;
+      payment.status = PaymentStatus.COMPLETED;
+      payment.paymentMethod = PaymentMethod.CASH;
+      payment.paymentType = PaymentType.MEMBERSHIP;
+      await this.paymentRepository.save(payment);
+    }
 
     return this.memberMembershipRepository.save(membership);
   }
