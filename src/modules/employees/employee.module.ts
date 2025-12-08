@@ -5,9 +5,10 @@ import { User } from '../../entities/user.entity';
 import { EmployeeService } from './employee.service';
 import { EmployeeController } from './employee.controller';
 import { AuditLogModule } from '../audit-logs/audit-log.module';
+import { EmailSettingsModule } from '../email-settings/email-settings.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Employee, User]), AuditLogModule],
+  imports: [TypeOrmModule.forFeature([Employee, User]), AuditLogModule, EmailSettingsModule],
   providers: [EmployeeService],
   controllers: [EmployeeController],
   exports: [EmployeeService],

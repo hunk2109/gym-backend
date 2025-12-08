@@ -9,6 +9,7 @@ import { JwtStrategy } from './jwt.strategy';
 import { RolesGuard } from './guards/roles.guard';
 import { PermissionsService } from './services/permissions.service';
 import { ResponseFilterService } from './services/response-filter.service';
+import { EmailSettingsModule } from '../email-settings/email-settings.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { ResponseFilterService } from './services/response-filter.service';
       secret: process.env.JWT_SECRET || 'muerete66',
       signOptions: { expiresIn: '24h' },
     }),
+    EmailSettingsModule,
   ],
   providers: [AuthService, JwtStrategy, RolesGuard, PermissionsService, ResponseFilterService],
   controllers: [AuthController],

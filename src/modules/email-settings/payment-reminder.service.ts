@@ -7,6 +7,7 @@ import { CreatePaymentReminderDto, UpdatePaymentReminderDto } from './dto';
 import { EmailService } from './email.service';
 import { Member } from '../../entities/member.entity';
 import { MemberMembership } from '../../entities/member-membership.entity';
+import { GymSettingsService } from '../gym-settings/gym-settings.service';
 
 @Injectable()
 export class PaymentReminderService {
@@ -20,6 +21,7 @@ export class PaymentReminderService {
     @InjectRepository(MemberMembership)
     private memberMembershipRepository: Repository<MemberMembership>,
     private emailService: EmailService,
+    private gymSettingsService: GymSettingsService,
   ) {}
 
   async createReminder(dto: CreatePaymentReminderDto): Promise<PaymentReminder> {
@@ -39,7 +41,7 @@ export class PaymentReminderService {
 
   async getAllReminders(): Promise<PaymentReminder[]> {
     return this.reminderRepository.find({
-      relations: ['member'],
+      relations: ['member', 'member.user'],
       order: { createdAt: 'DESC' },
     });
   }
@@ -47,7 +49,7 @@ export class PaymentReminderService {
   async getReminderById(id: string): Promise<PaymentReminder> {
     const reminder = await this.reminderRepository.findOne({
       where: { id },
-      relations: ['member'],
+      relations: ['member', 'member.user'],
     });
     if (!reminder) {
       throw new BadRequestException('Payment reminder not found');
@@ -127,12 +129,21 @@ export class PaymentReminderService {
 
       // Preparar datos del email
       const member = reminder.member;
+      const memberUser = member.user;
+
+      if (!memberUser) {
+        throw new Error(`User not found for member ${member.id}`);
+      }
+
+      // Obtener configuración del gimnasio
+      const gymSettings = await this.gymSettingsService.getSettings();
+
       const subject = this.getReminderSubject(reminder.type);
-      const htmlContent = this.getReminderTemplate(reminder, member, memberMembership);
+      const htmlContent = this.getReminderTemplate(reminder, member, memberMembership, gymSettings);
 
       // Enviar email
       await this.emailService.sendEmailDirect({
-        to: member.email,
+        to: memberUser.email,
         subject,
         html: htmlContent,
         text: this.stripHtml(htmlContent),
@@ -141,11 +152,11 @@ export class PaymentReminderService {
       // Actualizar recordatorio
       reminder.lastSentAt = new Date();
       reminder.retryCount = 0;
-      reminder.lastErrorMessage = null;
+      reminder.lastErrorMessage = '';
       reminder.nextSendAt = this.calculateNextSendDate(reminder.frequency);
 
       await this.reminderRepository.save(reminder);
-      this.logger.log(`Payment reminder sent to ${member.email}`);
+      this.logger.log(`Payment reminder sent to ${memberUser.email}`);
     } catch (error) {
       this.logger.error(`Error processing reminder ${reminder.id}:`, error);
 
@@ -201,38 +212,34 @@ export class PaymentReminderService {
     }
   }
 
-  private getReminderTemplate(reminder: PaymentReminder, member: any, memberMembership: any): string {
+  private getReminderTemplate(reminder: PaymentReminder, member: any, memberMembership: any, gymSettings?: any): string {
     const { membership } = memberMembership;
     const dueDate = new Date(memberMembership.endDate).toLocaleDateString('es-ES');
 
-    const templates = {
-      [ReminderType.DUE_DATE]: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2>¡Hola ${member.firstName}!</h2>
-          <p>Tu membresía <strong>${membership.name}</strong> vence hoy <strong>${dueDate}</strong>.</p>
-          <p>Para continuar disfrutando de nuestros servicios, por favor renueva tu membresía lo antes posible.</p>
-          <p><a href="https://gym-app.com/renew" style="background-color: #4CAF50; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">Renovar Membresía</a></p>
-        </div>
-      `,
-      [ReminderType.BEFORE_DUE]: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2>¡Hola ${member.firstName}!</h2>
-          <p>Te recordamos que tu membresía <strong>${membership.name}</strong> vence el <strong>${dueDate}</strong>.</p>
-          <p>Renuévala ahora para no perder acceso a nuestros servicios.</p>
-          <p><a href="https://gym-app.com/renew" style="background-color: #4CAF50; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">Renovar Membresía</a></p>
-        </div>
-      `,
-      [ReminderType.OVERDUE]: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2>¡Hola ${member.firstName}!</h2>
-          <p>Tu membresía <strong>${membership.name}</strong> ha vencido desde el <strong>${dueDate}</strong>.</p>
-          <p>Tu acceso al gimnasio ha sido suspendido. Por favor, renueva tu membresía de inmediato.</p>
-          <p><a href="https://gym-app.com/renew" style="background-color: #ff5722; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">Renovar Ahora</a></p>
-        </div>
-      `,
+    const messages = {
+      [ReminderType.DUE_DATE]: `Tu membresía <strong>${membership.name}</strong> vence hoy <strong>${dueDate}</strong>. Para continuar disfrutando de nuestros servicios, por favor renueva tu membresía lo antes posible.`,
+      [ReminderType.BEFORE_DUE]: `Te recordamos que tu membresía <strong>${membership.name}</strong> vence el <strong>${dueDate}</strong>. Renuévala ahora para no perder acceso a nuestros servicios.`,
+      [ReminderType.OVERDUE]: `Tu membresía <strong>${membership.name}</strong> ha vencido desde el <strong>${dueDate}</strong>. Tu acceso al gimnasio ha sido suspendido. Por favor, renueva tu membresía de inmediato.`,
     };
 
-    return templates[reminder.type] || '';
+    // Importar EmailTemplateBuilder dinámicamente
+    const { EmailTemplateBuilder } = require('./email-template.builder');
+    
+    // Preparar configuración del gimnasio
+    const gymConfig = gymSettings ? {
+      gymName: gymSettings.gymName,
+      email: gymSettings.email,
+      phone: gymSettings.phone,
+      address: gymSettings.address,
+      website: gymSettings.website,
+    } : undefined;
+    
+    return EmailTemplateBuilder.paymentReminderEmail(
+      member.firstName,
+      reminder.type,
+      messages[reminder.type] || 'Recordatorio de pago',
+      gymConfig
+    );
   }
 
   private isToday(date: Date): boolean {

@@ -51,8 +51,14 @@ export class Payroll {
   @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
   isrDeduction: number; // ISR (Impuesto Sobre la Renta) variable según salario
 
+  @Column({ type: 'boolean', default: false })
+  applyTSS: boolean; // Indica si se aplica descuento a TSS
+
   @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
   tssDeduction: number; // TSS (Tesorería de la Seguridad Social) ~2.87%
+
+  @Column({ type: 'decimal', precision: 5, scale: 2, default: 2.87 })
+  tssPercentage: number; // Porcentaje de aporte a TSS (por defecto 2.87%)
 
   @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
   otherDeductions: number; // Otras deducciones (multas, adelantos, etc.)

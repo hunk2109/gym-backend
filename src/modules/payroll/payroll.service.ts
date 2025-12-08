@@ -43,7 +43,9 @@ export class PayrollService {
     const holidayBonus = createDto.holidayBonus || 0;
     const afpDeduction = createDto.afpDeduction || 0;
     const isrDeduction = createDto.isrDeduction || 0;
-    const tssDeduction = createDto.tssDeduction || 0;
+    const applyTSS = createDto.applyTSS || false;
+    const tssPercentage = createDto.tssPercentage || 2.87;
+    const tssDeduction = applyTSS ? (baseSalary * tssPercentage) / 100 : (createDto.tssDeduction || 0);
     const otherDeductions = createDto.otherDeductions || 0;
 
     const totalDeductions = afpDeduction + isrDeduction + tssDeduction + otherDeductions;
@@ -58,6 +60,8 @@ export class PayrollService {
       holidayBonus,
       afpDeduction,
       isrDeduction,
+      applyTSS,
+      tssPercentage,
       tssDeduction,
       otherDeductions,
       totalAmount,
@@ -73,7 +77,8 @@ export class PayrollService {
     year?: number,
     status?: PayrollStatus,
   ): Promise<Payroll[]> {
-    const query = this.payrollRepository.createQueryBuilder('payroll');
+    const query = this.payrollRepository.createQueryBuilder('payroll')
+      .leftJoinAndSelect('payroll.employee', 'employee');
 
     if (month) {
       query.andWhere('payroll.month = :month', { month });
@@ -124,7 +129,13 @@ export class PayrollService {
     if (updateDto.isrDeduction !== undefined) {
       payroll.isrDeduction = updateDto.isrDeduction;
     }
-    if (updateDto.tssDeduction !== undefined) {
+    if (updateDto.applyTSS !== undefined) {
+      payroll.applyTSS = updateDto.applyTSS;
+    }
+    if (updateDto.tssPercentage !== undefined) {
+      payroll.tssPercentage = updateDto.tssPercentage;
+    }
+    if (updateDto.tssDeduction !== undefined && !updateDto.applyTSS) {
       payroll.tssDeduction = updateDto.tssDeduction;
     }
     if (updateDto.otherDeductions !== undefined) {
@@ -135,6 +146,11 @@ export class PayrollService {
     }
     if (updateDto.notes !== undefined) {
       payroll.notes = updateDto.notes;
+    }
+
+    // Recalcular TSS si está marcado como aplicable
+    if (payroll.applyTSS) {
+      payroll.tssDeduction = (payroll.baseSalary * payroll.tssPercentage) / 100;
     }
 
     // Recalcular total
@@ -190,6 +206,10 @@ export class PayrollService {
       });
 
       if (!existing) {
+        const applyTSS = generateDto.applyTSS || false;
+        const tssPercentage = generateDto.tssPercentage || 2.87;
+        const tssDeduction = applyTSS ? (employee.salary * tssPercentage) / 100 : 0;
+        
         const payroll = this.payrollRepository.create({
           employeeId: employee.id,
           month: generateDto.month,
@@ -199,9 +219,11 @@ export class PayrollService {
           holidayBonus: 0,
           afpDeduction: 0,
           isrDeduction: 0,
-          tssDeduction: 0,
+          applyTSS,
+          tssPercentage,
+          tssDeduction,
           otherDeductions: 0,
-          totalAmount: employee.salary,
+          totalAmount: applyTSS ? employee.salary - tssDeduction : employee.salary,
           status: PayrollStatus.DRAFT,
         });
         createdPayrolls.push(await this.payrollRepository.save(payroll));
@@ -251,5 +273,60 @@ export class PayrollService {
       totalAmount: total,
       byStatus,
     };
+  }
+
+  async generateWithDeductionOptions(options: any): Promise<Payroll[]> {
+    let employees: Employee[];
+
+    if (options.employeeIds && options.employeeIds.length > 0) {
+      employees = await this.employeeRepository.find({
+        where: options.employeeIds.map(id => ({ id })),
+      });
+    } else {
+      employees = await this.employeeRepository.find({
+        where: { isActive: true },
+      });
+    }
+
+    const createdPayrolls: Payroll[] = [];
+
+    for (const employee of employees) {
+      const existing = await this.payrollRepository.findOne({
+        where: {
+          employeeId: employee.id,
+          month: options.month,
+          year: options.year,
+        },
+      });
+
+      if (!existing) {
+        // Calcular deducciones según opciones
+        const baseSalary = employee.salary;
+        const afpDeduction = options.applyAFP ? (baseSalary * (options.afpPercentage || 2.87)) / 100 : 0;
+        const isrDeduction = options.applyISR ? (baseSalary * (options.isrPercentage || 2.87)) / 100 : 0;
+        const tssDeduction = options.applyTSS ? (baseSalary * (options.tssPercentage || 2.87)) / 100 : 0;
+        const otherDeductions = options.otherDeductions || 0;
+
+        const payroll = this.payrollRepository.create({
+          employeeId: employee.id,
+          month: options.month,
+          year: options.year,
+          baseSalary,
+          bonuses: 0,
+          holidayBonus: 0,
+          afpDeduction,
+          isrDeduction,
+          applyTSS: options.applyTSS || false,
+          tssPercentage: options.tssPercentage || 2.87,
+          tssDeduction,
+          otherDeductions,
+          totalAmount: baseSalary - (afpDeduction + isrDeduction + tssDeduction + otherDeductions),
+          status: PayrollStatus.DRAFT,
+        });
+        createdPayrolls.push(await this.payrollRepository.save(payroll));
+      }
+    }
+
+    return createdPayrolls;
   }
 }

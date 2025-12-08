@@ -40,4 +40,16 @@ export class SendTestEmailDto {
   @IsString()
   @IsOptional()
   recipientName?: string;
+
+  @IsString()
+  @IsOptional()
+  subject?: string;
+
+  @IsString()
+  @IsOptional()
+  message?: string;
+
+  @IsString()
+  @IsOptional()
+  htmlContent?: string;
 }

@@ -4,7 +4,11 @@ import {
   PrimaryGeneratedColumn,
   CreateDateColumn,
   UpdateDateColumn,
+  ManyToOne,
+  JoinColumn,
 } from 'typeorm';
+import { Coupon } from './coupon.entity';
+import { Promotion } from '../modules/promotions/entities/promotion.entity';
 
 @Entity('gym_settings')
 export class GymSettings {
@@ -43,6 +47,16 @@ export class GymSettings {
 
   @Column({ type: 'text', nullable: true })
   policies: string;
+
+  @Column({ type: 'boolean', default: false })
+  birthdayDiscountEnabled: boolean;
+
+  @ManyToOne(() => Promotion, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'birthdayDiscountCouponId' })
+  birthdayDiscountCoupon: Promotion | null;
+
+  @Column({ type: 'uuid', nullable: true })
+  birthdayDiscountCouponId: string | null;
 
   @CreateDateColumn()
   createdAt: Date;

@@ -24,6 +24,7 @@ import { Payroll } from './entities/payroll.entity';
 import { AuditLog } from './entities/audit-log.entity';
 import { ModuleSettings } from './entities/module-settings.entity';
 import { CashRegister } from './entities/cash-register.entity';
+import { Coupon } from './entities/coupon.entity';
 import { Promotion } from './modules/promotions/entities/promotion.entity';
 import { EmailConfig, EmailTemplate, EmailLog, PaymentReminder } from './modules/email-settings/entities';
 
@@ -49,6 +50,7 @@ import { ModulesManagementModule } from './modules/modules-management/modules-ma
 import { SystemParameterModule } from './modules/system-parameters/system-parameter.module';
 import { CashRegisterModule } from './modules/cash-register/cash-register.module';
 import { PromotionsModule } from './modules/promotions/promotions.module';
+import { CouponsModule } from './modules/coupons/coupons.module';
 
 import { ErrorHandlingInterceptor, ResponseInterceptor } from './common/interceptors';
 import { ResponseFilterInterceptor } from './modules/auth/interceptors/response-filter.interceptor';
@@ -67,7 +69,7 @@ import { LoggerMiddleware } from './common/middleware';
       username: process.env.DB_USERNAME || 'root',
       password: process.env.DB_PASSWORD || 'password',
       database: process.env.DB_NAME || 'gym_manager',
-      entities: [User, Product, Equipment, Sale, SaleItem, GymSettings, Employee, Member, Membership, MemberMembership, GymClass, ClassEnrollment, Payment, GroupMembership, GroupMembershipUser, Payroll, AuditLog, ModuleSettings, CashRegister, Promotion, EmailConfig, EmailTemplate, EmailLog, PaymentReminder],
+      entities: [User, Product, Equipment, Sale, SaleItem, GymSettings, Employee, Member, Membership, MemberMembership, GymClass, ClassEnrollment, Payment, GroupMembership, GroupMembershipUser, Payroll, AuditLog, ModuleSettings, CashRegister, Coupon, Promotion, EmailConfig, EmailTemplate, EmailLog, PaymentReminder],
       synchronize: true,
       logging: false,
     }),
@@ -98,6 +100,7 @@ import { LoggerMiddleware } from './common/middleware';
     CashRegisterModule,
     PromotionsModule,
     EmailSettingsModule,
+    CouponsModule,
   ],
   controllers: [],
   providers: [

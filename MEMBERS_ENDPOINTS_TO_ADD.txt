@@ -1,0 +1,40 @@
+// Agregar estos métodos al final del MembersController
+
+  // ============ MEMBERSHIP STATUS ENDPOINTS ============
+
+  @Get(':id/membership-status')
+  @HttpCode(HttpStatus.OK)
+  async getMembershipStatus(@Param('id') memberId: string) {
+    const status = await this.membershipValidationService.getMembershipStatus(memberId);
+    return {
+      statusCode: 200,
+      data: status,
+      message: status.isExpired ? '⚠️ Membresía vencida' : '✅ Membresía activa',
+    };
+  }
+
+  @Get('membership/expired')
+  @HttpCode(HttpStatus.OK)
+  async getExpiredMembers() {
+    const members = await this.membershipValidationService.getExpiredMembers();
+    return {
+      statusCode: 200,
+      data: members,
+      count: members.length,
+      message: `Se encontraron ${members.length} miembros con membresía vencida`,
+    };
+  }
+
+  @Get('membership/expiring/:days')
+  @HttpCode(HttpStatus.OK)
+  async getExpiringMembers(@Param('days') days: string) {
+    const members = await this.membershipValidationService.getExpiringMembersInDays(
+      parseInt(days) || 7,
+    );
+    return {
+      statusCode: 200,
+      data: members,
+      count: members.length,
+      message: `Se encontraron ${members.length} miembros con membresía venciendo en ${days} días`,
+    };
+  }

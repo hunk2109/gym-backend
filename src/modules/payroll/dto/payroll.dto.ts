@@ -52,6 +52,15 @@ export class CreatePayrollDto {
   isrDeduction?: number; // ISR variable
 
   @IsOptional()
+  @Type(() => Boolean)
+  applyTSS?: boolean; // Indicar si se aplica descuento a TSS
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  tssPercentage?: number; // Porcentaje de TSS (por defecto 2.87%)
+
+  @IsOptional()
   @Type(() => Number)
   @IsNumber({ maxDecimalPlaces: 2 })
   tssDeduction?: number; // TSS ~2.87%
@@ -88,6 +97,15 @@ export class UpdatePayrollDto {
   isrDeduction?: number;
 
   @IsOptional()
+  @Type(() => Boolean)
+  applyTSS?: boolean; // Indicar si se aplica descuento a TSS
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  tssPercentage?: number; // Porcentaje de TSS
+
+  @IsOptional()
   @Type(() => Number)
   @IsNumber({ maxDecimalPlaces: 2 })
   tssDeduction?: number;
@@ -122,4 +140,63 @@ export class GeneratePayrollDto {
   @IsOptional()
   @IsString({ each: true })
   employeeIds?: string[]; // Si no se proporciona, se generan para todos los empleados activos
+
+  @IsOptional()
+  @Type(() => Boolean)
+  applyTSS?: boolean; // Aplicar TSS a todos los empleados
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  tssPercentage?: number; // Porcentaje de TSS (por defecto 2.87%)
+}
+
+export class PayrollDeductionOptionsDto {
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(12)
+  month: number;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(2020)
+  @Max(2099)
+  year: number;
+
+  @IsOptional()
+  @IsString({ each: true })
+  employeeIds?: string[]; // Si no se proporciona, se generan para todos
+
+  @IsOptional()
+  @Type(() => Boolean)
+  applyAFP?: boolean; // Aplicar AFP
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  afpPercentage?: number; // Porcentaje de AFP
+
+  @IsOptional()
+  @Type(() => Boolean)
+  applyISR?: boolean; // Aplicar ISR
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  isrPercentage?: number; // Porcentaje de ISR
+
+  @IsOptional()
+  @Type(() => Boolean)
+  applyTSS?: boolean; // Aplicar TSS
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  tssPercentage?: number; // Porcentaje de TSS (por defecto 2.87%)
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  otherDeductions?: number; // Otras deducciones fijas
 }

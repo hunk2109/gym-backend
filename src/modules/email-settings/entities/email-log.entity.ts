@@ -8,6 +8,14 @@ export enum EmailStatus {
   BOUNCED = 'BOUNCED',
 }
 
+export enum EmailType {
+  BIRTHDAY = 'BIRTHDAY',
+  PAYMENT_REMINDER = 'PAYMENT_REMINDER',
+  MEMBERSHIP_EXPIRY = 'MEMBERSHIP_EXPIRY',
+  BULK_PROMOTION = 'BULK_PROMOTION',
+  CUSTOM = 'CUSTOM',
+}
+
 @Entity('email_logs')
 export class EmailLog {
   @PrimaryGeneratedColumn('uuid')
@@ -37,6 +45,9 @@ export class EmailLog {
 
   @Column({ type: 'enum', enum: EmailStatus, default: EmailStatus.PENDING })
   status: EmailStatus;
+
+  @Column({ type: 'enum', enum: EmailType, default: EmailType.CUSTOM })
+  emailType: EmailType;
 
   @Column({ nullable: true })
   messageId: string;

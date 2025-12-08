@@ -10,15 +10,22 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
+  Logger,
 } from '@nestjs/common';
 import { MembersService } from './members.service';
 import { CreateMemberDto, UpdateMemberDto } from './dto/create-member.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { MembershipValidationService } from '../../services/membership-validation.service';
 
 @Controller('members')
 @UseGuards(JwtAuthGuard)
 export class MembersController {
-  constructor(private readonly membersService: MembersService) {}
+  private readonly logger = new Logger(MembersController.name);
+
+  constructor(
+    private readonly membersService: MembersService,
+    private readonly membershipValidationService: MembershipValidationService,
+  ) {}
 
   @Get()
   @HttpCode(HttpStatus.OK)
@@ -71,6 +78,41 @@ export class MembersController {
   @HttpCode(HttpStatus.OK)
   async getRecentMembers(@Query('days') days: string = '30') {
     return this.membersService.getRecentMembers(parseInt(days));
+  }
+
+  @Get('membership/expired')
+  @HttpCode(HttpStatus.OK)
+  async getExpiredMembers() {
+    const members = await this.membershipValidationService.getExpiredMembers();
+    return {
+      statusCode: 200,
+      data: members,
+      count: members.length,
+      message: `Se encontraron ${members.length} miembros con membresía vencida`,
+    };
+  }
+
+  @Get('membership/expiring/:days')
+  @HttpCode(HttpStatus.OK)
+  async getExpiringMembers(@Param('days') days: string) {
+    const members = await this.membershipValidationService.getExpiringMembersInDays(parseInt(days) || 7);
+    return {
+      statusCode: 200,
+      data: members,
+      count: members.length,
+      message: `Se encontraron ${members.length} miembros con membresía venciendo en ${days} días`,
+    };
+  }
+
+  @Get(':id/membership-status')
+  @HttpCode(HttpStatus.OK)
+  async getMembershipStatus(@Param('id') memberId: string) {
+    const status = await this.membershipValidationService.getMembershipStatus(memberId);
+    return {
+      statusCode: 200,
+      data: status,
+      message: status.isExpired ? '⚠️ Membresía vencida' : '✅ Membresía activa',
+    };
   }
 
   @Get(':id')

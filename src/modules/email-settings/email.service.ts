@@ -10,6 +10,7 @@ import {
   EmailStatus,
 } from './entities';
 import { SendEmailDto } from './dto';
+import { EmailTemplateBuilder } from './email-template.builder';
 
 @Injectable()
 export class EmailService {
@@ -282,8 +283,12 @@ export class EmailService {
         throw new Error('Email transporter not initialized. Configure email settings first.');
       }
 
+      const config = await this.emailConfigRepository.findOne({
+        where: { isActive: true, isVerified: true },
+      });
+
       await this.transporter.sendMail({
-        from: process.env.EMAIL_FROM || 'noreply@gymmanager.com',
+        from: `${config?.senderName || 'Gym Manager'} <${config?.email || 'noreply@gymmanager.com'}>`,
         to: options.to,
         subject: options.subject,
         html: options.html,
@@ -294,6 +299,24 @@ export class EmailService {
     } catch (error) {
       this.logger.error(`Failed to send email to ${options.to}:`, error);
       throw new InternalServerErrorException(`Failed to send email: ${error.message}`);
+    }
+  }
+
+  /**
+   * Genera una plantilla profesional personalizada
+   */
+  generateTemplate(type: 'welcome' | 'payment' | 'promotion' | 'custom', data: any): string {
+    switch (type) {
+      case 'welcome':
+        return EmailTemplateBuilder.welcomeEmail(data.memberName, data.message);
+      case 'payment':
+        return EmailTemplateBuilder.paymentReminderEmail(data.memberName, data.reminderType, data.message);
+      case 'promotion':
+        return EmailTemplateBuilder.promotionEmail(data.title, data.message, data.discount);
+      case 'custom':
+        return EmailTemplateBuilder.customTemplate(data.title, data.message, data.buttonText);
+      default:
+        return EmailTemplateBuilder.customTemplate('Notificación', data.message);
     }
   }
 }
