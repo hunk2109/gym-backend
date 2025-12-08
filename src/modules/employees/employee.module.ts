@@ -6,9 +6,17 @@ import { EmployeeService } from './employee.service';
 import { EmployeeController } from './employee.controller';
 import { AuditLogModule } from '../audit-logs/audit-log.module';
 import { EmailSettingsModule } from '../email-settings/email-settings.module';
+import { ModulesManagementModule } from '../modules-management/modules-management.module';
+import { GymSettingsModule } from '../gym-settings/gym-settings.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Employee, User]), AuditLogModule, EmailSettingsModule],
+  imports: [
+    TypeOrmModule.forFeature([Employee, User]),
+    AuditLogModule,
+    EmailSettingsModule,
+    ModulesManagementModule,
+    GymSettingsModule,
+  ],
   providers: [EmployeeService],
   controllers: [EmployeeController],
   exports: [EmployeeService],

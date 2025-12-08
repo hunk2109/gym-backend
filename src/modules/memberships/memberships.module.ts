@@ -8,9 +8,15 @@ import { Membership } from '../../entities/membership.entity';
 import { MemberMembership } from '../../entities/member-membership.entity';
 import { Member } from '../../entities/member.entity';
 import { Payment } from '../../entities/payment.entity';
+import { PromotionsModule } from '../promotions/promotions.module';
+import { EmailSettingsModule } from '../email-settings/email-settings.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Membership, MemberMembership, Member, Payment])],
+  imports: [
+    TypeOrmModule.forFeature([Membership, MemberMembership, Member, Payment]),
+    PromotionsModule,
+    EmailSettingsModule,
+  ],
   controllers: [MembershipsController],
   providers: [MembershipsService, MembershipsSeeder, MembershipsCronService],
   exports: [MembershipsService],

@@ -37,10 +37,10 @@ export class GroupMembership {
   @JoinColumn({ name: 'membershipId' })
   membership: Membership;
 
-  @Column({ type: 'varchar' })
+  @Column({ type: 'varchar', nullable: true })
   createdByUserId: string;
 
-  @ManyToOne(() => User)
+  @ManyToOne(() => User, { nullable: true })
   @JoinColumn({ name: 'createdByUserId' })
   createdByUser: User;
 

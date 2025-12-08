@@ -102,7 +102,10 @@ export class PromotionsService {
       return { valid: false, discount: 0, message: 'Código de promoción expirado' };
     }
 
+    // Validar máximo de usos
+    console.log(`[PromotionsService] Validando ${promotion.code}: maxUses=${promotion.maxUses}, usesCount=${promotion.usesCount}`);
     if (promotion.maxUses && promotion.usesCount >= promotion.maxUses) {
+      console.log(`[PromotionsService] ❌ Cupón agotado: ${promotion.code}`);
       return { valid: false, discount: 0, message: 'Código de promoción alcanzó el máximo de usos' };
     }
 
@@ -110,6 +113,7 @@ export class PromotionsService {
       return { valid: false, discount: 0, message: 'Este código requiere fecha de nacimiento' };
     }
 
+    console.log(`[PromotionsService] ✅ Cupón válido: ${promotion.code} - Descuento: ${promotion.discountPercentage}%`);
     return { 
       valid: true, 
       discount: promotion.discountPercentage,
@@ -122,9 +126,13 @@ export class PromotionsService {
       where: { code: code.toUpperCase() },
     });
 
+    console.log(`[PromotionsService.applyPromotion] Verificando ${code}: maxUses=${promotion?.maxUses}, usesCount=${promotion?.usesCount}`);
     if (promotion && (!promotion.maxUses || promotion.usesCount < promotion.maxUses)) {
       promotion.usesCount += 1;
       await this.promotionsRepository.save(promotion);
+      console.log(`[PromotionsService.applyPromotion] ✓ Incrementado ${code} a usesCount=${promotion.usesCount}`);
+    } else {
+      console.log(`[PromotionsService.applyPromotion] ❌ No se pudo aplicar ${code} - Cupón agotado o no encontrado`);
     }
   }
 

@@ -6,6 +6,7 @@ import * as bcrypt from 'bcrypt';
 import { v4 as uuidv4 } from 'uuid';
 import { User, UserRole } from '../../entities/user.entity';
 import { EmailService } from '../email-settings/email.service';
+import { GymSettingsService } from '../gym-settings/gym-settings.service';
 
 @Injectable()
 export class AuthService {
@@ -16,6 +17,7 @@ export class AuthService {
     private userRepository: Repository<User>,
     private jwtService: JwtService,
     private emailService: EmailService,
+    private gymSettingsService: GymSettingsService,
   ) {}
 
   async register(email: string, password: string, firstName: string, lastName: string, phone: string) {
@@ -192,13 +194,25 @@ export class AuthService {
 
     // Enviar email con la contraseña temporal
     try {
+      // Obtener nombre del gimnasio
+      let gymName = 'GYM Manager';
+      try {
+        const gymSettings = await this.gymSettingsService.getSettings();
+        if (gymSettings?.gymName) {
+          gymName = gymSettings.gymName;
+        }
+      } catch (gymError) {
+        this.logger.warn(`Failed to get gym settings: ${gymError.message}`);
+      }
+
       await this.emailService.sendEmail({
         recipientEmail: user.email,
         recipientName: `${user.firstName} ${user.lastName}`,
-        subject: 'Recupera tu contraseña - GYM Manager',
+        subject: `Recupera tu contraseña - ${gymName}`,
         htmlContent: this.generatePasswordResetEmailHTML(
           user.firstName,
           tempPassword,
+          gymName,
         ),
         plainTextContent: `Hola ${user.firstName},\n\nTu contraseña temporal es: ${tempPassword}\n\nPor favor, cámbiala en la pantalla de recuperación de contraseña.`,
       });
@@ -215,7 +229,7 @@ export class AuthService {
     };
   }
 
-  private generatePasswordResetEmailHTML(firstName: string, tempPassword: string): string {
+  private generatePasswordResetEmailHTML(firstName: string, tempPassword: string, gymName: string = 'GYM Manager'): string {
     return `
       <!DOCTYPE html>
       <html>
@@ -233,7 +247,7 @@ export class AuthService {
         <body>
           <div class="container">
             <div class="header">
-              <h2>🏋️ GYM Manager</h2>
+              <h2>🏋️ ${gymName}</h2>
               <p>Recuperación de Contraseña</p>
             </div>
             <div class="content">
@@ -259,7 +273,7 @@ export class AuthService {
               <p>Si no solicitaste esta recuperación, ignora este correo.</p>
               
               <div class="footer">
-                <p>© ${new Date().getFullYear()} GYM Manager. Todos los derechos reservados.</p>
+                <p>© ${new Date().getFullYear()} ${gymName}. Todos los derechos reservados.</p>
                 <p>Este es un correo automático, por favor no respondas.</p>
               </div>
             </div>

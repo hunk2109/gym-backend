@@ -6,9 +6,17 @@ import { Member } from '../../entities/member.entity';
 import { User } from '../../entities/user.entity';
 import { MemberMembership } from '../../entities/member-membership.entity';
 import { MembershipValidationService } from '../../services/membership-validation.service';
+import { EmailSettingsModule } from '../email-settings/email-settings.module';
+import { ModulesManagementModule } from '../modules-management/modules-management.module';
+import { GymSettingsModule } from '../gym-settings/gym-settings.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Member, User, MemberMembership])],
+  imports: [
+    TypeOrmModule.forFeature([Member, User, MemberMembership]),
+    EmailSettingsModule,
+    ModulesManagementModule,
+    GymSettingsModule,
+  ],
   controllers: [MembersController],
   providers: [MembersService, MembershipValidationService],
   exports: [MembersService, MembershipValidationService],

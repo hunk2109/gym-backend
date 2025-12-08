@@ -6,6 +6,7 @@ import { PaymentReminderService } from './payment-reminder.service';
 import { AutoEmailService } from './auto-email.service';
 import { BulkPromotionService } from './bulk-promotion.service';
 import { CouponsService } from '../coupons/coupons.service';
+import { GymSettingsService } from '../gym-settings/gym-settings.service';
 import {
   CreateEmailConfigDto,
   UpdateEmailConfigDto,
@@ -30,6 +31,7 @@ export class EmailSettingsController {
     private readonly autoEmailService: AutoEmailService,
     private readonly bulkPromotionService: BulkPromotionService,
     private readonly couponsService: CouponsService,
+    private readonly gymSettingsService: GymSettingsService,
   ) {}
 
   // ============ EMAIL CONFIG ENDPOINTS ============
@@ -114,17 +116,48 @@ export class EmailSettingsController {
 
   @Post('send-test')
   async sendTestEmail(@Body() dto: SendTestEmailDto) {
-    // Use provided content or fall back to defaults
-    const htmlContent = dto.htmlContent || 
-      '<h1>Test Email</h1><p>This is a test email from Gym Manager.</p>';
-    
-    const plainTextContent = dto.message || 
-      'Test Email - This is a test email from Gym Manager.';
+    // Obtener configuración del gimnasio
+    let gymName = 'Gym Manager';
+    try {
+      const gymSettings = await this.gymSettingsService.getSettings();
+      if (gymSettings?.gymName) {
+        gymName = gymSettings.gymName;
+      }
+    } catch (gymError) {
+      this.logger.warn(`Failed to get gym settings: ${gymError.message}`);
+    }
+
+    let htmlContent: string;
+    let plainTextContent: string;
+
+    // Si se proporciona contenido HTML, usarlo
+    if (dto.htmlContent) {
+      htmlContent = dto.htmlContent;
+      plainTextContent = dto.message || 'Test Email';
+    } else {
+      // Usar template por defecto con gym name
+      const { EmailTemplateBuilder } = require('./email-template.builder');
+      const gymConfig = {
+        gymName,
+        email: '',
+        phone: undefined,
+        address: undefined,
+        website: undefined,
+      };
+      
+      htmlContent = EmailTemplateBuilder.customTemplate(
+        'Test Email',
+        `This is a test email from ${gymName}.`,
+        'View More',
+        gymConfig
+      );
+      plainTextContent = `Test Email - This is a test email from ${gymName}.`;
+    }
 
     return this.emailService.sendEmail({
       recipientEmail: dto.recipientEmail,
       recipientName: dto.recipientName,
-      subject: dto.subject || 'Test Email - Gym Manager',
+      subject: dto.subject || `Test Email - ${gymName}`,
       htmlContent: htmlContent,
       plainTextContent: plainTextContent,
     });

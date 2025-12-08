@@ -1,18 +1,26 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Like } from 'typeorm';
 import { v4 as uuidv4 } from 'uuid';
 import { Member } from '../../entities/member.entity';
 import { User } from '../../entities/user.entity';
 import { CreateMemberDto, UpdateMemberDto } from './dto/create-member.dto';
+import { EmailService } from '../email-settings/email.service';
+import { ModulesManagementService } from '../modules-management/modules-management.service';
+import { GymSettingsService } from '../gym-settings/gym-settings.service';
 
 @Injectable()
 export class MembersService {
+  private readonly logger = new Logger(MembersService.name);
+
   constructor(
     @InjectRepository(Member)
     private memberRepository: Repository<Member>,
     @InjectRepository(User)
     private userRepository: Repository<User>,
+    private emailService: EmailService,
+    private modulesManagementService: ModulesManagementService,
+    private gymSettingsService: GymSettingsService,
   ) {}
 
   async create(createMemberDto: CreateMemberDto): Promise<Member> {
@@ -40,7 +48,109 @@ export class MembersService {
       joinDate: createMemberDto.joinDate || new Date(),
     });
 
-    return this.memberRepository.save(member);
+    const savedMember = await this.memberRepository.save(member);
+
+    // Enviar email de bienvenida si está habilitado en configuración
+    try {
+      const sendWelcomeEmail = await this.modulesManagementService.getModuleSetting(
+        'memberships',
+        'sendWelcomeEmailToMembers',
+      );
+
+      if (!sendWelcomeEmail) {
+        this.logger.log(`Welcome email disabled for members, skipping email for ${user.email}`);
+        return savedMember;
+      }
+    } catch (settingError) {
+      this.logger.warn(`Failed to check email setting: ${settingError.message}, proceeding with email`);
+    }
+
+    // Enviar email de bienvenida
+    try {
+      // Obtener nombre del gimnasio
+      let gymName = 'GYM Manager';
+      try {
+        const gymSettings = await this.gymSettingsService.getSettings();
+        if (gymSettings?.gymName) {
+          gymName = gymSettings.gymName;
+        }
+      } catch (gymError) {
+        this.logger.warn(`Failed to get gym settings: ${gymError.message}, using default gym name`);
+      }
+
+      await this.emailService.sendEmail({
+        recipientEmail: user.email,
+        recipientName: `${user.firstName} ${user.lastName}`,
+        subject: `¡Bienvenido a ${gymName}! - Membresía`,
+        htmlContent: this.generateMemberWelcomeEmailHTML(
+          user.firstName,
+          user.email,
+          gymName,
+        ),
+        plainTextContent: `Hola ${user.firstName},\n\nTe has registrado exitosamente como miembro en ${gymName}.\n\nPuedes acceder con tu email y contraseña que estableciste durante el registro.\n\nBienvenido al gimnasio!`,
+      });
+
+      this.logger.log(`Welcome email sent to ${user.email}`);
+    } catch (emailError) {
+      this.logger.error(`Failed to send welcome email to ${user.email}`, emailError);
+      // No fallar la operación si el email no se envía
+    }
+
+    return savedMember;
+  }
+
+  private generateMemberWelcomeEmailHTML(firstName: string, email: string, gymName: string = 'GYM Manager'): string {
+    return `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <style>
+            body { font-family: Arial, sans-serif; }
+            .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+            .header { background-color: #007bff; color: white; padding: 20px; border-radius: 5px 5px 0 0; text-align: center; }
+            .content { background-color: #f8f9fa; padding: 20px; border-radius: 0 0 5px 5px; }
+            .welcome-box { background-color: #d1ecf1; border: 1px solid #bee5eb; padding: 15px; margin: 20px 0; border-radius: 5px; }
+            .info-item { margin: 10px 0; }
+            .label { font-weight: bold; color: #333; }
+            .footer { margin-top: 30px; padding-top: 20px; border-top: 1px solid #ddd; text-align: center; font-size: 12px; color: #666; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1>¡Bienvenido a ${gymName}!</h1>
+            </div>
+            <div class="content">
+              <p>Hola <strong>${firstName}</strong>,</p>
+              <p>Nos alegra tenerte como parte de nuestra comunidad de gimnasio.</p>
+              
+              <div class="welcome-box">
+                <p><strong>✅ Tu cuenta ha sido creada exitosamente</strong></p>
+                <div class="info-item">
+                  <div class="label">📧 Email:</div>
+                  <div>${email}</div>
+                </div>
+              </div>
+              
+              <p><strong>🚀 Próximos pasos:</strong></p>
+              <ol>
+                <li>Descarga la aplicación GYM Manager desde tu tienda de apps</li>
+                <li>Inicia sesión con tu email y contraseña</li>
+                <li>Completa tu perfil de membresía</li>
+                <li>¡Comienza tu viaje de fitness!</li>
+              </ol>
+              
+              <p>Si tienes alguna pregunta o necesitas asistencia, por favor contacta a nuestro equipo.</p>
+              
+              <div class="footer">
+                <p>© ${new Date().getFullYear()} ${gymName}. Todos los derechos reservados.</p>
+                <p>Este es un correo automático, por favor no respondas.</p>
+              </div>
+            </div>
+          </div>
+        </body>
+      </html>
+    `;
   }
 
   async findAll(page: number = 1, limit: number = 10): Promise<{ data: any[]; pagination: any }> {

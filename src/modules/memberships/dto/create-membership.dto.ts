@@ -96,6 +96,18 @@ export class RenewMembershipDto {
   @IsOptional()
   @IsDate()
   paymentDate?: Date;
+
+  @IsOptional()
+  @IsString()
+  promotionCode?: string;
+
+  @IsOptional()
+  @IsNumber()
+  discountPercentage?: number;
+
+  @IsOptional()
+  @IsString()
+  discountReason?: string;
 }
 
 export class MembershipResponseDto {

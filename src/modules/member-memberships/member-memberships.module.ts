@@ -7,11 +7,13 @@ import { Member } from '../../entities/member.entity';
 import { Membership } from '../../entities/membership.entity';
 import { Payment } from '../../entities/payment.entity';
 import { PromotionsModule } from '../promotions/promotions.module';
+import { EmailSettingsModule } from '../email-settings/email-settings.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([MemberMembership, Member, Membership, Payment]),
     PromotionsModule,
+    EmailSettingsModule,
   ],
   controllers: [MemberMembershipsController],
   providers: [MemberMembershipsService],

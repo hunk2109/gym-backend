@@ -8,6 +8,7 @@ import { Payment, PaymentMethod, PaymentType, PaymentStatus } from '../../entiti
 import { CreateMemberMembershipDto } from './dto/create-member-membership.dto';
 import { v4 as uuidv4 } from 'uuid';
 import { PromotionsService } from '../promotions/promotions.service';
+import { EmailService } from '../email-settings/email.service';
 
 @Injectable()
 export class MemberMembershipsService {
@@ -21,6 +22,7 @@ export class MemberMembershipsService {
     @InjectRepository(Payment)
     private readonly paymentRepository: Repository<Payment>,
     private readonly promotionsService: PromotionsService,
+    private readonly emailService: EmailService,
   ) {}
 
   /**
@@ -221,6 +223,20 @@ export class MemberMembershipsService {
 
     const savedMemberMembership = await this.memberMembershipRepository.save(memberMembership);
 
+    // Aplicar la promoción (incrementar contador de usos) si fue usada
+    console.log(`[MemberMembershipsService] ✓ SavedMembership ID: ${savedMemberMembership.id}`);
+    console.log(`[MemberMembershipsService] appliedPromotionCode ANTES de incrementar: "${appliedPromotionCode}"`);
+    console.log(`[MemberMembershipsService] appliedPromotionCode es null: ${appliedPromotionCode === null}`);
+    console.log(`[MemberMembershipsService] appliedPromotionCode está vacío: ${!appliedPromotionCode}`);
+    
+    if (appliedPromotionCode) {
+      console.log(`[MemberMembershipsService] ✓ Incrementando contador para cupón: "${appliedPromotionCode}"`);
+      await this.promotionsService.applyPromotion(appliedPromotionCode);
+      console.log(`[MemberMembershipsService] ✓ Promoción "${appliedPromotionCode}" aplicada - Contador incrementado`);
+    } else {
+      console.log(`[MemberMembershipsService] ⚠️  NO se incrementó contador - appliedPromotionCode está vacío`);
+    }
+
     // Crear registro en tabla Payment para el historial (con el monto CORRECTO incluyendo descuentos)
     const payment = new Payment();
     payment.id = uuidv4();
@@ -235,6 +251,90 @@ export class MemberMembershipsService {
 
     await this.paymentRepository.save(payment);
     console.log(`[MemberMembershipsService] ✓ Pago registrado: ${payment.id} - Monto: ${payment.amount} - Estado: ${payment.status}`);
+
+    // Enviar email de confirmación de membresía al miembro
+    try {
+      console.log(`[MemberMembershipsService] 📧 Iniciando envío de email de membresía...`);
+      
+      const memberWithUser = await this.memberRepository.findOne({
+        where: { id: memberId },
+        relations: ['user'],
+      });
+
+      console.log(`[MemberMembershipsService] 📧 Miembro obtenido:`, memberWithUser ? `SÍ (${memberWithUser.id})` : `NO`);
+      
+      if (memberWithUser && memberWithUser.user && memberWithUser.user.email) {
+        const memberEmail = memberWithUser.user.email;
+        const memberName = memberWithUser.user.firstName || memberWithUser.user.email;
+        const membershipName = membership.name;
+        const startDateFormatted = startDate.toLocaleDateString('es-ES');
+        const endDateFormatted = endDate.toLocaleDateString('es-ES');
+        const discountText = finalDiscountPercentage > 0 
+          ? `\n<p><strong>Descuento aplicado:</strong> ${finalDiscountPercentage}% (${appliedPromotionCode ? `Cupón: ${appliedPromotionCode}` : 'Descuento manual'})</p>`
+          : '';
+
+        const htmlContent = `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2>¡Bienvenido a tu membresía!</h2>
+            <p>Hola <strong>${memberName}</strong>,</p>
+            
+            <p>Tu membresía ha sido asignada exitosamente. Aquí están los detalles:</p>
+            
+            <table style="border-collapse: collapse; width: 100%; max-width: 600px;">
+              <tr style="background-color: #f5f5f5;">
+                <td style="padding: 10px; border: 1px solid #ddd;"><strong>Plan de Membresía</strong></td>
+                <td style="padding: 10px; border: 1px solid #ddd;">${membershipName}</td>
+              </tr>
+              <tr>
+                <td style="padding: 10px; border: 1px solid #ddd;"><strong>Fecha de Inicio</strong></td>
+                <td style="padding: 10px; border: 1px solid #ddd;">${startDateFormatted}</td>
+              </tr>
+              <tr style="background-color: #f5f5f5;">
+                <td style="padding: 10px; border: 1px solid #ddd;"><strong>Fecha de Vencimiento</strong></td>
+                <td style="padding: 10px; border: 1px solid #ddd;">${endDateFormatted}</td>
+              </tr>
+              <tr>
+                <td style="padding: 10px; border: 1px solid #ddd;"><strong>Monto a Pagar</strong></td>
+                <td style="padding: 10px; border: 1px solid #ddd;">RD$ ${parseFloat(memberMembership.amountPaid as any).toFixed(2)}</td>
+              </tr>
+              ${discountText ? `<tr style="background-color: #f5f5f5;">
+                <td colspan="2" style="padding: 10px; border: 1px solid #ddd;">
+                  <strong>Descuento:</strong> ${finalDiscountPercentage}% ${appliedPromotionCode ? `(Cupón: <strong>${appliedPromotionCode}</strong>)` : ''}
+                </td>
+              </tr>` : ''}
+            </table>
+            
+            <p style="margin-top: 20px;">Si tienes alguna pregunta sobre tu membresía, por favor contacta a nuestro equipo.</p>
+            
+            <p>¡Gracias por confiar en nosotros!</p>
+          </div>
+        `;
+
+        console.log(`[MemberMembershipsService] 📧 Enviando email a: ${memberEmail}`);
+        
+        const emailResult = await this.emailService.sendEmail({
+          recipientEmail: memberEmail,
+          recipientName: memberName,
+          subject: `✓ Membresía Asignada - ${membershipName}`,
+          htmlContent,
+        });
+        
+        console.log(`[MemberMembershipsService] ✅ Email enviado exitosamente. Log ID: ${emailResult?.id}`);
+      } else {
+        console.log(`[MemberMembershipsService] ⚠️  No se pudo enviar email - Usuario sin email o no encontrado`);
+        console.log(`[MemberMembershipsService] - memberWithUser existe: ${!!memberWithUser}`);
+        if (memberWithUser) {
+          console.log(`[MemberMembershipsService] - user existe: ${!!memberWithUser.user}`);
+          if (memberWithUser.user) {
+            console.log(`[MemberMembershipsService] - email existe: ${!!memberWithUser.user.email}`);
+          }
+        }
+      }
+    } catch (emailError) {
+      console.error(`[MemberMembershipsService] ❌ Error al enviar email de membresía:`, emailError.message);
+      console.error(`[MemberMembershipsService] Stack:`, (emailError as any)?.stack);
+      // No bloquear el flujo si hay error en el email
+    }
 
     return savedMemberMembership;
   }
@@ -327,6 +427,7 @@ export class MemberMembershipsService {
   ): Promise<MemberMembership> {
     const memberMembership = await this.memberMembershipRepository.findOne({
       where: { id: memberMembershipId },
+      relations: ['member', 'membership'],
     });
 
     if (!memberMembership) {
@@ -350,6 +451,74 @@ export class MemberMembershipsService {
       },
     );
     console.log(`[MemberMembershipsService] ✓ Payment actualizado a COMPLETED para memberMembershipId: ${memberMembershipId}`);
+
+    // Enviar email de confirmación de pago
+    try {
+      const memberWithUser = await this.memberRepository.findOne({
+        where: { id: memberMembership.memberId },
+        relations: ['user'],
+      });
+
+      if (memberWithUser?.user?.email) {
+        const memberName = memberWithUser.user.firstName || 'Miembro';
+        const memberEmail = memberWithUser.user.email;
+        const membershipName = memberMembership.membership?.name || 'Membresía';
+        const paymentDateFormatted = new Date(paymentDate).toLocaleDateString('es-DO', {
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric',
+        });
+
+        console.log(`[MemberMembershipsService] 📧 Iniciando envío de email de pago...`);
+        console.log(`[MemberMembershipsService] 📧 Enviando email a: ${memberEmail}`);
+
+        const htmlContent = `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #28a745;">✓ ¡Pago Confirmado!</h2>
+            <p>Hola <strong>${memberName}</strong>,</p>
+            <p>Nos complace confirmar que tu pago ha sido procesado exitosamente.</p>
+            
+            <table style="border-collapse: collapse; width: 100%; margin: 20px 0; border: 1px solid #ddd;">
+              <tr style="background-color: #f8f9fa;">
+                <td style="padding: 12px; border: 1px solid #ddd; font-weight: bold;">Plan de Membresía</td>
+                <td style="padding: 12px; border: 1px solid #ddd;">${membershipName}</td>
+              </tr>
+              <tr>
+                <td style="padding: 12px; border: 1px solid #ddd; font-weight: bold;">Monto Pagado</td>
+                <td style="padding: 12px; border: 1px solid #ddd;">RD$ ${amountPaid.toFixed(2)}</td>
+              </tr>
+              <tr style="background-color: #f8f9fa;">
+                <td style="padding: 12px; border: 1px solid #ddd; font-weight: bold;">Fecha de Pago</td>
+                <td style="padding: 12px; border: 1px solid #ddd;">${paymentDateFormatted}</td>
+              </tr>
+              <tr>
+                <td style="padding: 12px; border: 1px solid #ddd; font-weight: bold;">Estado</td>
+                <td style="padding: 12px; border: 1px solid #ddd; color: #28a745; font-weight: bold;">✓ PAGADO</td>
+              </tr>
+            </table>
+
+            <p>Si tienes alguna pregunta o necesitas más información, no dudes en contactarnos.</p>
+            <p style="color: #666; font-size: 12px; margin-top: 20px;">
+              Este es un correo automático. Por favor no responder a este correo.
+            </p>
+          </div>
+        `;
+
+        const emailResult = await this.emailService.sendEmail({
+          recipientEmail: memberEmail,
+          recipientName: memberName,
+          subject: `✓ Pago Confirmado - ${membershipName}`,
+          htmlContent,
+        });
+
+        if (emailResult?.id) {
+          console.log(`[MemberMembershipsService] ✅ Email de pago enviado exitosamente. Log ID: ${emailResult.id}`);
+        }
+      }
+    } catch (error) {
+      console.error(`[MemberMembershipsService] ❌ Error al enviar email de pago:`, error);
+      // No lanzar error, solo registrar en logs para que el pago no se bloquee
+    }
 
     return saved;
   }

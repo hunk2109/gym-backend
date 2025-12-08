@@ -14,6 +14,9 @@ export class ModuleSettings {
   @Column({ type: 'text', nullable: true })
   description: string;
 
+  @Column({ type: 'json', nullable: true })
+  settings: Record<string, any>;
+
   @CreateDateColumn()
   createdAt: Date;
 

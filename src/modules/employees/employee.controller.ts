@@ -11,6 +11,7 @@ import {
   HttpStatus,
   Query,
   Request,
+  BadRequestException,
 } from '@nestjs/common';
 import { EmployeeService } from './employee.service';
 import { CreateEmployeeDto, UpdateEmployeeDto } from './dto/employee.dto';
@@ -67,7 +68,16 @@ export class EmployeeController {
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.NO_CONTENT)
   async delete(@Param('id') id: string, @Request() req: any) {
-    return this.employeeService.delete(id, req.user);
+    try {
+      return await this.employeeService.delete(id, req.user);
+    } catch (error) {
+      if (error.message?.includes('foreign key constraint')) {
+        throw new BadRequestException(
+          'No se puede eliminar el empleado porque tiene registros asociados (nóminas, auditoría, etc.). El empleado ha sido desactivado.',
+        );
+      }
+      throw error;
+    }
   }
 
   @Put(':id/toggle-active')

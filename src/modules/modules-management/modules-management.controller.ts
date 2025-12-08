@@ -1,4 +1,4 @@
-import { Controller, Get, Put, Post, Param, Body, UseGuards, Req, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { Controller, Get, Put, Post, Param, Body, UseGuards, Req, ForbiddenException, NotFoundException, Query } from '@nestjs/common';
 import { ModulesManagementService } from './modules-management.service';
 import { UpdateModuleSettingsDto } from './dto/module-settings.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -42,6 +42,28 @@ export class ModulesManagementController {
       throw new ForbiddenException('Only admins can disable all modules');
     }
     return this.modulesService.disableAllModules();
+  }
+
+  @Get('settings/:moduleName/:settingKey')
+  async getModuleSetting(
+    @Param('moduleName') moduleName: string,
+    @Param('settingKey') settingKey: string,
+  ): Promise<any> {
+    return this.modulesService.getModuleSetting(moduleName, settingKey);
+  }
+
+  @Put('settings/:moduleName/:settingKey')
+  async updateModuleSetting(
+    @Param('moduleName') moduleName: string,
+    @Param('settingKey') settingKey: string,
+    @Body() body: { value: any },
+    @Req() req: any,
+  ): Promise<ModuleSettings> {
+    // Verificar que sea admin
+    if (req.user.role !== 'admin') {
+      throw new ForbiddenException('Only admins can update module settings');
+    }
+    return this.modulesService.updateModuleSetting(moduleName, settingKey, body.value);
   }
 
   @Get(':moduleName')

@@ -8,6 +8,7 @@ import { EmailService } from './email.service';
 import { Member } from '../../entities/member.entity';
 import { MemberMembership } from '../../entities/member-membership.entity';
 import { GymSettingsService } from '../gym-settings/gym-settings.service';
+import { CronLoggingService } from './cron-logging.service';
 
 @Injectable()
 export class PaymentReminderService {
@@ -22,6 +23,7 @@ export class PaymentReminderService {
     private memberMembershipRepository: Repository<MemberMembership>,
     private emailService: EmailService,
     private gymSettingsService: GymSettingsService,
+    private cronLoggingService: CronLoggingService,
   ) {}
 
   async createReminder(dto: CreatePaymentReminderDto): Promise<PaymentReminder> {
@@ -84,6 +86,12 @@ export class PaymentReminderService {
    */
   @Cron(CronExpression.EVERY_30_MINUTES)
   async sendPaymentReminders() {
+    const startTime = Date.now();
+    const logId = await this.cronLoggingService.logCronStart(
+      'PaymentReminderJob',
+      'Sending payment reminders every 30 minutes',
+    );
+
     try {
       this.logger.log('Iniciando proceso de envío de recordatorios de pago...');
 
@@ -95,17 +103,27 @@ export class PaymentReminderService {
         relations: ['member'],
       });
 
+      let remindersSent = 0;
       for (const reminder of reminders) {
-        await this.processReminder(reminder);
+        const sent = await this.processReminder(reminder);
+        if (sent) remindersSent++;
       }
 
-      this.logger.log(`Procesados ${reminders.length} recordatorios de pago`);
+      const executionTimeMs = Date.now() - startTime;
+      await this.cronLoggingService.logCronSuccess(logId, remindersSent, executionTimeMs);
+      this.logger.log(`Procesados ${remindersSent} recordatorios de pago en ${executionTimeMs}ms`);
     } catch (error) {
+      const executionTimeMs = Date.now() - startTime;
+      await this.cronLoggingService.logCronError(
+        logId,
+        error.message || 'Unknown error',
+        executionTimeMs,
+      );
       this.logger.error('Error sending payment reminders', error);
     }
   }
 
-  private async processReminder(reminder: PaymentReminder) {
+  private async processReminder(reminder: PaymentReminder): Promise<boolean> {
     try {
       // Obtener la membresía activa del miembro
       const memberMembership = await this.memberMembershipRepository.findOne({
@@ -116,7 +134,7 @@ export class PaymentReminderService {
 
       if (!memberMembership) {
         this.logger.warn(`No active membership found for member ${reminder.memberId}`);
-        return;
+        return false;
       }
 
       // Calcular si debe enviarse el recordatorio
@@ -124,7 +142,7 @@ export class PaymentReminderService {
       if (!shouldSend) {
         reminder.nextSendAt = this.calculateNextSendDate(reminder.frequency);
         await this.reminderRepository.save(reminder);
-        return;
+        return false;
       }
 
       // Preparar datos del email
@@ -157,6 +175,7 @@ export class PaymentReminderService {
 
       await this.reminderRepository.save(reminder);
       this.logger.log(`Payment reminder sent to ${memberUser.email}`);
+      return true;
     } catch (error) {
       this.logger.error(`Error processing reminder ${reminder.id}:`, error);
 
@@ -172,6 +191,7 @@ export class PaymentReminderService {
       }
 
       await this.reminderRepository.save(reminder);
+      return false;
     }
   }
 

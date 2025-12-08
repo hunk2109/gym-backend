@@ -24,9 +24,13 @@ export class GymSettingsService {
   }
 
   async getSettings(): Promise<GymSettings> {
-    let settings = await this.gymSettingsRepository.findOne({
-      where: {},
+    // Obtener el registro más reciente (últimu actualizado)
+    const allSettings = await this.gymSettingsRepository.find({
+      order: { updatedAt: 'DESC' },
+      take: 1,
     });
+
+    let settings = allSettings.length > 0 ? allSettings[0] : null;
 
     if (!settings) {
       this.logger.log('[GET] No gym settings found, creating default...');

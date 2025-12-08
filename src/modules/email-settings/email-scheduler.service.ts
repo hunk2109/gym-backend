@@ -8,6 +8,8 @@ import { User } from '../../entities/user.entity';
 import { EmailService } from './email.service';
 import { EmailTemplate, EmailTriggerType } from './entities';
 import { SendEmailDto } from './dto';
+import { GymSettingsService } from '../gym-settings/gym-settings.service';
+import { CronLoggingService } from './cron-logging.service';
 
 @Injectable()
 export class EmailSchedulerService {
@@ -24,6 +26,8 @@ export class EmailSchedulerService {
     private emailTemplateRepository: Repository<EmailTemplate>,
     @Inject(forwardRef(() => EmailService))
     private emailService: EmailService,
+    private gymSettingsService: GymSettingsService,
+    private cronLoggingService: CronLoggingService,
   ) {}
 
   /**
@@ -32,14 +36,21 @@ export class EmailSchedulerService {
    */
   @Cron(CronExpression.EVERY_DAY_AT_8AM)
   async sendBirthdayEmails() {
-    this.logger.log('Starting birthday email scheduler...');
+    const startTime = Date.now();
+    const logId = await this.cronLoggingService.logCronStart(
+      'BirthdayEmailScheduler',
+      'Sending birthday emails at 8 AM',
+    );
 
     try {
+      this.logger.log('Starting birthday email scheduler...');
+
       const today = new Date();
       const birthdays = await this.getBirthdaysToday();
 
       if (birthdays.length === 0) {
         this.logger.log('No birthdays today');
+        await this.cronLoggingService.logCronSuccess(logId, 0, Date.now() - startTime);
         return;
       }
 
@@ -49,9 +60,22 @@ export class EmailSchedulerService {
 
       if (!template) {
         this.logger.warn('Birthday email template not configured');
+        await this.cronLoggingService.logCronSuccess(logId, 0, Date.now() - startTime);
         return;
       }
 
+      // Obtener nombre del gimnasio
+      let gymName = 'GYM Manager';
+      try {
+        const gymSettings = await this.gymSettingsService.getSettings();
+        if (gymSettings?.gymName) {
+          gymName = gymSettings.gymName;
+        }
+      } catch (gymError) {
+        this.logger.warn(`Failed to get gym settings: ${gymError.message}`);
+      }
+
+      let emailsSent = 0;
       for (const member of birthdays) {
         try {
           const user = member.user;
@@ -60,6 +84,7 @@ export class EmailSchedulerService {
             lastName: user.lastName,
             email: user.email,
             membershipType: member.memberships?.[0]?.membership?.name || 'Miembro',
+            gymName: gymName,
           };
 
           // Generar código de descuento si está configurado en la plantilla
@@ -77,13 +102,22 @@ export class EmailSchedulerService {
           });
 
           this.logger.log(`Birthday email sent to ${user.email}`);
+          emailsSent++;
         } catch (error) {
           this.logger.error(`Failed to send birthday email to member ${member.id}`, error);
         }
       }
 
-      this.logger.log(`Sent ${birthdays.length} birthday emails`);
+      const executionTimeMs = Date.now() - startTime;
+      await this.cronLoggingService.logCronSuccess(logId, emailsSent, executionTimeMs);
+      this.logger.log(`Sent ${emailsSent} birthday emails in ${executionTimeMs}ms`);
     } catch (error) {
+      const executionTimeMs = Date.now() - startTime;
+      await this.cronLoggingService.logCronError(
+        logId,
+        error.message || 'Unknown error',
+        executionTimeMs,
+      );
       this.logger.error('Error in birthday email scheduler', error);
     }
   }
@@ -94,13 +128,20 @@ export class EmailSchedulerService {
    */
   @Cron(CronExpression.EVERY_DAY_AT_9AM)
   async sendAnniversaryEmails() {
-    this.logger.log('Starting anniversary email scheduler...');
+    const startTime = Date.now();
+    const logId = await this.cronLoggingService.logCronStart(
+      'AnniversaryEmailScheduler',
+      'Sending anniversary emails at 9 AM',
+    );
 
     try {
+      this.logger.log('Starting anniversary email scheduler...');
+
       const anniversaries = await this.getAnniversariesToday();
 
       if (anniversaries.length === 0) {
         this.logger.log('No membership anniversaries today');
+        await this.cronLoggingService.logCronSuccess(logId, 0, Date.now() - startTime);
         return;
       }
 
@@ -110,9 +151,22 @@ export class EmailSchedulerService {
 
       if (!template) {
         this.logger.warn('Anniversary email template not configured');
+        await this.cronLoggingService.logCronSuccess(logId, 0, Date.now() - startTime);
         return;
       }
 
+      // Obtener nombre del gimnasio
+      let gymName = 'GYM Manager';
+      try {
+        const gymSettings = await this.gymSettingsService.getSettings();
+        if (gymSettings?.gymName) {
+          gymName = gymSettings.gymName;
+        }
+      } catch (gymError) {
+        this.logger.warn(`Failed to get gym settings: ${gymError.message}`);
+      }
+
+      let emailsSent = 0;
       for (const membership of anniversaries) {
         try {
           const member = membership.member;
@@ -125,6 +179,7 @@ export class EmailSchedulerService {
             email: user.email,
             membershipType: membership.membership.name,
             years: yearsOfMembership.toString(),
+            gymName: gymName,
           };
 
           // Generar código de descuento si está configurado
@@ -142,13 +197,22 @@ export class EmailSchedulerService {
           });
 
           this.logger.log(`Anniversary email sent to ${user.email}`);
+          emailsSent++;
         } catch (error) {
           this.logger.error(`Failed to send anniversary email to member ${membership.member.id}`, error);
         }
       }
 
-      this.logger.log(`Sent ${anniversaries.length} anniversary emails`);
+      const executionTimeMs = Date.now() - startTime;
+      await this.cronLoggingService.logCronSuccess(logId, emailsSent, executionTimeMs);
+      this.logger.log(`Sent ${emailsSent} anniversary emails in ${executionTimeMs}ms`);
     } catch (error) {
+      const executionTimeMs = Date.now() - startTime;
+      await this.cronLoggingService.logCronError(
+        logId,
+        error.message || 'Unknown error',
+        executionTimeMs,
+      );
       this.logger.error('Error in anniversary email scheduler', error);
     }
   }

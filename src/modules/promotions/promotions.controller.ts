@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Patch, Delete, Param, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Delete, Param, UseGuards, HttpCode, HttpStatus } from '@nestjs/common';
 import { PromotionsService } from './promotions.service';
 import { CreatePromotionDto, UpdatePromotionDto, ValidatePromotionDto } from './dtos/promotion.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -29,6 +29,13 @@ export class PromotionsController {
     return this.promotionsService.findActive();
   }
 
+  @Post('validate')
+  @HttpCode(HttpStatus.OK)
+  @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO)
+  async validatePromoCode(@Body() validateDto: ValidatePromotionDto) {
+    return this.promotionsService.validatePromoCode(validateDto);
+  }
+
   @Get(':id')
   @Roles(UserRole.ADMIN, UserRole.ENCARGADO)
   async findOne(@Param('id') id: string) {
@@ -48,12 +55,6 @@ export class PromotionsController {
   @Roles(UserRole.ADMIN)
   async remove(@Param('id') id: string) {
     return this.promotionsService.remove(id);
-  }
-
-  @Post('validate')
-  @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO)
-  async validatePromoCode(@Body() validateDto: ValidatePromotionDto) {
-    return this.promotionsService.validatePromoCode(validateDto);
   }
 
   @Patch(':id/toggle-active')

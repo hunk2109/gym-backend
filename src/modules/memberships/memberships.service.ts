@@ -7,6 +7,8 @@ import { MemberMembership } from '../../entities/member-membership.entity';
 import { Member } from '../../entities/member.entity';
 import { Payment, PaymentStatus, PaymentMethod, PaymentType } from '../../entities/payment.entity';
 import { CreateMembershipDto, UpdateMembershipDto, AssignMembershipDto, RenewMembershipDto } from './dto/create-membership.dto';
+import { PromotionsService } from '../promotions/promotions.service';
+import { EmailService } from '../email-settings/email.service';
 
 @Injectable()
 export class MembershipsService {
@@ -19,6 +21,8 @@ export class MembershipsService {
     private memberRepository: Repository<Member>,
     @InjectRepository(Payment)
     private paymentRepository: Repository<Payment>,
+    private promotionsService: PromotionsService,
+    private emailService: EmailService,
   ) {}
 
   // Membership CRUD
@@ -219,18 +223,65 @@ export class MembershipsService {
     const newEndDate = new Date(newStartDate);
     newEndDate.setMonth(newEndDate.getMonth() + currentMembership.membership.durationMonths);
 
+    let discountAmount = 0;
+    let appliedPromotionCode: string | null = null;
+    let appliedDiscountPercentage = 0;
+    
+    const membershipPrice = parseFloat(currentMembership.membership.price as any) || 0;
+
+    // Validar cupón si se proporciona
+    if (renewMembershipDto.promotionCode) {
+      try {
+        const validation = await this.promotionsService.validatePromoCode({
+          code: renewMembershipDto.promotionCode,
+        });
+
+        if (validation.valid) {
+          appliedDiscountPercentage = validation.discount;
+          discountAmount = (membershipPrice * appliedDiscountPercentage) / 100;
+          appliedPromotionCode = renewMembershipDto.promotionCode;
+          console.log(
+            `[MembershipsService] Cupón "${renewMembershipDto.promotionCode}" válido. Descuento: ${appliedDiscountPercentage}% = ${discountAmount}`,
+          );
+        } else {
+          throw new BadRequestException(validation.message || 'Cupón inválido o expirado');
+        }
+      } catch (error) {
+        if (error instanceof BadRequestException) {
+          throw error;
+        }
+        throw new BadRequestException('Error al validar el cupón de promoción');
+      }
+    }
+
+    const finalAmount = membershipPrice - discountAmount;
+    const finalAmountPaid = renewMembershipDto.amountPaid ?? finalAmount;
+
     const newMembership = this.memberMembershipRepository.create({
       id: uuidv4(),
       memberId: currentMembership.memberId,
       membershipId: currentMembership.membershipId,
       startDate: newStartDate,
       endDate: newEndDate,
-      amountPaid: renewMembershipDto.amountPaid,
-      paymentDate: renewMembershipDto.paymentDate,
+      amountPaid: finalAmountPaid as any,
+      paymentDate: renewMembershipDto.paymentDate as any,
+      paymentStatus: renewMembershipDto.amountPaid ? 'paid' : 'pending',
       isActive: true,
-    });
+      appliedPromotionCode: appliedPromotionCode,
+      discountAmount: discountAmount as any,
+      discountPercentage: appliedDiscountPercentage as any,
+      discountReason: renewMembershipDto.discountReason || null,
+    }) as MemberMembership;
 
-    return this.memberMembershipRepository.save(newMembership);
+    const savedNewMembership = await this.memberMembershipRepository.save(newMembership);
+
+    // Aplicar la promoción (incrementar contador de usos) si fue usada
+    if (appliedPromotionCode) {
+      await this.promotionsService.applyPromotion(appliedPromotionCode);
+      console.log(`[MembershipsService] ✓ Promoción "${appliedPromotionCode}" aplicada - Contador incrementado`);
+    }
+
+    return savedNewMembership;
   }
 
   async getMemberMembershipHistory(memberId: string, page: number = 1, limit: number = 10): Promise<{ data: MemberMembership[]; pagination: any }> {
@@ -354,7 +405,7 @@ export class MembershipsService {
   ): Promise<MemberMembership> {
     const membership = await this.memberMembershipRepository.findOne({
       where: { id: memberMembershipId },
-      relations: ['member'],
+      relations: ['member', 'membership'],
     });
 
     if (!membership) {
@@ -405,7 +456,72 @@ export class MembershipsService {
       await this.paymentRepository.save(payment);
     }
 
-    return this.memberMembershipRepository.save(membership);
+    const savedMembership = await this.memberMembershipRepository.save(membership);
+
+    // Enviar email de confirmación de pago
+    try {
+      console.log(`[MembershipsService] 📧 Iniciando envío de email de pago...`);
+      
+      const memberWithUser = await this.memberRepository.findOne({
+        where: { id: membership.memberId },
+        relations: ['user'],
+      });
+
+      if (memberWithUser && memberWithUser.user && memberWithUser.user.email) {
+        const memberEmail = memberWithUser.user.email;
+        const memberName = memberWithUser.user.firstName || memberWithUser.user.email;
+        const membershipName = membership.membership?.name || 'Tu Membresía';
+        const paymentDateFormatted = parsedPaymentDate.toLocaleDateString('es-ES');
+
+        const htmlContent = `
+          <h2>¡Pago Confirmado!</h2>
+          <p>Hola <strong>${memberName}</strong>,</p>
+          
+          <p>Tu pago ha sido recibido y procesado exitosamente. Aquí está el comprobante:</p>
+          
+          <table style="border-collapse: collapse; width: 100%; max-width: 600px;">
+            <tr style="background-color: #f5f5f5;">
+              <td style="padding: 10px; border: 1px solid #ddd;"><strong>Plan de Membresía</strong></td>
+              <td style="padding: 10px; border: 1px solid #ddd;">${membershipName}</td>
+            </tr>
+            <tr>
+              <td style="padding: 10px; border: 1px solid #ddd;"><strong>Monto Pagado</strong></td>
+              <td style="padding: 10px; border: 1px solid #ddd;">RD$ ${(amountPaid as any).toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+            </tr>
+            <tr style="background-color: #f5f5f5;">
+              <td style="padding: 10px; border: 1px solid #ddd;"><strong>Fecha de Pago</strong></td>
+              <td style="padding: 10px; border: 1px solid #ddd;">${paymentDateFormatted}</td>
+            </tr>
+            <tr>
+              <td style="padding: 10px; border: 1px solid #ddd;"><strong>Estado</strong></td>
+              <td style="padding: 10px; border: 1px solid #ddd;"><span style="color: green; font-weight: bold;">✓ PAGADO</span></td>
+            </tr>
+          </table>
+          
+          <p style="margin-top: 20px;">Tu membresía está activa y disponible para usar. Si tienes alguna pregunta, por favor contacta a nuestro equipo.</p>
+          
+          <p>¡Gracias por tu pago!</p>
+        `;
+
+        console.log(`[MembershipsService] 📧 Enviando email a: ${memberEmail}`);
+        
+        const emailResult = await this.emailService.sendEmail({
+          recipientEmail: memberEmail,
+          recipientName: memberName,
+          subject: `✓ Pago Confirmado - ${membershipName}`,
+          htmlContent,
+        });
+        
+        console.log(`[MembershipsService] ✅ Email de pago enviado exitosamente. Log ID: ${emailResult?.id}`);
+      } else {
+        console.log(`[MembershipsService] ⚠️  No se pudo enviar email - Usuario sin email o no encontrado`);
+      }
+    } catch (emailError) {
+      console.error(`[MembershipsService] ❌ Error al enviar email de pago:`, (emailError as any)?.message);
+      // No bloquear el flujo si hay error en el email
+    }
+
+    return savedMembership;
   }
 
   /**

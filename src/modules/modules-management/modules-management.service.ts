@@ -9,14 +9,14 @@ export class ModulesManagementService {
   private readonly logger = new Logger('ModulesManagementService');
 
   private readonly DEFAULT_MODULES = [
-    { moduleName: 'inventory', description: 'Gestión de Inventario' },
-    { moduleName: 'sales', description: 'Gestión de Ventas' },
-    { moduleName: 'memberships', description: 'Gestión de Membresías' },
-    { moduleName: 'employees', description: 'Gestión de Empleados' },
-    { moduleName: 'dashboard', description: 'Dashboard Principal' },
-    { moduleName: 'reports', description: 'Reportes' },
-    { moduleName: 'payments', description: 'Gestión de Pagos' },
-    { moduleName: 'audit_logs', description: 'Registros de Auditoría' },
+    { moduleName: 'inventory', description: 'Gestión de Inventario', settings: {} },
+    { moduleName: 'sales', description: 'Gestión de Ventas', settings: {} },
+    { moduleName: 'memberships', description: 'Gestión de Membresías', settings: { sendWelcomeEmailToMembers: false } },
+    { moduleName: 'employees', description: 'Gestión de Empleados', settings: { sendWelcomeEmailToEmployees: true } },
+    { moduleName: 'dashboard', description: 'Dashboard Principal', settings: {} },
+    { moduleName: 'reports', description: 'Reportes', settings: {} },
+    { moduleName: 'payments', description: 'Gestión de Pagos', settings: {} },
+    { moduleName: 'audit_logs', description: 'Registros de Auditoría', settings: {} },
   ];
 
   constructor(
@@ -32,8 +32,10 @@ export class ModulesManagementService {
       
       const modules = this.DEFAULT_MODULES.map(module =>
         this.moduleSettingsRepository.create({
-          ...module,
+          moduleName: module.moduleName,
+          description: module.description,
           isEnabled: true,
+          settings: module.settings || {},
         }),
       );
 
@@ -114,5 +116,36 @@ export class ModulesManagementService {
       this.logger.error(`Error disabling all modules: ${error.message}`);
       throw new BadRequestException('Error disabling all modules');
     }
+  }
+
+  async getModuleSetting(moduleName: string, settingKey: string): Promise<any> {
+    const module = await this.getModule(moduleName);
+    
+    if (!module) {
+      throw new NotFoundException(`Module ${moduleName} not found`);
+    }
+
+    if (!module.settings) {
+      return undefined;
+    }
+
+    return module.settings[settingKey];
+  }
+
+  async updateModuleSetting(moduleName: string, settingKey: string, value: any): Promise<ModuleSettings> {
+    const module = await this.getModule(moduleName);
+    
+    if (!module) {
+      throw new NotFoundException(`Module ${moduleName} not found`);
+    }
+
+    if (!module.settings) {
+      module.settings = {};
+    }
+
+    module.settings[settingKey] = value;
+    this.logger.log(`Module ${moduleName} setting ${settingKey} updated to ${value}`);
+    
+    return this.moduleSettingsRepository.save(module);
   }
 }

@@ -12,6 +12,7 @@ import { EmailTemplateBuilder, GymConfig } from './email-template.builder';
 import { GymSettingsService } from '../gym-settings/gym-settings.service';
 import { CouponsService } from '../coupons/coupons.service';
 import { EmailDuplicateCheckerService } from './email-duplicate-checker.service';
+import { CronLoggingService } from './cron-logging.service';
 
 @Injectable()
 export class AutoEmailService {
@@ -33,6 +34,7 @@ export class AutoEmailService {
     private gymSettingsService: GymSettingsService,
     private couponsService: CouponsService,
     private duplicateChecker: EmailDuplicateCheckerService,
+    private cronLoggingService: CronLoggingService,
   ) {}
 
   /**
@@ -41,6 +43,12 @@ export class AutoEmailService {
    */
   @Cron('*/30 * * * *')
   async processAutoEmails() {
+    const startTime = Date.now();
+    const logId = await this.cronLoggingService.logCronStart(
+      'AutoEmailJob',
+      'Sending automatic emails every 30 minutes',
+    );
+
     try {
       this.logger.log('🤖 Iniciando proceso de emails automáticos...');
 
@@ -54,16 +62,33 @@ export class AutoEmailService {
         website: gymSettings?.website,
       };
 
-      // Ejecutar todos los procesos
-      await Promise.all([
+      // Ejecutar todos los procesos y contar emails enviados
+      const results = await Promise.all([
         this.checkBirthdayEmails(gymConfig),
         this.checkMembershipDueToday(gymConfig),
         this.checkMembershipDueSoon(gymConfig),
         this.checkMembershipOverdue(gymConfig),
       ]);
 
-      this.logger.log('✅ Proceso de emails automáticos completado');
+      const totalEmailsSent = results.reduce((sum, count) => sum + count, 0);
+      const executionTimeMs = Date.now() - startTime;
+
+      await this.cronLoggingService.logCronSuccess(
+        logId,
+        totalEmailsSent,
+        executionTimeMs,
+      );
+
+      this.logger.log(
+        `✅ Proceso de emails automáticos completado. ${totalEmailsSent} emails enviados en ${executionTimeMs}ms`,
+      );
     } catch (error) {
+      const executionTimeMs = Date.now() - startTime;
+      await this.cronLoggingService.logCronError(
+        logId,
+        error.message || 'Unknown error',
+        executionTimeMs,
+      );
       this.logger.error('❌ Error en proceso de emails automáticos:', error);
     }
   }
@@ -71,7 +96,8 @@ export class AutoEmailService {
   /**
    * Enviar emails de cumpleaños a miembros que cumplen años hoy
    */
-  private async checkBirthdayEmails(gymConfig: GymConfig) {
+  private async checkBirthdayEmails(gymConfig: GymConfig): Promise<number> {
+    let emailsSent = 0;
     try {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
@@ -162,16 +188,19 @@ export class AutoEmailService {
         await this.emailLogRepository.save(log);
 
         this.logger.log(`✅ Email de cumpleaños enviado a: ${member.user.email}`);
+        emailsSent++;
       }
     } catch (error) {
       this.logger.error('Error en checkBirthdayEmails:', error);
     }
+    return emailsSent;
   }
 
   /**
    * Enviar emails a miembros cuya membresía vence HOY
    */
-  private async checkMembershipDueToday(gymConfig: GymConfig) {
+  private async checkMembershipDueToday(gymConfig: GymConfig): Promise<number> {
+    let emailsSent = 0;
     try {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
@@ -246,16 +275,19 @@ export class AutoEmailService {
         await this.emailLogRepository.save(logDueToday);
 
         this.logger.log(`✅ Email de vencimiento hoy enviado a: ${member.user.email}`);
+        emailsSent++;
       }
     } catch (error) {
       this.logger.error('Error en checkMembershipDueToday:', error);
     }
+    return emailsSent;
   }
 
   /**
    * Enviar emails a miembros cuya membresía vence en los próximos 3 días
    */
-  private async checkMembershipDueSoon(gymConfig: GymConfig) {
+  private async checkMembershipDueSoon(gymConfig: GymConfig): Promise<number> {
+    let emailsSent = 0;
     try {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
@@ -332,16 +364,19 @@ export class AutoEmailService {
         await this.emailLogRepository.save(logDueSoon);
 
         this.logger.log(`✅ Email de vencimiento próximo enviado a: ${member.user.email}`);
+        emailsSent++;
       }
     } catch (error) {
       this.logger.error('Error en checkMembershipDueSoon:', error);
     }
+    return emailsSent;
   }
 
   /**
    * Enviar emails a miembros cuya membresía ya ha vencido
    */
-  private async checkMembershipOverdue(gymConfig: GymConfig) {
+  private async checkMembershipOverdue(gymConfig: GymConfig): Promise<number> {
+    let emailsSent = 0;
     try {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
@@ -414,10 +449,12 @@ export class AutoEmailService {
         await this.emailLogRepository.save(logOverdue);
 
         this.logger.log(`✅ Email de membresía vencida enviado a: ${member.user.email}`);
+        emailsSent++;
       }
     } catch (error) {
       this.logger.error('Error en checkMembershipOverdue:', error);
     }
+    return emailsSent;
   }
 
   /**

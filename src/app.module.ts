@@ -27,6 +27,7 @@ import { CashRegister } from './entities/cash-register.entity';
 import { Coupon } from './entities/coupon.entity';
 import { Promotion } from './modules/promotions/entities/promotion.entity';
 import { EmailConfig, EmailTemplate, EmailLog, PaymentReminder } from './modules/email-settings/entities';
+import { CronExecutionLog } from './modules/email-settings/entities/cron-execution-log.entity';
 
 import { AuthModule } from './modules/auth/auth.module';
 import { EmailSettingsModule } from './modules/email-settings/email-settings.module';
@@ -69,7 +70,7 @@ import { LoggerMiddleware } from './common/middleware';
       username: process.env.DB_USERNAME || 'root',
       password: process.env.DB_PASSWORD || 'password',
       database: process.env.DB_NAME || 'gym_manager',
-      entities: [User, Product, Equipment, Sale, SaleItem, GymSettings, Employee, Member, Membership, MemberMembership, GymClass, ClassEnrollment, Payment, GroupMembership, GroupMembershipUser, Payroll, AuditLog, ModuleSettings, CashRegister, Coupon, Promotion, EmailConfig, EmailTemplate, EmailLog, PaymentReminder],
+      entities: [User, Product, Equipment, Sale, SaleItem, GymSettings, Employee, Member, Membership, MemberMembership, GymClass, ClassEnrollment, Payment, GroupMembership, GroupMembershipUser, Payroll, AuditLog, ModuleSettings, CashRegister, Coupon, Promotion, EmailConfig, EmailTemplate, EmailLog, PaymentReminder, CronExecutionLog],
       synchronize: true,
       logging: false,
     }),

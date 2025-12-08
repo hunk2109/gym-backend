@@ -36,6 +36,16 @@ export class GroupMembershipsController {
     }
   }
 
+  @Get('member/:userId')
+  async getGroupsByMember(@Param('userId') userId: string): Promise<{ data: GroupMembershipResponseDto[] }> {
+    try {
+      const data = await this.groupMembershipsService.getGroupsByMember(userId);
+      return { data };
+    } catch (error) {
+      throw error;
+    }
+  }
+
   @Get(':id')
   async findOne(@Param('id') id: string): Promise<{ data: GroupMembershipResponseDto }> {
     try {
@@ -89,16 +99,6 @@ export class GroupMembershipsController {
   ): Promise<{ data: GroupMembershipResponseDto }> {
     try {
       const data = await this.groupMembershipsService.removeMember(id, userId);
-      return { data };
-    } catch (error) {
-      throw error;
-    }
-  }
-
-  @Get('member/:userId')
-  async getGroupsByMember(@Param('userId') userId: string): Promise<{ data: GroupMembershipResponseDto[] }> {
-    try {
-      const data = await this.groupMembershipsService.getGroupsByMember(userId);
       return { data };
     } catch (error) {
       throw error;

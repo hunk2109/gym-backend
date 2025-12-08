@@ -8,6 +8,8 @@ import { CreateEmployeeDto, UpdateEmployeeDto } from './dto/employee.dto';
 import { AuditLogService } from '../audit-logs/audit-log.service';
 import { User, UserRole } from '../../entities/user.entity';
 import { EmailService } from '../email-settings/email.service';
+import { ModulesManagementService } from '../modules-management/modules-management.service';
+import { GymSettingsService } from '../gym-settings/gym-settings.service';
 
 @Injectable()
 export class EmployeeService {
@@ -20,6 +22,8 @@ export class EmployeeService {
     private userRepository: Repository<User>,
     private auditLogService: AuditLogService,
     private emailService: EmailService,
+    private modulesManagementService: ModulesManagementService,
+    private gymSettingsService: GymSettingsService,
   ) {}
 
   async create(createDto: CreateEmployeeDto, authUser?: any): Promise<Employee> {
@@ -60,18 +64,45 @@ export class EmployeeService {
       await this.userRepository.save(user);
       this.logger.log(`User created for employee ${createdEmployee.email}`);
 
+      // Verificar si está habilitado enviar email de bienvenida
+      try {
+        const sendWelcomeEmail = await this.modulesManagementService.getModuleSetting(
+          'employees',
+          'sendWelcomeEmailToEmployees',
+        );
+
+        if (!sendWelcomeEmail) {
+          this.logger.log(`Welcome email disabled for employees, skipping email for ${createdEmployee.email}`);
+          return createdEmployee;
+        }
+      } catch (settingError) {
+        this.logger.warn(`Failed to check email setting: ${settingError.message}, proceeding with email`);
+      }
+
       // Enviar email con contraseña temporal
       try {
+        // Obtener nombre del gimnasio
+        let gymName = 'GYM Manager';
+        try {
+          const gymSettings = await this.gymSettingsService.getSettings();
+          if (gymSettings?.gymName) {
+            gymName = gymSettings.gymName;
+          }
+        } catch (gymError) {
+          this.logger.warn(`Failed to get gym settings: ${gymError.message}, using default gym name`);
+        }
+
         await this.emailService.sendEmail({
           recipientEmail: createdEmployee.email,
           recipientName: `${createdEmployee.firstName} ${createdEmployee.lastName}`,
-          subject: '¡Bienvenido a GYM Manager! - Acceso de Empleado',
+          subject: `¡Bienvenido a ${gymName}! - Acceso de Empleado`,
           htmlContent: this.generateEmployeeWelcomeEmailHTML(
             createdEmployee.firstName,
             createdEmployee.email,
             tempPassword,
+            gymName,
           ),
-          plainTextContent: `Hola ${createdEmployee.firstName},\n\nTe hemos creado una cuenta como empleado en GYM Manager.\n\nTus datos de acceso:\nEmail: ${createdEmployee.email}\nContraseña temporal: ${tempPassword}\n\nPor favor, cámbiala en tu perfil después de iniciar sesión.`,
+          plainTextContent: `Hola ${createdEmployee.firstName},\n\nTe hemos creado una cuenta como empleado en ${gymName}.\n\nTus datos de acceso:\nEmail: ${createdEmployee.email}\nContraseña temporal: ${tempPassword}\n\nPor favor, cámbiala en tu perfil después de iniciar sesión.`,
         });
 
         this.logger.log(`Welcome email sent to ${createdEmployee.email}`);
@@ -136,7 +167,7 @@ export class EmployeeService {
     return roleMap[employeeRole] || UserRole.EMPLEADO_CAJERO;
   }
 
-  private generateEmployeeWelcomeEmailHTML(firstName: string, email: string, tempPassword: string): string {
+  private generateEmployeeWelcomeEmailHTML(firstName: string, email: string, tempPassword: string, gymName: string = 'GYM Manager'): string {
     return `
       <!DOCTYPE html>
       <html>
@@ -157,12 +188,12 @@ export class EmployeeService {
         <body>
           <div class="container">
             <div class="header">
-              <h2>🏋️ GYM Manager</h2>
+              <h2>🏋️ ${gymName}</h2>
               <p>¡Bienvenido a tu cuenta de empleado!</p>
             </div>
             <div class="content">
               <p>Hola <strong>${firstName}</strong>,</p>
-              <p>Tu cuenta de empleado ha sido creada exitosamente en GYM Manager.</p>
+              <p>Tu cuenta de empleado ha sido creada exitosamente en ${gymName}.</p>
               
               <p><strong>Tus datos de acceso:</strong></p>
               <div class="credentials-box">
@@ -198,7 +229,7 @@ export class EmployeeService {
               <p>Si tienes problemas o preguntas, contacta al administrador.</p>
               
               <div class="footer">
-                <p>© ${new Date().getFullYear()} GYM Manager. Todos los derechos reservados.</p>
+                <p>© ${new Date().getFullYear()} ${gymName}. Todos los derechos reservados.</p>
                 <p>Este es un correo automático, por favor no respondas.</p>
               </div>
             </div>
@@ -282,35 +313,66 @@ export class EmployeeService {
   async delete(id: string, authUser?: any): Promise<void> {
     const employee = await this.findById(id);
     
-    // Registrar eliminación en auditoría
+    // En lugar de eliminar, desactivar el empleado (soft delete)
+    // Esto evita problemas con restricciones de clave foránea
+    const oldStatus = employee.isActive;
+    employee.isActive = false;
+    
     try {
-      const userId = authUser?.id || authUser?.sub || authUser?.userId;
-      const userName = await this.getUserName(userId);
-      
-      await this.auditLogService.create({
-        action: 'EMPLOYEE_DELETED',
-        module: 'EMPLOYEES',
-        description: `Empleado eliminado: ${employee.firstName} ${employee.lastName} (ID: ${id})`,
-        userId: userId,
-        userName: userName,
-        oldValue: {
-          id: employee.id,
-          firstName: employee.firstName,
-          lastName: employee.lastName,
-          email: employee.email,
-          phone: employee.phone,
-          role: employee.role,
-          salary: employee.salary,
-          hireDate: employee.hireDate,
-          isActive: employee.isActive,
-        },
-      });
-    } catch (error) {
-      console.error('Error logging employee deletion:', error);
-      // No fallar la operación si el log falla
-    }
+      // Marcar usuario como inactivo también
+      try {
+        const user = await this.userRepository.findOne({
+          where: { email: employee.email },
+        });
+        if (user) {
+          user.isActive = false;
+          await this.userRepository.save(user);
+          this.logger.log(`User deactivated for employee ${employee.email}`);
+        }
+      } catch (userError) {
+        this.logger.warn(`Failed to deactivate user for employee ${employee.email}: ${userError.message}`);
+      }
 
-    await this.employeeRepository.remove(employee);
+      // Guardar empleado como inactivo
+      await this.employeeRepository.save(employee);
+      this.logger.log(`Employee deactivated (soft delete): ${employee.id}`);
+
+      // Registrar eliminación en auditoría
+      try {
+        const userId = authUser?.id || authUser?.sub || authUser?.userId;
+        const userName = await this.getUserName(userId);
+        
+        await this.auditLogService.create({
+          action: 'EMPLOYEE_DELETED',
+          module: 'EMPLOYEES',
+          description: `Empleado eliminado (desactivado): ${employee.firstName} ${employee.lastName} (ID: ${id})`,
+          userId: userId,
+          userName: userName,
+          oldValue: {
+            id: employee.id,
+            firstName: employee.firstName,
+            lastName: employee.lastName,
+            email: employee.email,
+            phone: employee.phone,
+            role: employee.role,
+            salary: employee.salary,
+            hireDate: employee.hireDate,
+            isActive: oldStatus,
+          },
+          newValue: {
+            isActive: false,
+          },
+        });
+      } catch (error) {
+        this.logger.warn(`Error logging employee deletion: ${error.message}`);
+        // No fallar la operación si el log falla
+      }
+    } catch (error) {
+      this.logger.error(`Failed to delete employee ${id}: ${error.message}`, error.stack);
+      throw new BadRequestException(
+        `No se pudo eliminar el empleado: ${error.message || 'Error desconocido'}`,
+      );
+    }
   }
 
   async toggleActive(id: string, authUser?: any): Promise<Employee> {

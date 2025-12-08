@@ -1,4 +1,4 @@
-import { IsString, IsBoolean, IsOptional } from 'class-validator';
+import { IsString, IsBoolean, IsOptional, IsObject } from 'class-validator';
 
 export class UpdateModuleSettingsDto {
   @IsString()
@@ -12,6 +12,10 @@ export class UpdateModuleSettingsDto {
   @IsString()
   @IsOptional()
   description?: string;
+
+  @IsObject()
+  @IsOptional()
+  settings?: Record<string, any>;
 }
 
 export class GetModuleSettingsDto {
