@@ -2,7 +2,7 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { v4 as uuidv4 } from 'uuid';
-import { Membership } from '../../entities/membership.entity';
+import { Membership, MembershipType } from '../../entities/membership.entity';
 import { MemberMembership } from '../../entities/member-membership.entity';
 import { Member } from '../../entities/member.entity';
 import { Payment, PaymentStatus, PaymentMethod, PaymentType } from '../../entities/payment.entity';
@@ -27,6 +27,21 @@ export class MembershipsService {
 
   // Membership CRUD
   async createMembership(createMembershipDto: CreateMembershipDto): Promise<Membership> {
+    console.log('[MembershipsService] createMembership received:', createMembershipDto);
+    
+    // Determinar el tipo: si viene un string, convertirlo a enum; si no, usar INDIVIDUAL
+    let membershipType = MembershipType.INDIVIDUAL;
+    if (createMembershipDto.type) {
+      const typeValue = String(createMembershipDto.type).toLowerCase();
+      if (typeValue === 'group' || typeValue === MembershipType.GROUP) {
+        membershipType = MembershipType.GROUP;
+      } else if (typeValue === 'individual' || typeValue === MembershipType.INDIVIDUAL) {
+        membershipType = MembershipType.INDIVIDUAL;
+      }
+    }
+    
+    console.log('[MembershipsService] Determined type:', membershipType);
+    
     // Crear membership sin incluir id ni timestamps (TypeORM los generará)
     const membership = this.membershipRepository.create({
       name: createMembershipDto.name,
@@ -34,8 +49,11 @@ export class MembershipsService {
       price: createMembershipDto.price,
       durationMonths: createMembershipDto.durationMonths,
       benefits: createMembershipDto.benefits,
+      type: membershipType,
       isActive: createMembershipDto.isActive !== undefined ? createMembershipDto.isActive : true,
     });
+    
+    console.log('[MembershipsService] Creating membership with type:', membership.type);
     return this.membershipRepository.save(membership);
   }
 

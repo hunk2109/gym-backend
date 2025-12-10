@@ -1,4 +1,6 @@
-import { IsString, IsOptional, IsNumber, IsBoolean, IsArray, IsDate } from 'class-validator';
+import { IsString, IsOptional, IsNumber, IsBoolean, IsArray, IsDate, IsEnum } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { MembershipType } from '../../../entities/membership.entity';
 
 export class CreateMembershipDto {
   @IsString()
@@ -17,6 +19,17 @@ export class CreateMembershipDto {
   @IsOptional()
   @IsArray()
   benefits?: string[];
+
+  @IsOptional()
+  @IsEnum(MembershipType)
+  @Transform(({ value }) => {
+    // Convertir string a enum si es necesario
+    if (typeof value === 'string') {
+      return value.toLowerCase() as MembershipType;
+    }
+    return value;
+  })
+  type?: MembershipType;
 
   @IsOptional()
   @IsBoolean()

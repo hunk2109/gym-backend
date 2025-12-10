@@ -18,8 +18,7 @@ import { MemberMembership } from './entities/member-membership.entity';
 import { GymClass } from './entities/gym-class.entity';
 import { ClassEnrollment } from './entities/class-enrollment.entity';
 import { Payment } from './entities/payment.entity';
-import { GroupMembership } from './entities/group-membership.entity';
-import { GroupMembershipUser } from './entities/group-membership-user.entity';
+
 import { Payroll } from './entities/payroll.entity';
 import { AuditLog } from './entities/audit-log.entity';
 import { ModuleSettings } from './entities/module-settings.entity';
@@ -44,7 +43,7 @@ import { ClassesModule } from './modules/classes/classes.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { UserRolesModule } from './modules/user-roles/user-roles.module';
-import { GroupMembershipsModule } from './modules/group-memberships/group-memberships.module';
+
 import { PayrollModule } from './modules/payroll/payroll.module';
 import { AuditLogModule } from './modules/audit-logs/audit-log.module';
 import { ModulesManagementModule } from './modules/modules-management/modules-management.module';
@@ -70,7 +69,7 @@ import { LoggerMiddleware } from './common/middleware';
       username: process.env.DB_USERNAME || 'root',
       password: process.env.DB_PASSWORD || 'password',
       database: process.env.DB_NAME || 'gym_manager',
-      entities: [User, Product, Equipment, Sale, SaleItem, GymSettings, Employee, Member, Membership, MemberMembership, GymClass, ClassEnrollment, Payment, GroupMembership, GroupMembershipUser, Payroll, AuditLog, ModuleSettings, CashRegister, Coupon, Promotion, EmailConfig, EmailTemplate, EmailLog, PaymentReminder, CronExecutionLog],
+      entities: [User, Product, Equipment, Sale, SaleItem, GymSettings, Employee, Member, Membership, MemberMembership, GymClass, ClassEnrollment, Payment, Payroll, AuditLog, ModuleSettings, CashRegister, Coupon, Promotion, EmailConfig, EmailTemplate, EmailLog, PaymentReminder, CronExecutionLog],
       synchronize: true,
       logging: false,
     }),
@@ -93,7 +92,7 @@ import { LoggerMiddleware } from './common/middleware';
     PaymentsModule,
     ReportsModule,
     UserRolesModule,
-    GroupMembershipsModule,
+
     PayrollModule,
     AuditLogModule,
     ModulesManagementModule,

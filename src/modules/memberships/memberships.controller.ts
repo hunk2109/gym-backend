@@ -104,6 +104,9 @@ export class MembershipsController {
   @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO)
   @HttpCode(HttpStatus.CREATED)
   async createMembership(@Body() createMembershipDto: CreateMembershipDto) {
+    console.log('[MembershipsController] POST /memberships - Raw body:', JSON.stringify(createMembershipDto));
+    console.log('[MembershipsController] type field value:', createMembershipDto.type);
+    console.log('[MembershipsController] type field type:', typeof createMembershipDto.type);
     return this.membershipsService.createMembership(createMembershipDto);
   }
 

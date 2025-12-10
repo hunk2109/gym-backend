@@ -1,4 +1,5 @@
 import { NestFactory } from '@nestjs/core';
+import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
@@ -14,13 +15,14 @@ async function bootstrap() {
   // Global prefix para todas las rutas
   app.setGlobalPrefix('api');
 
-  // ValidationPipe deshabilitado temporalmente para debug
-  // app.useGlobalPipes(
-  //   new ValidationPipe({
-  //     transform: true,
-  //     whitelist: false,
-  //   }),
-  // );
+  // Enable validation pipe with transformation
+  app.useGlobalPipes(
+    new ValidationPipe({
+      transform: true,
+      whitelist: false,
+      forbidNonWhitelisted: false,
+    }),
+  );
 
   await app.listen(process.env.PORT ?? 3000, '0.0.0.0');
   console.log('Backend running on http://localhost:3000');

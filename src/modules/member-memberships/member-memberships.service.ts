@@ -3,7 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { MemberMembership } from '../../entities/member-membership.entity';
 import { Member } from '../../entities/member.entity';
-import { Membership } from '../../entities/membership.entity';
+import { Membership, MembershipType } from '../../entities/membership.entity';
 import { Payment, PaymentMethod, PaymentType, PaymentStatus } from '../../entities/payment.entity';
 import { CreateMemberMembershipDto } from './dto/create-member-membership.dto';
 import { v4 as uuidv4 } from 'uuid';
@@ -118,6 +118,8 @@ export class MemberMembershipsService {
       );
     }
 
+
+
     // Validar fechas
     const startDate = new Date(dto.startDate);
     const endDate = new Date(dto.endDate);
@@ -202,9 +204,12 @@ export class MemberMembershipsService {
     const finalAmount = membershipPrice - discountAmount;
     console.log(`[MemberMembershipsService] Cálculos finales - membershipPrice: ${membershipPrice}, discountAmount: ${discountAmount}, finalAmount: ${finalAmount}`);
     
-    memberMembership.amountPaid = (dto.amountPaid ?? finalAmount) as any;
+    // Determinar el monto pagado y el estado
+    const amountPaidValue = dto.amountPaid ? Number(dto.amountPaid) : 0;
+    memberMembership.amountPaid = amountPaidValue > 0 ? amountPaidValue : finalAmount;
     memberMembership.paymentDate = (dto.paymentDate ?? null) as any;
-    memberMembership.paymentStatus = dto.amountPaid ? 'paid' : 'pending';
+    // Si se pagó algo (amountPaid > 0), marcar como 'paid', si no, marcar como 'pending'
+    memberMembership.paymentStatus = amountPaidValue > 0 ? 'paid' : 'pending';
     memberMembership.isRecurring = false;
     
     // Almacenar información del descuento aplicado
@@ -395,7 +400,6 @@ export class MemberMembershipsService {
 
     const [data, total] = await this.memberMembershipRepository.findAndCount({
       where: {
-        isActive: true,
         paymentStatus: 'pending',
       },
       relations: ['membership', 'member'],
