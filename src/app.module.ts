@@ -15,6 +15,8 @@ import { Employee } from './entities/employee.entity';
 import { Member } from './entities/member.entity';
 import { Membership } from './entities/membership.entity';
 import { MemberMembership } from './entities/member-membership.entity';
+import { Group } from './entities/group.entity';
+import { GroupCompanion } from './entities/group-companion.entity';
 import { GymClass } from './entities/gym-class.entity';
 import { ClassEnrollment } from './entities/class-enrollment.entity';
 import { Payment } from './entities/payment.entity';
@@ -51,6 +53,7 @@ import { SystemParameterModule } from './modules/system-parameters/system-parame
 import { CashRegisterModule } from './modules/cash-register/cash-register.module';
 import { PromotionsModule } from './modules/promotions/promotions.module';
 import { CouponsModule } from './modules/coupons/coupons.module';
+import { GroupsModule } from './modules/groups/groups.module';
 
 import { ErrorHandlingInterceptor, ResponseInterceptor } from './common/interceptors';
 import { ResponseFilterInterceptor } from './modules/auth/interceptors/response-filter.interceptor';
@@ -69,7 +72,7 @@ import { LoggerMiddleware } from './common/middleware';
       username: process.env.DB_USERNAME || 'root',
       password: process.env.DB_PASSWORD || 'password',
       database: process.env.DB_NAME || 'gym_manager',
-      entities: [User, Product, Equipment, Sale, SaleItem, GymSettings, Employee, Member, Membership, MemberMembership, GymClass, ClassEnrollment, Payment, Payroll, AuditLog, ModuleSettings, CashRegister, Coupon, Promotion, EmailConfig, EmailTemplate, EmailLog, PaymentReminder, CronExecutionLog],
+      entities: [User, Product, Equipment, Sale, SaleItem, GymSettings, Employee, Member, Membership, MemberMembership, Group, GroupCompanion, GymClass, ClassEnrollment, Payment, Payroll, AuditLog, ModuleSettings, CashRegister, Coupon, Promotion, EmailConfig, EmailTemplate, EmailLog, PaymentReminder, CronExecutionLog],
       synchronize: true,
       logging: false,
     }),
@@ -101,6 +104,7 @@ import { LoggerMiddleware } from './common/middleware';
     PromotionsModule,
     EmailSettingsModule,
     CouponsModule,
+    GroupsModule,
   ],
   controllers: [],
   providers: [

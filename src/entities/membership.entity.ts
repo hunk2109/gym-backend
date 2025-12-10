@@ -50,6 +50,9 @@ export class Membership {
   @Column({ type: 'boolean', default: true })
   isActive: boolean;
 
+  @Column({ type: 'int', nullable: true })
+  maxGroupCompanions?: number; // Máximo de acompañantes si es membresía grupal
+
   @CreateDateColumn()
   createdAt: Date;
 
