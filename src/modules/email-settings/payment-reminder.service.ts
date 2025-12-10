@@ -126,14 +126,17 @@ export class PaymentReminderService {
   private async processReminder(reminder: PaymentReminder): Promise<boolean> {
     try {
       // Obtener la membresía activa del miembro
-      const memberMembership = await this.memberMembershipRepository.findOne({
-        where: { memberId: reminder.memberId },
-        relations: ['membership'],
-        order: { createdAt: 'DESC' },
-      });
+      // FILTRO: Solo procesar si membershipType != 'companion'
+      let memberMembership = await this.memberMembershipRepository
+        .createQueryBuilder('mm')
+        .where('mm.memberId = :memberId', { memberId: reminder.memberId })
+        .andWhere('(mm.membershipType IS NULL OR mm.membershipType IN (:...types))', { types: ['individual', 'responsible'] })
+        .leftJoinAndSelect('mm.membership', 'membership')
+        .orderBy('mm.createdAt', 'DESC')
+        .getOne();
 
       if (!memberMembership) {
-        this.logger.warn(`No active membership found for member ${reminder.memberId}`);
+        this.logger.warn(`No active membership found for member ${reminder.memberId} (not companion)`);
         return false;
       }
 

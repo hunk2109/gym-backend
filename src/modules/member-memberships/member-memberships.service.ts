@@ -9,6 +9,7 @@ import { CreateMemberMembershipDto } from './dto/create-member-membership.dto';
 import { v4 as uuidv4 } from 'uuid';
 import { PromotionsService } from '../promotions/promotions.service';
 import { EmailService } from '../email-settings/email.service';
+import { GroupsService } from '../groups/groups.service';
 
 @Injectable()
 export class MemberMembershipsService {
@@ -23,6 +24,7 @@ export class MemberMembershipsService {
     private readonly paymentRepository: Repository<Payment>,
     private readonly promotionsService: PromotionsService,
     private readonly emailService: EmailService,
+    private readonly groupsService: GroupsService,
   ) {}
 
   /**
@@ -339,6 +341,50 @@ export class MemberMembershipsService {
       console.error(`[MemberMembershipsService] ❌ Error al enviar email de membresía:`, emailError.message);
       console.error(`[MemberMembershipsService] Stack:`, (emailError as any)?.stack);
       // No bloquear el flujo si hay error en el email
+    }
+
+    // Si la membresía es de tipo 'group', auto-crear grupo
+    if (membership.type === MembershipType.GROUP) {
+      try {
+        console.log(`[MemberMembershipsService] 👥 Creando grupo automáticamente para membresía grupal...`);
+        
+        // Marcar la membresía con membershipType 'responsible'
+        savedMemberMembership.membershipType = 'responsible' as any;
+        await this.memberMembershipRepository.save(savedMemberMembership);
+        
+        // Auto-crear grupo con nombre por defecto (el usuario puede modificarlo después)
+        const member = await this.memberRepository.findOne({
+          where: { id: memberId },
+          relations: ['user'],
+        });
+        
+        const firstName = member?.user?.firstName || 'Grupo';
+        const lastName = member?.user?.lastName || '';
+        const groupName = `${firstName} ${lastName}`.trim();
+        
+        await this.groupsService.createGroup(
+          groupName,
+          dto.membershipId,
+          memberId,
+          startDate,
+          endDate,
+        );
+        
+        // Obtener el grupo creado para actualizar MemberMembership
+        const group = await this.memberMembershipRepository
+          .query(`SELECT g.id FROM groups g WHERE g.responsible_member_id = $1 AND g.membership_id = $2 ORDER BY g.created_at DESC LIMIT 1`, 
+            [memberId, dto.membershipId]);
+        
+        if (group && group[0]) {
+          savedMemberMembership.groupId = group[0].id;
+          await this.memberMembershipRepository.save(savedMemberMembership);
+        }
+        
+        console.log(`[MemberMembershipsService] ✅ Grupo creado automáticamente para membresía grupal`);
+      } catch (groupError) {
+        console.error(`[MemberMembershipsService] ⚠️  Error al crear grupo automáticamente:`, groupError.message);
+        // No bloquear el flujo si hay error en la creación del grupo
+      }
     }
 
     return savedMemberMembership;

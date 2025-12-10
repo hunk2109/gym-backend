@@ -268,17 +268,23 @@ export class PaymentsService {
 
     // Obtener pagos pendientes de la tabla Payment (SIN los de membresías)
     // Los pagos PENDING con memberMembershipId se cuentan desde MemberMembership para evitar duplicados
+    // FILTRO: Solo mostrar si membershipType != 'companion'
     const paymentRecords = await this.paymentRepository
       .createQueryBuilder('payment')
       .leftJoinAndSelect('payment.member', 'member')
       .leftJoinAndSelect('member.user', 'user')
+      .leftJoin(MemberMembership, 'mm', 'mm.id = payment.memberMembershipId')
       .where('payment.status = :status', { status: PaymentStatus.PENDING })
       .andWhere('payment.memberMembershipId IS NULL')
       .andWhere('payment.dueDate <= :cutoffDate', { cutoffDate })
+      .andWhere('mm.membershipType IS NULL OR mm.membershipType IN (:...allowedTypes)', { 
+        allowedTypes: ['individual', 'responsible'] 
+      })
       .orderBy('payment.dueDate', 'ASC')
       .getMany();
 
     // Obtener membresías con pago pendiente
+    // FILTRO: Solo mostrar si membershipType != 'companion'
     const membershipRecords = await this.memberMembershipRepository
       .createQueryBuilder('mm')
       .leftJoinAndSelect('mm.member', 'member')
@@ -286,6 +292,9 @@ export class PaymentsService {
       .leftJoinAndSelect('mm.membership', 'membership')
       .where('mm.paymentStatus = :status', { status: 'pending' })
       .andWhere('mm.endDate <= :cutoffDate', { cutoffDate })
+      .andWhere('mm.membershipType IS NULL OR mm.membershipType IN (:...allowedTypes)', { 
+        allowedTypes: ['individual', 'responsible'] 
+      })
       .orderBy('mm.endDate', 'ASC')
       .getMany();
 
