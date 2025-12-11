@@ -42,42 +42,51 @@ export class MembersService {
       throw new BadRequestException('Member already exists for this user');
     }
 
-    const member = this.memberRepository.create({
+    // Preparar datos del member, filtrando campos que no son de la entidad
+    const memberData: any = {
       id: uuidv4(),
-      ...createMemberDto,
-      joinDate: createMemberDto.joinDate || new Date(),
-    });
+      userId: createMemberDto.userId,
+      documentId: createMemberDto.documentId,
+      emergencyContact: createMemberDto.emergencyContact,
+      emergencyPhone: createMemberDto.emergencyPhone,
+      dateOfBirth: createMemberDto.dateOfBirth,
+      gender: createMemberDto.gender ? (createMemberDto.gender as any) : undefined,
+      address: createMemberDto.address,
+      city: createMemberDto.city,
+      zipCode: createMemberDto.zipCode,
+      joinDate: createMemberDto.joinDate ? new Date(createMemberDto.joinDate) : new Date(),
+      isPaid: createMemberDto.isPaid ?? false,
+      hasMembership: createMemberDto.hasMembership ?? false,
+      hasPendingPayment: createMemberDto.hasPendingPayment ?? false,
+    };
 
-    const savedMember = await this.memberRepository.save(member);
-
-    // Enviar email de bienvenida si está habilitado en configuración
-    try {
-      const sendWelcomeEmail = await this.modulesManagementService.getModuleSetting(
-        'memberships',
-        'sendWelcomeEmailToMembers',
-      );
-
-      if (!sendWelcomeEmail) {
-        this.logger.log(`Welcome email disabled for members, skipping email for ${user.email}`);
-        return savedMember;
-      }
-    } catch (settingError) {
-      this.logger.warn(`Failed to check email setting: ${settingError.message}, proceeding with email`);
+    // lastVisit solo si está presente
+    if (createMemberDto.lastVisit) {
+      memberData.lastVisit = new Date(createMemberDto.lastVisit);
     }
+
+    const member = this.memberRepository.create(memberData);
+    const savedMember = (await this.memberRepository.save(member)) as unknown as Member;
 
     // Enviar email de bienvenida
     try {
+      console.log(`[MembersService] 📧 Attempting to send welcome email to ${user.email}`);
+      
       // Obtener nombre del gimnasio
       let gymName = 'GYM Manager';
       try {
         const gymSettings = await this.gymSettingsService.getSettings();
         if (gymSettings?.gymName) {
           gymName = gymSettings.gymName;
+          console.log(`[MembersService] 📧 Got gym name: ${gymName}`);
         }
       } catch (gymError) {
+        console.warn(`[MembersService] 📧 Failed to get gym settings: ${gymError.message}, using default gym name`);
         this.logger.warn(`Failed to get gym settings: ${gymError.message}, using default gym name`);
       }
 
+      console.log(`[MembersService] 📧 Sending email to ${user.email} with gym name: ${gymName}`);
+      
       await this.emailService.sendEmail({
         recipientEmail: user.email,
         recipientName: `${user.firstName} ${user.lastName}`,
@@ -90,8 +99,10 @@ export class MembersService {
         plainTextContent: `Hola ${user.firstName},\n\nTe has registrado exitosamente como miembro en ${gymName}.\n\nPuedes acceder con tu email y contraseña que estableciste durante el registro.\n\nBienvenido al gimnasio!`,
       });
 
+      console.log(`[MembersService] ✅ Welcome email sent successfully to ${user.email}`);
       this.logger.log(`Welcome email sent to ${user.email}`);
     } catch (emailError) {
+      console.error(`[MembersService] ❌ Failed to send welcome email to ${user.email}: ${emailError.message}`);
       this.logger.error(`Failed to send welcome email to ${user.email}`, emailError);
       // No fallar la operación si el email no se envía
     }

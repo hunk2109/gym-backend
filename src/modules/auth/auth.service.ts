@@ -1,7 +1,7 @@
 import { Injectable, BadRequestException, ConflictException, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, DataSource } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import { v4 as uuidv4 } from 'uuid';
 import { User, UserRole } from '../../entities/user.entity';
@@ -18,6 +18,7 @@ export class AuthService {
     private jwtService: JwtService,
     private emailService: EmailService,
     private gymSettingsService: GymSettingsService,
+    private dataSource: DataSource,
   ) {}
 
   async register(email: string, password: string, firstName: string, lastName: string, phone: string) {
@@ -43,6 +44,37 @@ export class AuthService {
     });
 
     await this.userRepository.save(user);
+    
+    // Crear un Member automáticamente para este usuario
+    // Esto permite que el usuario vea sus grupos incluso sin membresía
+    try {
+      const memberRepository = this.dataSource.getRepository('Member');
+      const member = memberRepository.create({
+        id: uuidv4(), // Generar UUID único para el Member
+        userId: user.id,
+        firstName,
+        lastName,
+        email,
+        phone,
+        documentType: 'cedula', // valor por defecto
+        documentNumber: '', // será actualizado después
+        birthDate: null,
+        address: '',
+        city: '',
+        state: '',
+        zipCode: '',
+        country: '',
+        emergencyContact: '',
+        emergencyPhone: '',
+        hasMembership: false,
+      });
+      await memberRepository.save(member);
+      console.log(`[AuthService] ✅ Member creado automáticamente para userId: ${user.id}`);
+    } catch (error) {
+      console.error(`[AuthService] ⚠️  Error al crear Member automáticamente: ${error.message}`);
+      // No fallar el registro si hay error creando Member
+    }
+    
     return this.generateToken(user);
   }
 
@@ -351,6 +383,66 @@ export class AuthService {
         updatedAt: user.updatedAt,
         isActive: user.isActive,
       },
+    };
+  }
+
+  async createUserByAdmin(
+    email: string,
+    password: string,
+    firstName: string,
+    lastName: string,
+    phone: string,
+    role?: string,
+    adminUserId?: string,
+  ) {
+    // Verificar que el usuario admin existe
+    if (adminUserId) {
+      const adminUser = await this.userRepository.findOne({
+        where: { id: adminUserId },
+      });
+      if (!adminUser || adminUser.role !== UserRole.ADMIN) {
+        throw new BadRequestException('Only admin can create users');
+      }
+    }
+
+    // Verificar si el usuario ya existe
+    const existingUser = await this.userRepository.findOne({
+      where: { email },
+    });
+
+    if (existingUser) {
+      throw new ConflictException('User already exists');
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const user = this.userRepository.create({
+      id: uuidv4(),
+      email,
+      passwordHash: hashedPassword,
+      firstName,
+      lastName,
+      phone,
+      role: role ? (role as UserRole) : UserRole.CLIENTE,
+      isActive: true,
+    });
+
+    await this.userRepository.save(user);
+    
+    console.log(`[AuthService] ✅ User creado por admin para: ${email}`);
+
+    // NO devolver token - solo devolver los datos del usuario creado
+    // El Member será creado después desde Flutter con todos los datos
+    return {
+      user: {
+        id: user.id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        phone: user.phone,
+        role: user.role,
+      },
+      message: 'User created successfully by admin',
     };
   }
 }

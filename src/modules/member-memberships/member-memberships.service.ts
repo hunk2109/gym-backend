@@ -230,6 +230,79 @@ export class MemberMembershipsService {
 
     const savedMemberMembership = await this.memberMembershipRepository.save(memberMembership);
 
+    // 🆕 Si es membresía de tipo "group", crear automáticamente un grupo
+    console.log(`[MemberMembershipsService] 📋 membership.type: "${membership.type}" (typeof: ${typeof membership.type})`);
+    console.log(`[MemberMembershipsService] 📋 ¿Es 'group'? ${membership.type === 'group'}`);
+    
+    if (membership.type === 'group') {
+      try {
+        console.log(`[MemberMembershipsService] 📦 Creando grupo automáticamente para membresía tipo 'group'...`);
+        
+        // Get user info from member - memberId puede ser id o userId
+        console.log(`[MemberMembershipsService] 🔍 Buscando miembro: ${memberId}`);
+        let memberWithUser = await this.memberRepository.findOne({
+          where: { id: memberId },
+          relations: ['user'],
+        });
+        
+        // Si no existe por id, buscar por userId
+        if (!memberWithUser) {
+          memberWithUser = await this.memberRepository.findOne({
+            where: { userId: memberId },
+            relations: ['user'],
+          });
+        }
+        
+        console.log(`[MemberMembershipsService] ✅ Miembro encontrado:`, memberWithUser ? `id=${memberWithUser.id}, userId=${memberWithUser.userId}, user.id=${memberWithUser.user?.id}` : 'NO ENCONTRADO');
+        
+        if (!memberWithUser) {
+          console.error(`[MemberMembershipsService] ❌ No se encontró miembro: ${memberId}`);
+          throw new Error(`Miembro no encontrado: ${memberId}`);
+        }
+        
+        const firstName = memberWithUser?.user?.firstName || 'Usuario';
+        const lastName = memberWithUser?.user?.lastName || '';
+        const groupName = `${firstName} ${lastName} - Grupo`.trim();
+        console.log(`[MemberMembershipsService] 📦 Nombre del grupo: "${groupName}"`);
+        
+        // Usar el userId del miembro - SIMPLIFICADO: solo toma lo que está en memberWithUser.userId
+        const responsibleUserId = memberWithUser.userId;
+        
+        console.log(`\n${'='.repeat(60)}`);
+        console.log(`[MemberMembershipsService] 🔑 userId EXTRAÍDO: "${responsibleUserId}"`);
+        console.log(`[MemberMembershipsService] 📊 DETALLES DEL MIEMBRO:`);
+        console.log(`  - memberWithUser.id: ${memberWithUser.id}`);
+        console.log(`  - memberWithUser.userId: ${memberWithUser.userId}`);
+        console.log(`  - memberWithUser.user.id: ${memberWithUser.user?.id}`);
+        console.log(`${'='.repeat(60)}\n`);
+        
+        if (!responsibleUserId) {
+          throw new BadRequestException('El miembro no tiene userId');
+        }
+        
+        console.log(`[MemberMembershipsService] 📊 Valores para createGroup:`);
+        console.log(`  - groupName: ${groupName}`);
+        console.log(`  - membership.id: ${membership.id}`);
+        console.log(`  - responsibleUserId: ${responsibleUserId} ← ESTE ES EL VALOR QUE SE PASA`);
+        console.log(`  - startDate: ${startDate}`);
+        console.log(`  - endDate: ${endDate}`);
+
+        const newGroup = await this.groupsService.createGroup(
+          groupName,
+          membership.id,
+          responsibleUserId,
+          startDate,
+          endDate,
+        );
+        
+        console.log(`[MemberMembershipsService] ✅ Grupo creado exitosamente: ${newGroup.id}`);
+      } catch (error) {
+        console.error(`[MemberMembershipsService] ❌ Error al crear grupo: ${error.message}`);
+        // No lanzar error - la membresía ya fue creada, solo el grupo falló
+        // El usuario puede crear el grupo manualmente después
+      }
+    }
+
     // Aplicar la promoción (incrementar contador de usos) si fue usada
     console.log(`[MemberMembershipsService] ✓ SavedMembership ID: ${savedMemberMembership.id}`);
     console.log(`[MemberMembershipsService] appliedPromotionCode ANTES de incrementar: "${appliedPromotionCode}"`);
@@ -343,49 +416,8 @@ export class MemberMembershipsService {
       // No bloquear el flujo si hay error en el email
     }
 
-    // Si la membresía es de tipo 'group', auto-crear grupo
-    if (membership.type === MembershipType.GROUP) {
-      try {
-        console.log(`[MemberMembershipsService] 👥 Creando grupo automáticamente para membresía grupal...`);
-        
-        // Marcar la membresía con membershipType 'responsible'
-        savedMemberMembership.membershipType = 'responsible' as any;
-        await this.memberMembershipRepository.save(savedMemberMembership);
-        
-        // Auto-crear grupo con nombre por defecto (el usuario puede modificarlo después)
-        const member = await this.memberRepository.findOne({
-          where: { id: memberId },
-          relations: ['user'],
-        });
-        
-        const firstName = member?.user?.firstName || 'Grupo';
-        const lastName = member?.user?.lastName || '';
-        const groupName = `${firstName} ${lastName}`.trim();
-        
-        await this.groupsService.createGroup(
-          groupName,
-          dto.membershipId,
-          memberId,
-          startDate,
-          endDate,
-        );
-        
-        // Obtener el grupo creado para actualizar MemberMembership
-        const group = await this.memberMembershipRepository
-          .query(`SELECT g.id FROM groups g WHERE g.responsible_member_id = $1 AND g.membership_id = $2 ORDER BY g.created_at DESC LIMIT 1`, 
-            [memberId, dto.membershipId]);
-        
-        if (group && group[0]) {
-          savedMemberMembership.groupId = group[0].id;
-          await this.memberMembershipRepository.save(savedMemberMembership);
-        }
-        
-        console.log(`[MemberMembershipsService] ✅ Grupo creado automáticamente para membresía grupal`);
-      } catch (groupError) {
-        console.error(`[MemberMembershipsService] ⚠️  Error al crear grupo automáticamente:`, groupError.message);
-        // No bloquear el flujo si hay error en la creación del grupo
-      }
-    }
+    // La creación del grupo ya se hace arriba en línea ~249
+    // No duplicar aquí
 
     return savedMemberMembership;
   }

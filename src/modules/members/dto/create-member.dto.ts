@@ -7,6 +7,22 @@ export class CreateMemberDto {
 
   @IsOptional()
   @IsString()
+  firstName?: string;
+
+  @IsOptional()
+  @IsString()
+  lastName?: string;
+
+  @IsOptional()
+  @IsEmail()
+  email?: string;
+
+  @IsOptional()
+  @IsString()
+  phone?: string;
+
+  @IsOptional()
+  @IsString()
   documentId?: string;
 
   @IsOptional()
@@ -18,12 +34,10 @@ export class CreateMemberDto {
   emergencyPhone?: string;
 
   @IsOptional()
-  @IsDate()
-  dateOfBirth?: Date;
+  dateOfBirth?: string | Date;
 
   @IsOptional()
-  @IsEnum(MemberGender)
-  gender?: MemberGender;
+  gender?: string;
 
   @IsOptional()
   @IsString()
@@ -38,12 +52,35 @@ export class CreateMemberDto {
   zipCode?: string;
 
   @IsOptional()
-  @IsDate()
-  joinDate?: Date;
+  joinDate?: string | Date;
 
   @IsOptional()
   @IsBoolean()
   isPaid?: boolean;
+
+  // Campos opcionales que Flutter envía
+  @IsOptional()
+  id?: string;
+
+  @IsOptional()
+  user?: any;
+
+  @IsOptional()
+  lastVisit?: string | Date | null;
+
+  @IsOptional()
+  @IsBoolean()
+  hasMembership?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  hasPendingPayment?: boolean;
+
+  @IsOptional()
+  createdAt?: string | Date;
+
+  @IsOptional()
+  updatedAt?: string | Date;
 }
 
 export class UpdateMemberDto {

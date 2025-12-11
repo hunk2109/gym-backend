@@ -1,7 +1,10 @@
 import { Controller, Post, Body, HttpCode, HttpStatus, UseGuards, Req, Patch, Get } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { RolesGuard } from './guards/roles.guard';
+import { Roles } from './decorators/roles.decorator';
 import { UpdateProfileDto, ChangePasswordDto, ForgotPasswordDto, ResetPasswordDto } from './dto/update-profile.dto';
+import { UserRole } from '../../entities/user.entity';
 
 @Controller('auth')
 export class AuthController {
@@ -76,5 +79,31 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   async resetPassword(@Body() resetPasswordDto: ResetPasswordDto) {
     return this.authService.resetPassword(resetPasswordDto);
+  }
+
+  @Post('admin/create-user')
+  @HttpCode(HttpStatus.CREATED)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  async createUserByAdmin(
+    @Body('email') email: string,
+    @Body('password') password: string,
+    @Body('firstName') firstName: string,
+    @Body('lastName') lastName: string,
+    @Body('phone') phone: string,
+    @Body('role') role?: string,
+    @Req() req?: any,
+  ) {
+    // Verificar que el usuario es admin
+    const requestingUser = req.user;
+    return this.authService.createUserByAdmin(
+      email,
+      password,
+      firstName,
+      lastName,
+      phone,
+      role,
+      requestingUser.userId,
+    );
   }
 }

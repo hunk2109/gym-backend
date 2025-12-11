@@ -8,7 +8,7 @@ import {
   JoinColumn,
   OneToMany,
 } from 'typeorm';
-import { Member } from './member.entity';
+import { User } from './user.entity';
 import { Membership } from './membership.entity';
 import { GroupCompanion } from './group-companion.entity';
 
@@ -23,19 +23,19 @@ export class Group {
   @Column('varchar', { length: 255, nullable: true })
   description: string;
 
-  @ManyToOne(() => Membership, { eager: true })
+  @ManyToOne(() => Membership, { eager: false })
   @JoinColumn({ name: 'membershipId' })
   membership: Membership; // Membresía grupal (Familiar Premium)
 
   @Column('varchar')
   membershipId: string;
 
-  @ManyToOne(() => Member, { eager: true })
-  @JoinColumn({ name: 'responsibleMemberId' })
-  responsibleMember: Member; // Juan Rodriguez (responsable)
+  @ManyToOne(() => User, { eager: false })
+  @JoinColumn({ name: 'responsibleUserId' })
+  responsibleUser: User; // Usuario responsable
 
   @Column('varchar')
-  responsibleMemberId: string;
+  responsibleUserId: string;
 
   @Column('date')
   startDate: Date;

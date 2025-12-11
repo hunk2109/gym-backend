@@ -5,6 +5,7 @@ import { GroupCompanion } from '../../entities/group-companion.entity';
 import { Member } from '../../entities/member.entity';
 import { Membership } from '../../entities/membership.entity';
 import { MemberMembership } from '../../entities/member-membership.entity';
+import { User } from '../../entities/user.entity';
 import { GroupsService } from './groups.service';
 import { GroupsController } from './groups.controller';
 
@@ -16,6 +17,7 @@ import { GroupsController } from './groups.controller';
       Member,
       Membership,
       MemberMembership,
+      User,
     ]),
   ],
   controllers: [GroupsController],
