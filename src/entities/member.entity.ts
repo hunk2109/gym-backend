@@ -76,6 +76,9 @@ export class Member {
   @Column({ type: 'boolean', default: false })
   hasPendingPayment: boolean;
 
+  @Column({ type: 'longtext', nullable: true })
+  fingerprints?: string; // JSON con información de huellas dactilares
+
   @OneToMany(() => MemberMembership, (membership) => membership.member)
   memberships: MemberMembership[];
 

@@ -77,6 +77,10 @@ export class CreateMemberDto {
   hasPendingPayment?: boolean;
 
   @IsOptional()
+  @IsString()
+  fingerprints?: string; // JSON con información de huellas dactilares
+
+  @IsOptional()
   createdAt?: string | Date;
 
   @IsOptional()
@@ -123,6 +127,10 @@ export class UpdateMemberDto {
   @IsOptional()
   @IsBoolean()
   isPaid?: boolean;
+
+  @IsOptional()
+  @IsString()
+  fingerprints?: string; // JSON con información de huellas dactilares
 }
 
 export class MemberResponseDto {
@@ -146,6 +154,7 @@ export class MemberResponseDto {
   joinDate?: Date;
   lastVisit?: Date;
   isPaid: boolean;
+  fingerprints?: string;
   createdAt: Date;
   updatedAt: Date;
 }
