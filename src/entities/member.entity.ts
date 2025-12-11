@@ -29,6 +29,9 @@ export class Member {
   @Column({ type: 'varchar' })
   userId: string;
 
+  @Column({ type: 'varchar', unique: true, nullable: true })
+  memberCode: string;
+
   @Column({ type: 'varchar', nullable: true })
   documentId: string;
 

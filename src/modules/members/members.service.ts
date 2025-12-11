@@ -45,10 +45,27 @@ export class MembersService {
       throw new BadRequestException('Member already exists for this user');
     }
 
+    // Generar código de miembro (YYYY-#### incremental)
+    const year = new Date().getFullYear();
+    const lastMember = await this.memberRepository
+      .createQueryBuilder('member')
+      .where('member.memberCode LIKE :year', { year: `${year}-%` })
+      .orderBy('member.memberCode', 'DESC')
+      .limit(1)
+      .getOne();
+    
+    let nextSequence = 1;
+    if (lastMember && lastMember.memberCode) {
+      const lastSequence = parseInt(lastMember.memberCode.split('-')[1], 10);
+      nextSequence = lastSequence + 1;
+    }
+    const memberCode = `${year}-${String(nextSequence).padStart(4, '0')}`;
+
     // Preparar datos del member, filtrando campos que no son de la entidad
     const memberData: any = {
       id: uuidv4(),
       userId: createMemberDto.userId,
+      memberCode: memberCode,
       documentId: createMemberDto.documentId,
       emergencyContact: createMemberDto.emergencyContact,
       emergencyPhone: createMemberDto.emergencyPhone,
@@ -98,8 +115,9 @@ export class MembersService {
           user.firstName,
           user.email,
           gymName,
+          memberCode,
         ),
-        plainTextContent: `Hola ${user.firstName},\n\nTe has registrado exitosamente como miembro en ${gymName}.\n\nPuedes acceder con tu email y contraseña que estableciste durante el registro.\n\nBienvenido al gimnasio!`,
+        plainTextContent: `Hola ${user.firstName},\n\nTe has registrado exitosamente como miembro en ${gymName}.\n\nTu código de miembro es: ${memberCode}\n\nPuedes acceder con tu email y contraseña que estableciste durante el registro.\n\nBienvenido al gimnasio!`,
       });
 
       console.log(`[MembersService] ✅ Welcome email sent successfully to ${user.email}`);
@@ -113,7 +131,7 @@ export class MembersService {
     return savedMember;
   }
 
-  private generateMemberWelcomeEmailHTML(firstName: string, email: string, gymName: string = 'GYM Manager'): string {
+  private generateMemberWelcomeEmailHTML(firstName: string, email: string, gymName: string = 'GYM Manager', memberCode: string = ''): string {
     return `
       <!DOCTYPE html>
       <html>
@@ -124,6 +142,8 @@ export class MembersService {
             .header { background-color: #007bff; color: white; padding: 20px; border-radius: 5px 5px 0 0; text-align: center; }
             .content { background-color: #f8f9fa; padding: 20px; border-radius: 0 0 5px 5px; }
             .welcome-box { background-color: #d1ecf1; border: 1px solid #bee5eb; padding: 15px; margin: 20px 0; border-radius: 5px; }
+            .code-box { background-color: #fff3cd; border: 2px solid #ffc107; padding: 20px; margin: 20px 0; border-radius: 5px; text-align: center; }
+            .member-code { font-size: 24px; font-weight: bold; color: #ff6b00; letter-spacing: 2px; }
             .info-item { margin: 10px 0; }
             .label { font-weight: bold; color: #333; }
             .footer { margin-top: 30px; padding-top: 20px; border-top: 1px solid #ddd; text-align: center; font-size: 12px; color: #666; }
@@ -144,6 +164,12 @@ export class MembersService {
                   <div class="label">📧 Email:</div>
                   <div>${email}</div>
                 </div>
+              </div>
+              
+              <div class="code-box">
+                <p style="margin: 0 0 10px 0; color: #666;"><strong>Tu Código de Miembro:</strong></p>
+                <div class="member-code">${memberCode}</div>
+                <p style="margin: 10px 0 0 0; font-size: 12px; color: #666;">Guarda este código para futuras referencias</p>
               </div>
               
               <p><strong>🚀 Próximos pasos:</strong></p>
