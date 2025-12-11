@@ -85,6 +85,27 @@ export class GroupsController {
     }
   }
 
+  @Get('responsible/:memberId')
+  async getGroupsByResponsible(@Param('memberId') memberId: string) {
+    try {
+      console.log(
+        `[GroupsController.getGroupsByResponsible] 🔍 Obteniendo grupos responsables del miembro: ${memberId}`,
+      );
+      const groups = await this.groupsService.getGroupsByResponsibleMember(
+        memberId,
+      );
+      console.log(
+        `[GroupsController.getGroupsByResponsible] ✅ ${groups.length} grupo(s) encontrado(s)`,
+      );
+      return groups;
+    } catch (error) {
+      throw new HttpException(
+        error.message || 'Error obteniendo grupos',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+  }
+
   @Get(':groupId')
   async getGroup(@Param('groupId') groupId: string) {
     try {
@@ -177,7 +198,8 @@ export class GroupsController {
   ) {
     try {
       const memberId = req.user.memberId;
-      await this.groupsService.deleteGroup(groupId, memberId);
+      const userRole = req.user.role;
+      await this.groupsService.deleteGroup(groupId, memberId, userRole);
       return {
         success: true,
         message: 'Grupo eliminado exitosamente',
@@ -249,7 +271,7 @@ export class GroupsController {
     @Request() req,
   ) {
     try {
-      await this.groupsService.removeCompanionFromGroup(
+      const updatedGroup = await this.groupsService.removeCompanionFromGroup(
         groupId,
         companionId,
         req.user.memberId,
@@ -258,6 +280,7 @@ export class GroupsController {
       return {
         success: true,
         message: 'Acompañante eliminado exitosamente',
+        data: updatedGroup,
       };
     } catch (error) {
       throw new HttpException(
@@ -268,19 +291,27 @@ export class GroupsController {
   }
 
   @Put(':groupId/transfer-responsibility')
+  @UseGuards(JwtAuthGuard)
   async transferResponsibility(
     @Param('groupId') groupId: string,
     @Body()
     body: {
-      newResponsibleUserId: string;
+      newResponsibleMemberId: string;
     },
     @Request() req,
   ) {
     try {
+      console.log(`[TransferResponsibility Controller] 📍 Parámetros recibidos:`);
+      console.log(`  - groupId: ${groupId}`);
+      console.log(`  - body.newResponsibleMemberId: ${body.newResponsibleMemberId}`);
+      console.log(`  - req.user.userId: ${req.user.userId}`);
+      console.log(`  - req.user.role: ${req.user.role}`);
+      
       const group = await this.groupsService.transferResponsibility(
         groupId,
-        body.newResponsibleUserId,
+        body.newResponsibleMemberId,
         req.user.userId,
+        req.user.role,
       );
       return {
         success: true,

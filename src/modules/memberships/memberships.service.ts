@@ -545,15 +545,16 @@ export class MembershipsService {
   /**
    * Obtener membresías con pago pendiente
    */
-  async getPendingPayments(daysOverdue?: number): Promise<MemberMembership[]> {
-    console.log(`[MembershipsService] getPendingPayments - Buscando pagos pendientes...`);
+  async getPendingPayments(daysOverdue?: number): Promise<any[]> {
+    console.log(`[MembershipsService] getPendingPayments - Buscando pagos pendientes (excluyendo companions)...`);
     
     const query = this.memberMembershipRepository
       .createQueryBuilder('mm')
       .leftJoinAndSelect('mm.member', 'member')
       .leftJoinAndSelect('member.user', 'user')
       .leftJoinAndSelect('mm.membership', 'membership')
-      .where('mm.paymentStatus = :status', { status: 'pending' });
+      .where('mm.paymentStatus = :status', { status: 'pending' })
+      .andWhere('mm.membershipType IN (:...allowedTypes)', { allowedTypes: ['individual', 'responsible'] });
 
     if (daysOverdue) {
       const cutoffDate = new Date();
@@ -563,17 +564,24 @@ export class MembershipsService {
 
     const result = await query.orderBy('mm.endDate', 'ASC').getMany();
     
-    console.log(`[MembershipsService] Encontrados ${result.length} pagos pendientes`);
-    if (result.length > 0) {
-      console.log(`[MembershipsService] Pagos:`, result.map(r => ({
+    // Mapear datos para incluir estado legible
+    const resultWithStatus = result.map((mm: any) => ({
+      ...mm,
+      membershipStatusLabel: mm.membershipType === 'responsible' ? 'Responsable' : 'Individual',
+    }));
+    
+    console.log(`[MembershipsService] Encontrados ${resultWithStatus.length} pagos pendientes`);
+    if (resultWithStatus.length > 0) {
+      console.log(`[MembershipsService] Pagos:`, resultWithStatus.map(r => ({
         id: r.id,
         memberId: r.memberId,
         paymentStatus: r.paymentStatus,
         endDate: r.endDate,
+        membershipStatusLabel: r.membershipStatusLabel,
       })));
     }
     
-    return result;
+    return resultWithStatus;
   }
 
   /**

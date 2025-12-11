@@ -41,12 +41,18 @@ export class PaymentsService {
   async getAllPayments(page: number = 1, limit: number = 10): Promise<{ data: Payment[]; pagination: any }> {
     const skip = (page - 1) * limit;
 
-    const [data, total] = await this.paymentRepository.findAndCount({
-      relations: ['member'],
-      skip,
-      take: limit,
-      order: { paymentDate: 'DESC' },
-    });
+    // FILTRO: Excluir acompañantes (companion)
+    const [data, total] = await this.paymentRepository
+      .createQueryBuilder('payment')
+      .leftJoinAndSelect('payment.member', 'member')
+      .leftJoin(MemberMembership, 'mm', 'mm.id = payment.memberMembershipId')
+      .where('mm.membershipType IS NULL OR mm.membershipType IN (:...allowedTypes)', {
+        allowedTypes: ['individual', 'responsible'],
+      })
+      .skip(skip)
+      .take(limit)
+      .orderBy('payment.paymentDate', 'DESC')
+      .getManyAndCount();
 
     return {
       data,
@@ -89,13 +95,19 @@ export class PaymentsService {
   async getPaymentsByMember(memberId: string, page: number = 1, limit: number = 10): Promise<{ data: Payment[]; pagination: any }> {
     const skip = (page - 1) * limit;
 
-    const [data, total] = await this.paymentRepository.findAndCount({
-      where: { memberId },
-      relations: ['member'],
-      skip,
-      take: limit,
-      order: { paymentDate: 'DESC' },
-    });
+    // FILTRO: Excluir acompañantes (companion)
+    const [data, total] = await this.paymentRepository
+      .createQueryBuilder('payment')
+      .leftJoinAndSelect('payment.member', 'member')
+      .leftJoin(MemberMembership, 'mm', 'mm.id = payment.memberMembershipId')
+      .where('payment.memberId = :memberId', { memberId })
+      .andWhere('mm.membershipType IS NULL OR mm.membershipType IN (:...allowedTypes)', {
+        allowedTypes: ['individual', 'responsible'],
+      })
+      .skip(skip)
+      .take(limit)
+      .orderBy('payment.paymentDate', 'DESC')
+      .getManyAndCount();
 
     return {
       data,
@@ -111,13 +123,19 @@ export class PaymentsService {
   async getPaymentsByStatus(status: PaymentStatus, page: number = 1, limit: number = 10): Promise<{ data: Payment[]; pagination: any }> {
     const skip = (page - 1) * limit;
 
-    const [data, total] = await this.paymentRepository.findAndCount({
-      where: { status },
-      relations: ['member'],
-      skip,
-      take: limit,
-      order: { paymentDate: 'DESC' },
-    });
+    // FILTRO: Excluir acompañantes (companion)
+    const [data, total] = await this.paymentRepository
+      .createQueryBuilder('payment')
+      .leftJoinAndSelect('payment.member', 'member')
+      .leftJoin(MemberMembership, 'mm', 'mm.id = payment.memberMembershipId')
+      .where('payment.status = :status', { status })
+      .andWhere('mm.membershipType IS NULL OR mm.membershipType IN (:...allowedTypes)', {
+        allowedTypes: ['individual', 'responsible'],
+      })
+      .skip(skip)
+      .take(limit)
+      .orderBy('payment.paymentDate', 'DESC')
+      .getManyAndCount();
 
     return {
       data,
@@ -133,13 +151,19 @@ export class PaymentsService {
   async getPaymentsByDateRange(startDate: Date, endDate: Date, page: number = 1, limit: number = 10): Promise<{ data: Payment[]; pagination: any }> {
     const skip = (page - 1) * limit;
 
-    const [data, total] = await this.paymentRepository.findAndCount({
-      where: { paymentDate: Between(startDate, endDate) },
-      relations: ['member'],
-      skip,
-      take: limit,
-      order: { paymentDate: 'DESC' },
-    });
+    // FILTRO: Excluir acompañantes (companion)
+    const [data, total] = await this.paymentRepository
+      .createQueryBuilder('payment')
+      .leftJoinAndSelect('payment.member', 'member')
+      .leftJoin(MemberMembership, 'mm', 'mm.id = payment.memberMembershipId')
+      .where('payment.paymentDate BETWEEN :startDate AND :endDate', { startDate, endDate })
+      .andWhere('mm.membershipType IS NULL OR mm.membershipType IN (:...allowedTypes)', {
+        allowedTypes: ['individual', 'responsible'],
+      })
+      .skip(skip)
+      .take(limit)
+      .orderBy('payment.paymentDate', 'DESC')
+      .getManyAndCount();
 
     return {
       data,
@@ -153,40 +177,85 @@ export class PaymentsService {
   }
 
   async getPaymentStatistics(): Promise<any> {
+    // FILTRO: Excluir acompañantes (companion)
     const [totalPayments, completedPayments, pendingPayments, failedPayments] = await Promise.all([
-      this.paymentRepository.count(),
-      this.paymentRepository.count({ where: { status: PaymentStatus.COMPLETED } }),
-      this.paymentRepository.count({ where: { status: PaymentStatus.PENDING, memberMembershipId: IsNull() } }),
-      this.paymentRepository.count({ where: { status: PaymentStatus.FAILED } }),
+      this.paymentRepository
+        .createQueryBuilder('payment')
+        .leftJoin(MemberMembership, 'mm', 'mm.id = payment.memberMembershipId')
+        .where('mm.membershipType IS NULL OR mm.membershipType IN (:...allowedTypes)', {
+          allowedTypes: ['individual', 'responsible'],
+        })
+        .getCount(),
+      this.paymentRepository
+        .createQueryBuilder('payment')
+        .leftJoin(MemberMembership, 'mm', 'mm.id = payment.memberMembershipId')
+        .where('payment.status = :status', { status: PaymentStatus.COMPLETED })
+        .andWhere('mm.membershipType IS NULL OR mm.membershipType IN (:...allowedTypes)', {
+          allowedTypes: ['individual', 'responsible'],
+        })
+        .getCount(),
+      this.paymentRepository
+        .createQueryBuilder('payment')
+        .leftJoin(MemberMembership, 'mm', 'mm.id = payment.memberMembershipId')
+        .where('payment.status = :status', { status: PaymentStatus.PENDING })
+        .andWhere('payment.memberMembershipId IS NULL')
+        .andWhere('mm.membershipType IS NULL OR mm.membershipType IN (:...allowedTypes)', {
+          allowedTypes: ['individual', 'responsible'],
+        })
+        .getCount(),
+      this.paymentRepository
+        .createQueryBuilder('payment')
+        .leftJoin(MemberMembership, 'mm', 'mm.id = payment.memberMembershipId')
+        .where('payment.status = :status', { status: PaymentStatus.FAILED })
+        .andWhere('mm.membershipType IS NULL OR mm.membershipType IN (:...allowedTypes)', {
+          allowedTypes: ['individual', 'responsible'],
+        })
+        .getCount(),
     ]);
 
     const totalAmount = await this.paymentRepository
       .createQueryBuilder('payment')
+      .leftJoin(MemberMembership, 'mm', 'mm.id = payment.memberMembershipId')
       .select('SUM(payment.amount)', 'total')
       .where('payment.status = :status', { status: PaymentStatus.COMPLETED })
+      .andWhere('mm.membershipType IS NULL OR mm.membershipType IN (:...allowedTypes)', {
+        allowedTypes: ['individual', 'responsible'],
+      })
       .getRawOne();
 
     const averageAmount = await this.paymentRepository
       .createQueryBuilder('payment')
+      .leftJoin(MemberMembership, 'mm', 'mm.id = payment.memberMembershipId')
       .select('AVG(payment.amount)', 'average')
       .where('payment.status = :status', { status: PaymentStatus.COMPLETED })
+      .andWhere('mm.membershipType IS NULL OR mm.membershipType IN (:...allowedTypes)', {
+        allowedTypes: ['individual', 'responsible'],
+      })
       .getRawOne();
 
     const byPaymentMethod = await this.paymentRepository
       .createQueryBuilder('payment')
+      .leftJoin(MemberMembership, 'mm', 'mm.id = payment.memberMembershipId')
       .select('payment.paymentMethod', 'method')
       .addSelect('COUNT(payment.id)', 'count')
       .addSelect('SUM(payment.amount)', 'total')
       .where('payment.status = :status', { status: PaymentStatus.COMPLETED })
+      .andWhere('mm.membershipType IS NULL OR mm.membershipType IN (:...allowedTypes)', {
+        allowedTypes: ['individual', 'responsible'],
+      })
       .groupBy('payment.paymentMethod')
       .getRawMany();
 
     const byPaymentType = await this.paymentRepository
       .createQueryBuilder('payment')
+      .leftJoin(MemberMembership, 'mm', 'mm.id = payment.memberMembershipId')
       .select('payment.paymentType', 'type')
       .addSelect('COUNT(payment.id)', 'count')
       .addSelect('SUM(payment.amount)', 'total')
       .where('payment.status = :status', { status: PaymentStatus.COMPLETED })
+      .andWhere('mm.membershipType IS NULL OR mm.membershipType IN (:...allowedTypes)', {
+        allowedTypes: ['individual', 'responsible'],
+      })
       .groupBy('payment.paymentType')
       .getRawMany();
 
@@ -204,11 +273,17 @@ export class PaymentsService {
   }
 
   async getMemberPaymentHistory(memberId: string): Promise<any> {
-    const payments = await this.paymentRepository.find({
-      where: { memberId },
-      relations: ['member'],
-      order: { paymentDate: 'DESC' },
-    });
+    // FILTRO: Excluir acompañantes (companion)
+    const payments = await this.paymentRepository
+      .createQueryBuilder('payment')
+      .leftJoinAndSelect('payment.member', 'member')
+      .leftJoin(MemberMembership, 'mm', 'mm.id = payment.memberMembershipId')
+      .where('payment.memberId = :memberId', { memberId })
+      .andWhere('mm.membershipType IS NULL OR mm.membershipType IN (:...allowedTypes)', {
+        allowedTypes: ['individual', 'responsible'],
+      })
+      .orderBy('payment.paymentDate', 'DESC')
+      .getMany();
 
     const totalPaid = payments
       .filter((p) => p.status === PaymentStatus.COMPLETED)
@@ -248,11 +323,16 @@ export class PaymentsService {
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - daysOverdue);
 
+    // FILTRO: Excluir acompañantes (companion)
     return this.paymentRepository
       .createQueryBuilder('payment')
+      .leftJoin(MemberMembership, 'mm', 'mm.id = payment.memberMembershipId')
       .where('payment.status = :status', { status: PaymentStatus.PENDING })
       .andWhere('payment.memberMembershipId IS NULL')
       .andWhere('payment.dueDate <= :cutoffDate', { cutoffDate })
+      .andWhere('mm.membershipType IS NULL OR mm.membershipType IN (:...allowedTypes)', {
+        allowedTypes: ['individual', 'responsible'],
+      })
       .orderBy('payment.dueDate', 'ASC')
       .getMany();
   }
@@ -320,6 +400,8 @@ export class PaymentsService {
       type: 'MEMBERSHIP', // Marker para saber que es de MemberMembership
       membershipRecordId: mm.id, // ID del registro de membresía
       membership: mm.membership,
+      membershipType: mm.membershipType,
+      membershipStatusLabel: mm.membershipType === 'responsible' ? 'Responsable' : 'Individual',
     }));
 
     // Combinar y ordenar por fecha

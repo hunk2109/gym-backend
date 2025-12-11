@@ -4,6 +4,7 @@ import { Repository, Like } from 'typeorm';
 import { v4 as uuidv4 } from 'uuid';
 import { Member } from '../../entities/member.entity';
 import { User } from '../../entities/user.entity';
+import { MemberMembership } from '../../entities/member-membership.entity';
 import { CreateMemberDto, UpdateMemberDto } from './dto/create-member.dto';
 import { EmailService } from '../email-settings/email.service';
 import { ModulesManagementService } from '../modules-management/modules-management.service';
@@ -18,6 +19,8 @@ export class MembersService {
     private memberRepository: Repository<Member>,
     @InjectRepository(User)
     private userRepository: Repository<User>,
+    @InjectRepository(MemberMembership)
+    private memberMembershipRepository: Repository<MemberMembership>,
     private emailService: EmailService,
     private modulesManagementService: ModulesManagementService,
     private gymSettingsService: GymSettingsService,
@@ -203,43 +206,111 @@ export class MembersService {
 
     const total = await this.memberRepository.count();
 
-    // Calcular hasPendingPayment para cada miembro
-    const mappedData = data.map(member => {
-      console.log(`[MembersService.findAll] Procesando miembro: id="${member.id}" (type: ${typeof member.id}), userId="${member.userId}"`);
-      
-      // Asegurar que memberships es un array
-      const memberships = member.memberships || [];
-      
-      if (memberships.length === 0) {
-        console.log(`[MembersService] Miembro ${member.id}: SIN MEMBRESÍAS → hasMembership=false`);
+    // Calcular hasPendingPayment para cada miembro (con async)
+    const mappedData = await Promise.all(
+      data.map(async (member) => {
+        console.log(`[MembersService.findAll] Procesando miembro: id="${member.id}" (type: ${typeof member.id}), userId="${member.userId}"`);
+        
+        // Asegurar que memberships es un array
+        const memberships = member.memberships || [];
+        
+        if (memberships.length === 0) {
+          console.log(`[MembersService] Miembro ${member.id}: SIN MEMBRESÍAS → hasMembership=false`);
+          const mapped = {
+            ...member,
+            currentMembership: null,
+            hasMembership: false,
+            hasPendingPayment: false,
+          };
+          return mapped;
+        }
+
+        // Ordenar membresías por fecha más reciente
+        const sortedMemberships = memberships.sort(
+          (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+        );
+        
+        const mostRecent = sortedMemberships[0];
+        let isPending = mostRecent.paymentStatus === 'pending';
+        
+        // LÓGICA DE ACOMPAÑANTES: Si es acompañante, verificar si el responsable del grupo pagó
+        if (mostRecent.membershipType === 'companion' && isPending) {
+          // ESTRATEGIA 1: Buscar por groupId si existe
+          let responsibleMembership: MemberMembership | null = null;
+          
+          if (mostRecent.groupId) {
+            responsibleMembership = await this.memberMembershipRepository
+              .createQueryBuilder('mm')
+              .leftJoinAndSelect('mm.member', 'member')
+              .leftJoinAndSelect('member.user', 'user')
+              .where('mm.groupId = :groupId', { groupId: mostRecent.groupId })
+              .andWhere('mm.membershipType != :companion', { companion: 'companion' })
+              .andWhere('mm.member.id != :currentMemberId', { currentMemberId: member.id })
+              .orderBy('mm.createdAt', 'DESC')
+              .take(1)
+              .getOne();
+          }
+          
+          // ESTRATEGIA 2: Si no encontró por groupId, buscar por membershipId (misma membresía)
+          if (!responsibleMembership && mostRecent.membershipId) {
+            responsibleMembership = await this.memberMembershipRepository
+              .createQueryBuilder('mm')
+              .leftJoinAndSelect('mm.member', 'member')
+              .leftJoinAndSelect('member.user', 'user')
+              .where('mm.membershipId = :membershipId', { membershipId: mostRecent.membershipId })
+              .andWhere('mm.membershipType != :companion', { companion: 'companion' })
+              .andWhere('mm.member.id != :currentMemberId', { currentMemberId: member.id })
+              .orderBy('mm.createdAt', 'DESC')
+              .take(1)
+              .getOne();
+          }
+          
+          if (responsibleMembership && responsibleMembership.paymentStatus === 'paid') {
+            isPending = false;
+          }
+        }
+        
+        // Determinar el label del estado de membresía
+        let membershipStatusLabel = '';
+        
+        if (mostRecent.membershipType === 'companion') {
+          membershipStatusLabel = 'Acompañante';
+        } else if (mostRecent.membershipType === 'responsible') {
+          membershipStatusLabel = 'Responsable';
+        } else if (mostRecent.membershipType === 'individual') {
+          // Si es 'individual' pero tiene groupId o hay acompañantes en su grupo, es Responsable de grupo
+          if (mostRecent.groupId) {
+            membershipStatusLabel = 'Responsable';
+          } else if (mostRecent.membershipId) {
+            // Verificar si hay acompañantes en la misma membresía
+            const companionCount = await this.memberMembershipRepository
+              .createQueryBuilder('mm')
+              .where('mm.membershipId = :membershipId', { membershipId: mostRecent.membershipId })
+              .andWhere('mm.membershipType = :type', { type: 'companion' })
+              .getCount();
+            
+            if (companionCount > 0) {
+              membershipStatusLabel = 'Responsable';
+            } else {
+              membershipStatusLabel = 'Individual';
+            }
+          } else {
+            membershipStatusLabel = 'Individual';
+          }
+        }
+
         const mapped = {
           ...member,
-          currentMembership: null,
-          hasMembership: false,
-          hasPendingPayment: false,
+          memberships: sortedMemberships,
+          currentMembership: mostRecent,
+          hasMembership: true,
+          hasPendingPayment: isPending,
+          membershipType: mostRecent.membershipType,
+          membershipStatusLabel,
         };
         return mapped;
-      }
-
-      // Ordenar membresías por fecha más reciente
-      const sortedMemberships = memberships.sort(
-        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-      );
-      
-      const mostRecent = sortedMemberships[0];
-      const isPending = mostRecent.paymentStatus === 'pending';
-      
-      console.log(`[MembersService] Miembro ${member.id}: hasMembership=true, hasPendingPayment=${isPending}`);
-      
-      const mapped = {
-        ...member,
-        memberships: sortedMemberships,
-        currentMembership: mostRecent,
-        hasMembership: true,
-        hasPendingPayment: isPending,
-      };
-      return mapped;
-    });
+      }),
+    );
 
     return {
       data: mappedData,
@@ -288,8 +359,17 @@ export class MembersService {
   }
 
   async delete(id: string): Promise<void> {
-    const member = await this.findById(id);
-    await this.memberRepository.remove(member);
+    // 1. Eliminar el acompañante del grupo (group_companions table)
+    await this.memberRepository.manager.connection
+      .createQueryBuilder()
+      .delete()
+      .from('group_companions')
+      .where('memberId = :memberId', { memberId: id })
+      .execute();
+    
+    // 2. Eliminar todas las membresías del miembro (no el miembro mismo)
+    // Esto permite que el miembro siga existiendo pero sin membresías activas
+    await this.memberMembershipRepository.delete({ memberId: id });
   }
 
   async search(query: string, page: number = 1, limit: number = 10): Promise<{ data: Member[]; pagination: any }> {

@@ -92,15 +92,33 @@ export class GroupsService {
   }
 
   async getGroupById(groupId: string): Promise<Group> {
-    const group = await this.groupRepository.findOne({
-      where: { id: groupId },
-      relations: ['membership', 'responsibleUser', 'companions', 'companions.member', 'companions.member.user'],
-    });
+    // Usar QueryBuilder con leftJoinAndSelect para cargar companions frescos
+    const group = await this.groupRepository
+      .createQueryBuilder('group')
+      .where('group.id = :id', { id: groupId })
+      .leftJoinAndSelect('group.membership', 'membership')
+      .leftJoinAndSelect('group.companions', 'companions')
+      .leftJoinAndSelect('companions.member', 'member')
+      .leftJoinAndSelect('member.user', 'memberUser')
+      .getOne();
 
     if (!group) {
       throw new NotFoundException('Grupo no encontrado');
     }
 
+    // Cargar responsibleUser de forma independiente basada en responsibleUserId
+    console.log(`[getGroupById] 📋 Cargando responsibleUser para responsibleUserId: ${group.responsibleUserId}`);
+    if (group.responsibleUserId) {
+      const responsibleUser = await this.userRepository.findOne({
+        where: { id: group.responsibleUserId },
+      });
+      console.log(`[getGroupById] ✅ responsibleUser encontrado: ${responsibleUser?.id} - ${responsibleUser?.firstName} ${responsibleUser?.lastName}`);
+      if (responsibleUser) {
+        group.responsibleUser = responsibleUser;
+      }
+    }
+
+    console.log(`[getGroupById] 🔙 Retornando grupo - responsibleUserId: ${group.responsibleUserId}, responsibleUser.id: ${group.responsibleUser?.id}`);
     return group;
   }
 
@@ -195,17 +213,60 @@ export class GroupsService {
     return await this.groupRepository.save(group);
   }
 
-  async deleteGroup(groupId: string, requestingMemberId: string): Promise<void> {
+  async deleteGroup(
+    groupId: string,
+    requestingMemberId: string,
+    userRole?: string,
+  ): Promise<void> {
     const group = await this.getGroupById(groupId);
 
-    // Validar que solo el responsable puede eliminar
-    if (group.responsibleUserId !== requestingMemberId) {
-      throw new BadRequestException(
-        'Solo el responsable del grupo puede eliminarlo',
-      );
+    // ADMIN y ENCARGADO pueden eliminar cualquier grupo
+    const isAuthorizedRole =
+      userRole && ['admin', 'encargado'].includes(userRole.toLowerCase());
+
+    if (!isAuthorizedRole) {
+      // Si no es ADMIN/ENCARGADO, validar que sea el responsable del grupo
+      const requestingMember = await this.memberRepository.findOne({
+        where: { id: requestingMemberId },
+        relations: ['user'],
+      });
+
+      if (!requestingMember) {
+        throw new BadRequestException('Miembro no encontrado');
+      }
+
+      if (group.responsibleUserId !== requestingMember.user.id) {
+        throw new BadRequestException(
+          'Solo el responsable del grupo puede eliminarlo',
+        );
+      }
     }
 
+    console.log(`[deleteGroup] 🗑️ Eliminando grupo: ${groupId}`);
+
+    // Obtener todos los acompañantes del grupo
+    const companions = await this.groupCompanionRepository.find({
+      where: { groupId },
+    });
+
+    console.log(`[deleteGroup] 👥 Encontrados ${companions.length} acompañantes`);
+
+    // Remover membresía de cada acompañante
+    for (const companion of companions) {
+      console.log(
+        `[deleteGroup] 🗑️ Removiendo membresía del acompañante: ${companion.memberId}`,
+      );
+      await this.memberMembershipRepository.delete({
+        memberId: companion.memberId,
+      });
+    }
+
+    console.log(`[deleteGroup] ✅ Membresías de acompañantes removidas`);
+
+    // Eliminar el grupo
     await this.groupRepository.remove(group);
+
+    console.log(`[deleteGroup] ✅ Grupo eliminado exitosamente`);
   }
 
   async addCompanionToGroup(
@@ -273,6 +334,20 @@ export class GroupsService {
 
     // Usar insert en lugar de save para asegurar que es una inserción pura (sin triggers de update)
     await this.groupCompanionRepository.insert(newCompanion);
+    console.log(`[addCompanionToGroup] ✅ GroupCompanion creado: ${newCompanion.id}`);
+
+    // Crear la membresía para el acompañante
+    const memberMembership = new MemberMembership();
+    memberMembership.id = uuidv4();
+    memberMembership.memberId = memberId;
+    memberMembership.membershipId = group.membershipId;
+    memberMembership.groupId = groupId;
+    memberMembership.membershipType = 'companion';
+    memberMembership.startDate = new Date();
+    memberMembership.endDate = group.endDate;
+
+    await this.memberMembershipRepository.insert(memberMembership);
+    console.log(`[addCompanionToGroup] ✅ MemberMembership creada: ${memberMembership.id}`);
 
     // Incrementar contador de acompañantes usando un UPDATE directo
     // para evitar que TypeORM intente sincronizar las relaciones
@@ -280,6 +355,7 @@ export class GroupsService {
       { id: groupId },
       { companionCount: () => 'companionCount + 1' }
     );
+    console.log(`[addCompanionToGroup] ✅ Contador de acompañantes incrementado`);
 
     // Retornar el objeto directamente sin hacer query adicional
     return newCompanion;
@@ -290,12 +366,22 @@ export class GroupsService {
     companionId: string,
     requestingMemberId: string,
     userRole?: string,
-  ): Promise<void> {
-    const group = await this.getGroupById(groupId);
+  ): Promise<Group> {
+    console.log(`[removeCompanionFromGroup] 🗑️  Eliminando acompañante: ${companionId} del grupo: ${groupId}`);
+    
+    const group = await this.groupRepository.findOne({
+      where: { id: groupId },
+    });
+
+    if (!group) {
+      throw new NotFoundException('Grupo no encontrado');
+    }
 
     // Validar que solo el responsable o usuarios con roles específicos pueden remover acompañantes
     const isResponsible = group.responsibleUserId === requestingMemberId;
     const isAuthorizedRole = userRole && ['admin', 'encargado', 'empleado_cajero'].includes(userRole);
+    
+    console.log(`[removeCompanionFromGroup] isResponsible: ${isResponsible}, isAuthorizedRole: ${isAuthorizedRole}, userRole: ${userRole}`);
     
     if (!isResponsible && !isAuthorizedRole) {
       throw new BadRequestException(
@@ -306,6 +392,8 @@ export class GroupsService {
     const companion = await this.groupCompanionRepository.findOne({
       where: { id: companionId },
     });
+
+    console.log(`[removeCompanionFromGroup] ✅ Acompañante encontrado:`, companion);
 
     if (!companion) {
       throw new NotFoundException('Acompañante no encontrado');
@@ -318,52 +406,122 @@ export class GroupsService {
     }
 
     // Eliminar la membresía del acompañante
-    await this.memberMembershipRepository.delete({
+    console.log(`[removeCompanionFromGroup] 🗑️  Eliminando membresía del acompañante para memberId: ${companion.memberId}, groupId: ${groupId}`);
+    
+    // Primero, obtener las membresías para ver qué existe
+    const existingMemberships = await this.memberMembershipRepository.find({
+      where: {
+        memberId: companion.memberId,
+        groupId: groupId,
+      },
+    });
+    console.log(`[removeCompanionFromGroup] 📋 Membresías existentes:`, existingMemberships);
+    
+    const membershipDeleteResult = await this.memberMembershipRepository.delete({
       memberId: companion.memberId,
       groupId: groupId,
       membershipType: 'companion',
     });
+    console.log(`[removeCompanionFromGroup] ✅ Membresías eliminadas:`, membershipDeleteResult.affected);
 
-    // Eliminar acompañante
-    await this.groupCompanionRepository.remove(companion);
+    // Eliminar acompañante verificando que realmente se eliminó
+    console.log(`[removeCompanionFromGroup] 🗑️  Eliminando GroupCompanion con id: ${companionId}`);
+    
+    // Verificar que existe antes de eliminar
+    const companionBefore = await this.groupCompanionRepository.findOne({
+      where: { id: companionId },
+    });
+    console.log(`[removeCompanionFromGroup] 📋 Companion antes de eliminar:`, companionBefore ? 'EXISTE' : 'NO EXISTE');
+    
+    // Usar delete directo en el repository
+    const removeResult = await this.groupCompanionRepository.delete({
+      id: companionId,
+    });
+    console.log(`[removeCompanionFromGroup] ✅ Delete resultado - affected:`, removeResult.affected);
+    
+    // Verificar que se eliminó después con query builder para forzar lectura de BD
+    const companionAfter = await this.groupCompanionRepository
+      .createQueryBuilder('gc')
+      .where('gc.id = :id', { id: companionId })
+      .getOne();
+    console.log(`[removeCompanionFromGroup] 📋 Companion después de eliminar:`, companionAfter ? 'EXISTE ❌' : 'NO EXISTE ✅');
 
     // Decrementar contador
-    group.companionCount = Math.max(0, group.companionCount - 1);
-    await this.groupRepository.save(group);
+    console.log(`[removeCompanionFromGroup] 📝 Decrementando contador de acompañantes`);
+    await this.groupRepository.update(
+      { id: groupId },
+      { companionCount: () => 'companionCount - 1' }
+    );
+    console.log(`[removeCompanionFromGroup] ✅ Grupo actualizado - contador decrementado`);
+
+    // Limpiar cache de TypeORM para forzar que recargue desde BD
+    await this.groupRepository.manager.connection.queryResultCache?.remove([groupId]);
+    
+    // Retornar grupo actualizado
+    const result = await this.getGroupById(groupId);
+    console.log(`[removeCompanionFromGroup] ✅ Grupo retornado`);
+    return result;
   }
 
   async transferResponsibility(
     groupId: string,
-    newResponsibleUserId: string,
-    requestingMemberId: string,
+    newResponsibleMemberId: string,
+    requestingUserId: string,
+    requestingUserRole?: string,
   ): Promise<Group> {
-    const group = await this.getGroupById(groupId);
+    // Obtener grupo sin cache para esta operación
+    const group = await this.groupRepository.findOne({
+      where: { id: groupId },
+      relations: ['membership'],
+    });
 
-    // Validar que solo el responsable actual puede transferir
-    if (group.responsibleUserId !== requestingMemberId) {
+    if (!group) {
+      throw new NotFoundException('Grupo no encontrado');
+    }
+
+    console.log(`[TransferResponsibility] 📋 Grupo cargado - id: ${group.id}, groupId: ${group.id}, membershipId: ${group.membershipId}`);
+
+    // Permitir si es responsable actual, admin o encargado
+    const isResponsible = group.responsibleUserId === requestingUserId;
+    const isAdminOrManager = requestingUserRole && ['admin', 'encargado'].includes(requestingUserRole);
+    if (!isResponsible && !isAdminOrManager) {
       throw new BadRequestException(
-        'Solo el responsable actual puede transferir la responsabilidad',
+        'Solo el responsable actual, un admin o encargado pueden transferir la responsabilidad',
       );
     }
 
-    // Validar que el nuevo responsable es acompañante del grupo
-    // Buscar primero el miembro por userId
-    const member = await this.memberRepository.findOne({
-      where: { userId: newResponsibleUserId },
-    });
-    if (!member) {
-      throw new BadRequestException('Usuario no encontrado como miembro');
-    }
-
-    const companion = await this.groupCompanionRepository.findOne({
-      where: { groupId, memberId: member.id },
+    // Validar que el nuevo responsable existe como miembro
+    console.log(`[TransferResponsibility] 🔍 Validando nuevo responsable - newResponsibleMemberId: ${newResponsibleMemberId}`);
+    
+    const newResponsibleMemberExists = await this.memberRepository.findOne({
+      where: { id: newResponsibleMemberId },
     });
 
-    if (!companion) {
-      throw new BadRequestException(
-        'El nuevo responsable debe ser un acompañante del grupo',
-      );
+    if (!newResponsibleMemberExists) {
+      throw new BadRequestException('El nuevo responsable no existe como miembro');
     }
+
+    console.log(`[TransferResponsibility] ✅ Nuevo responsable es miembro válido`);
+
+    // Obtener el userId del nuevo responsable desde el miembro
+    const newResponsibleMember = await this.memberRepository.findOne({
+      where: { id: newResponsibleMemberId },
+      relations: ['user'],
+    });
+    
+    console.log(`[TransferResponsibility] 🔍 newResponsibleMember: ${JSON.stringify(newResponsibleMember)}`);
+    console.log(`[TransferResponsibility] 🔍 newResponsibleMember.userId: ${newResponsibleMember?.userId}`);
+    
+    if (!newResponsibleMember) {
+      throw new BadRequestException('Miembro no encontrado');
+    }
+    if (!newResponsibleMember.userId) {
+      throw new BadRequestException('El miembro no tiene userId asociado');
+    }
+    
+    const newResponsibleUserId = newResponsibleMember.userId;
+    
+    console.log(`[TransferResponsibility] ✅ newResponsibleUserId: ${newResponsibleUserId}`);
 
     // Cambiar membresía del antiguo responsable a 'companion'
     // Primero obtener el miembro del responsable actual
@@ -386,11 +544,50 @@ export class GroupsService {
       await this.memberMembershipRepository.save(oldResponsibleMembership);
     }
 
+    // Crear un GroupCompanion para el antiguo responsable si no existe
+    if (oldResponsibleMember) {
+      const oldResponsibleCompanion = await this.groupCompanionRepository.findOne({
+        where: { groupId, memberId: oldResponsibleMember.id },
+      });
+
+      if (!oldResponsibleCompanion) {
+        const newCompanion = new GroupCompanion();
+        newCompanion.id = uuidv4();
+        newCompanion.groupId = groupId;
+        newCompanion.memberId = oldResponsibleMember.id;
+        newCompanion.relationship = 'ex_responsible'; // Marcar como ex-responsable
+        newCompanion.status = 'active';
+
+        console.log(`[TransferResponsibility] 📝 Creando companion - id: ${newCompanion.id}, groupId: ${newCompanion.groupId}, memberId: ${newCompanion.memberId}`);
+        await this.groupCompanionRepository.insert(newCompanion);
+        console.log(`[TransferResponsibility] ✅ Antiguo responsable agregado como acompañante`);
+
+        // Crear también la membresía del antiguo responsable
+        const oldMemberMembership = new MemberMembership();
+        oldMemberMembership.id = uuidv4();
+        oldMemberMembership.memberId = oldResponsibleMember.id;
+        oldMemberMembership.membershipId = group.membershipId;
+        oldMemberMembership.groupId = groupId;
+        oldMemberMembership.membershipType = 'companion';
+        oldMemberMembership.startDate = new Date();
+        oldMemberMembership.endDate = group.endDate;
+
+        await this.memberMembershipRepository.insert(oldMemberMembership);
+        console.log(`[TransferResponsibility] ✅ MemberMembership creada para antiguo responsable`);
+
+        // Incrementar contador de acompañantes
+        await this.groupRepository.update(
+          { id: groupId },
+          { companionCount: () => 'companionCount + 1' }
+        );
+      }
+    }
+
     // Cambiar membresía del nuevo responsable a 'responsible'
     const newResponsibleMembership = await this.memberMembershipRepository.findOne(
       {
         where: {
-          memberId: member.id,
+          memberId: newResponsibleMemberId,
           groupId: groupId,
           membershipType: 'companion',
         },
@@ -402,8 +599,87 @@ export class GroupsService {
       await this.memberMembershipRepository.save(newResponsibleMembership);
     }
 
-    // Actualizar grupo
-    group.responsibleUserId = newResponsibleUserId;
-    return await this.groupRepository.save(group);
+    // Remover el nuevo responsable de GroupCompanion si existe
+    const newResponsibleCompanion = await this.groupCompanionRepository.findOne({
+      where: { groupId, memberId: newResponsibleMemberId },
+    });
+
+    if (newResponsibleCompanion) {
+      console.log(`[TransferResponsibility] 🗑️  Removiendo nuevo responsable de companions`);
+      await this.groupCompanionRepository
+        .createQueryBuilder()
+        .delete()
+        .from(GroupCompanion)
+        .where('id = :id', { id: newResponsibleCompanion.id })
+        .execute();
+      console.log(`[TransferResponsibility] ✅ Nuevo responsable removido de acompañantes`);
+
+      // Decrementar contador de acompañantes
+      await this.groupRepository.update(
+        { id: groupId },
+        { companionCount: () => 'companionCount - 1' }
+      );
+    } else {
+      console.log(`[TransferResponsibility] ℹ️  Nuevo responsable no es companion (probablemente era responsable actual)`);
+    }
+
+    // Actualizar grupo usando UPDATE directo para evitar sincronización de relaciones
+    console.log(`[TransferResponsibility] 📝 Actualizando grupo - responsibleUserId: ${group.responsibleUserId} → ${newResponsibleUserId}`);
+    await this.groupRepository.update(
+      { id: groupId },
+      { responsibleUserId: newResponsibleUserId }
+    );
+    console.log(`[TransferResponsibility] ✅ Grupo actualizado`);
+    
+    // Retornar el grupo con todas sus relaciones cargadas
+    const result = await this.getGroupById(groupId);
+    console.log(`[TransferResponsibility] ✅ Grupo retornado - responsibleUserId: ${result.responsibleUserId}`);
+    return result;
+  }
+
+  async getGroupsByResponsibleMember(memberId: string): Promise<Group[]> {
+    try {
+      console.log(
+        `[getGroupsByResponsibleMember] 🔍 Obteniendo grupos para miembro: ${memberId}`,
+      );
+
+      // Primero obtener el usuario asociado al miembro
+      const member = await this.memberRepository.findOne({
+        where: { id: memberId },
+        relations: ['user'],
+      });
+
+      if (!member) {
+        console.log(`[getGroupsByResponsibleMember] ⚠️ Miembro no encontrado`);
+        return [];
+      }
+
+      console.log(
+        `[getGroupsByResponsibleMember] 👤 Miembro encontrado, userId: ${member.user.id}`,
+      );
+
+      // Buscar grupos donde este usuario es responsable
+      const groups = await this.groupRepository
+        .createQueryBuilder('group')
+        .leftJoinAndSelect('group.membership', 'membership')
+        .leftJoinAndSelect('group.responsibleUser', 'responsibleUser')
+        .leftJoinAndSelect('group.companions', 'companions')
+        .leftJoinAndSelect('companions.member', 'member')
+        .leftJoinAndSelect('member.user', 'memberUser')
+        .where('group.responsibleUserId = :userId', { userId: member.user.id })
+        .cache(0)
+        .getMany();
+
+      console.log(
+        `[getGroupsByResponsibleMember] ✅ ${groups.length} grupo(s) encontrado(s)`,
+      );
+
+      return groups;
+    } catch (error) {
+      console.error(
+        `[getGroupsByResponsibleMember] ❌ Error: ${error.message}`,
+      );
+      throw error;
+    }
   }
 }

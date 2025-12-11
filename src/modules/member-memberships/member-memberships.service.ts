@@ -451,14 +451,45 @@ export class MemberMembershipsService {
       );
     }
 
-    // ELIMINAR COMPLETAMENTE el registro de la BD (no solo desactivar)
+    // PRIMERO: Eliminar al miembro de group_companions si es acompañante
+    console.log(`[REMOVE MEMBERSHIP] 🗑️ Eliminando de group_companions si existe...`);
+    
+    // Si es acompañante, obtener el groupId ANTES de eliminarlo
+    let groupIdToUpdate: string | null = null;
+    if (memberMembership.membershipType === 'companion' && memberMembership.groupId) {
+      groupIdToUpdate = memberMembership.groupId;
+      console.log(`[REMOVE MEMBERSHIP] Es acompañante - groupId: ${groupIdToUpdate}`);
+    }
+    
+    const groupCompanionDeleteResult = await this.memberMembershipRepository.manager.connection
+      .createQueryBuilder()
+      .delete()
+      .from('group_companions')
+      .where('memberId = :memberId', { memberId })
+      .execute();
+    
+    console.log(`[REMOVE MEMBERSHIP] ✓ Registros eliminados de group_companions: ${groupCompanionDeleteResult.affected}`);
+    
+    // Si se eliminó un acompañante, decrementar el contador del grupo
+    if (groupIdToUpdate && groupCompanionDeleteResult.affected && groupCompanionDeleteResult.affected > 0) {
+      console.log(`[REMOVE MEMBERSHIP] 📉 Decrementando contador de acompañantes para groupId: ${groupIdToUpdate}...`);
+      const updateResult = await this.memberMembershipRepository.manager.connection
+        .createQueryBuilder()
+        .update('groups')
+        .set({ companionCount: () => 'companionCount - 1' })
+        .where('id = :groupId', { groupId: groupIdToUpdate })
+        .execute();
+      console.log(`[REMOVE MEMBERSHIP] ✓ Contador de acompañantes decrementado - filas actualizadas: ${updateResult.affected}`);
+    }
+
+    // SEGUNDO: ELIMINAR COMPLETAMENTE el registro de MemberMembership de la BD (no solo desactivar)
     const deleteResult = await this.memberMembershipRepository.delete({
       id: memberMembership.id,
     });
     
     console.log(`[REMOVE MEMBERSHIP] ✓ Membresía eliminada de la BD: ${memberMembership.id} - Registros eliminados: ${deleteResult.affected}`);
 
-    // Actualizar el miembro para indicar que NO tiene membresía activa
+    // TERCERO: Actualizar el miembro para indicar que NO tiene membresía activa
     await this.memberRepository.update(
       { id: memberId },
       { hasMembership: false } as any,
@@ -469,27 +500,35 @@ export class MemberMembershipsService {
 
   /**
    * Obtener todas las membresías pendientes de pago
+   * FILTRO: Excluye acompañantes (companion)
+   * Agrega estado legible: "Responsable" o "Individual"
    */
   async getPendingPayments(
     page: number = 1,
     limit: number = 10,
-  ): Promise<{ data: MemberMembership[]; pagination: any }> {
+  ): Promise<{ data: any[]; pagination: any }> {
     const skip = (page - 1) * limit;
 
-    const [data, total] = await this.memberMembershipRepository.findAndCount({
-      where: {
-        paymentStatus: 'pending',
-      },
-      relations: ['membership', 'member'],
-      skip,
-      take: limit,
-      order: {
-        createdAt: 'DESC',
-      },
-    });
+    const [data, total] = await this.memberMembershipRepository
+      .createQueryBuilder('mm')
+      .leftJoinAndSelect('mm.membership', 'membership')
+      .leftJoinAndSelect('mm.member', 'member')
+      .leftJoinAndSelect('member.user', 'user')
+      .where('mm.paymentStatus = :status', { status: 'pending' })
+      .andWhere('mm.membershipType IN (:...allowedTypes)', { allowedTypes: ['individual', 'responsible'] })
+      .skip(skip)
+      .take(limit)
+      .orderBy('mm.createdAt', 'DESC')
+      .getManyAndCount();
+
+    // Mapear datos para incluir estado legible
+    const dataWithStatus = data.map((mm: any) => ({
+      ...mm,
+      membershipStatusLabel: mm.membershipType === 'responsible' ? 'Responsable' : 'Individual',
+    }));
 
     return {
-      data,
+      data: dataWithStatus,
       pagination: {
         page,
         limit,
