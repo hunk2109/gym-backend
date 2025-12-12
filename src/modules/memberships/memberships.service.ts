@@ -6,9 +6,11 @@ import { Membership, MembershipType } from '../../entities/membership.entity';
 import { MemberMembership } from '../../entities/member-membership.entity';
 import { Member } from '../../entities/member.entity';
 import { Payment, PaymentStatus, PaymentMethod, PaymentType } from '../../entities/payment.entity';
+import { CronExecutionLog } from '../../entities/cron-execution-log.entity';
 import { CreateMembershipDto, UpdateMembershipDto, AssignMembershipDto, RenewMembershipDto } from './dto/create-membership.dto';
 import { PromotionsService } from '../promotions/promotions.service';
 import { EmailService } from '../email-settings/email.service';
+import { GymSettingsService } from '../gym-settings/gym-settings.service';
 
 @Injectable()
 export class MembershipsService {
@@ -21,8 +23,11 @@ export class MembershipsService {
     private memberRepository: Repository<Member>,
     @InjectRepository(Payment)
     private paymentRepository: Repository<Payment>,
+    @InjectRepository(CronExecutionLog)
+    private cronExecutionLogRepository: Repository<CronExecutionLog>,
     private promotionsService: PromotionsService,
     private emailService: EmailService,
+    private gymSettingsService: GymSettingsService,
   ) {}
 
   // Membership CRUD
@@ -51,9 +56,10 @@ export class MembershipsService {
       benefits: createMembershipDto.benefits,
       type: membershipType,
       isActive: createMembershipDto.isActive !== undefined ? createMembershipDto.isActive : true,
+      maxGroupCompanions: createMembershipDto.maxGroupCompanions,
     });
     
-    console.log('[MembershipsService] Creating membership with type:', membership.type);
+    console.log('[MembershipsService] Creating membership with type:', membership.type, 'maxGroupCompanions:', membership.maxGroupCompanions);
     return this.membershipRepository.save(membership);
   }
 
@@ -90,7 +96,9 @@ export class MembershipsService {
   async updateMembership(id: string, updateMembershipDto: UpdateMembershipDto): Promise<Membership> {
     const membership = await this.getMembershipById(id);
 
+    console.log('[MembershipsService] Updating membership:', id, 'with:', updateMembershipDto);
     Object.assign(membership, updateMembershipDto);
+    console.log('[MembershipsService] Membership after assign:', membership);
 
     return this.membershipRepository.save(membership);
   }
@@ -339,7 +347,22 @@ export class MembershipsService {
    * Genera nueva membresía con pago pendiente
    */
   async autoRenewExpiredMemberships(): Promise<{ renewed: number; suspended: number }> {
+    const startTime = Date.now();
+    console.log(`[MembershipsService] 🔄 Iniciando auto-renovación de membresías expiradas...`);
+
     const today = new Date();
+
+    // Obtener la configuración del gimnasio para los días de suspensión
+    let suspensionDays = 15; // default
+    try {
+      const gymSettings = await this.gymSettingsService.getSettings();
+      if (gymSettings && gymSettings.membershipSuspensionDays) {
+        suspensionDays = gymSettings.membershipSuspensionDays;
+        console.log(`[MembershipsService] Auto-renewal usando ${suspensionDays} días para suspensión`);
+      }
+    } catch (error) {
+      console.warn(`[MembershipsService] No se pudo obtener settings de gym, usando default: ${suspensionDays}`, error);
+    }
 
     // Encontrar membresías expiradas que deben renovarse
     const expiredRecurring = await this.memberMembershipRepository
@@ -349,6 +372,8 @@ export class MembershipsService {
       .andWhere('mm.isActive = true')
       .andWhere('mm.isRecurring = true')
       .getMany();
+
+    console.log(`[MembershipsService] Encontradas ${expiredRecurring.length} membresías expiradas`);
 
     let renewed = 0;
     let suspended = 0;
@@ -361,55 +386,66 @@ export class MembershipsService {
           (today.getTime() - new Date(currentMembership.endDate).getTime()) / (1000 * 60 * 60 * 24),
         );
 
-        if (daysSinceDue > 15) {
+        if (daysSinceDue > suspensionDays) {
           // Suspender membresía
           currentMembership.isActive = false;
           currentMembership.paymentStatus = 'suspended';
           currentMembership.suspensionDate = today;
           await this.memberMembershipRepository.save(currentMembership);
+          console.log(`[MembershipsService] ⛔ Membresía suspendida - Miembro: ${currentMembership.memberId}, Días vencido: ${daysSinceDue}`);
           suspended++;
         } else {
-          // Renovar con pago pendiente
+          // Renovar con pago pendiente - Actualizar la membresía existente
           const newStartDate = currentMembership.endDate;
           const newEndDate = new Date(newStartDate);
           newEndDate.setMonth(newEndDate.getMonth() + currentMembership.membership.durationMonths);
 
-          const newMembership = this.memberMembershipRepository.create({
-            id: uuidv4(),
-            memberId: currentMembership.memberId,
-            membershipId: currentMembership.membershipId,
-            startDate: newStartDate,
-            endDate: newEndDate,
-            paymentStatus: 'pending',
-            isRecurring: true,
-            isActive: true,
-          });
-
-          await this.memberMembershipRepository.save(newMembership);
+          currentMembership.startDate = newStartDate;
+          currentMembership.endDate = newEndDate;
+          currentMembership.paymentStatus = 'pending';
+          currentMembership.isActive = true;
+          
+          await this.memberMembershipRepository.save(currentMembership);
+          console.log(`[MembershipsService] ✅ Membresía renovada con pago pendiente - Miembro: ${currentMembership.memberId}`);
           renewed++;
         }
       } else if (currentMembership.paymentStatus === 'paid') {
-        // Si ya pagó, renovar automáticamente
+        // Si ya pagó, renovar automáticamente - Actualizar la membresía existente
         const newStartDate = currentMembership.endDate;
         const newEndDate = new Date(newStartDate);
         newEndDate.setMonth(newEndDate.getMonth() + currentMembership.membership.durationMonths);
 
-        const newMembership = this.memberMembershipRepository.create({
-          id: uuidv4(),
-          memberId: currentMembership.memberId,
-          membershipId: currentMembership.membershipId,
-          startDate: newStartDate,
-          endDate: newEndDate,
-          paymentStatus: 'pending',
-          isRecurring: true,
-          isActive: true,
-        });
-
-        await this.memberMembershipRepository.save(newMembership);
+        currentMembership.startDate = newStartDate;
+        currentMembership.endDate = newEndDate;
+        currentMembership.paymentStatus = 'pending';
+        currentMembership.isActive = true;
+        
+        await this.memberMembershipRepository.save(currentMembership);
+        console.log(`[MembershipsService] ✅ Membresía renovada automáticamente - Miembro: ${currentMembership.memberId}`);
         renewed++;
       }
     }
 
+    // Registrar en logs de ejecución del cronjob
+    const executionTimeMs = Date.now() - startTime;
+    const totalProcessed = renewed + suspended;
+    
+    try {
+      const log = this.cronExecutionLogRepository.create({
+        cronName: 'auto-renew-expired-memberships',
+        description: `Renovadas: ${renewed}, Suspendidas: ${suspended}`,
+        status: 'success',
+        executionTimeMs,
+        itemsProcessed: totalProcessed,
+      });
+      await this.cronExecutionLogRepository.save(log);
+      console.log(`[MembershipsService] ✅ Log registrado en BD`);
+    } catch (error) {
+      console.error(`[MembershipsService] Error al registrar log:`, error);
+    }
+
+    console.log(`[MembershipsService] ✅ Auto-renovación completada en ${executionTimeMs}ms - Renovadas: ${renewed}, Suspendidas: ${suspended}`);
+    
     return { renewed, suspended };
   }
 
@@ -655,4 +691,5 @@ export class MembershipsService {
       message: `Sincronización completada. ${pendingMemberships.length} membresías con pago pendiente están disponibles en el sistema de pagos.`,
     };
   }
+
 }

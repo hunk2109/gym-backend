@@ -18,7 +18,6 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { MembershipValidationService } from '../../services/membership-validation.service';
 
 @Controller('members')
-@UseGuards(JwtAuthGuard)
 export class MembersController {
   private readonly logger = new Logger(MembersController.name);
 
@@ -28,6 +27,7 @@ export class MembersController {
   ) {}
 
   @Get()
+  @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
   async findAll(@Query('page') page: string = '1', @Query('limit') limit: string = '10') {
     const result = await this.membersService.findAll(parseInt(page), parseInt(limit));

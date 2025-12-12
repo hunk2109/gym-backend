@@ -9,13 +9,11 @@ export class MembershipsCronService {
   constructor(private readonly membershipsService: MembershipsService) {}
 
   /**
-   * Ejecuta renovación automática de membresías diariamente a las 2:00 AM
-   * - Renueva membresías con pago pendiente (menos de 15 días vencidas)
-   * - Suspende membresías con pago pendiente (más de 15 días vencidas)
-   * 
-   * DESHABILITADO: El cron se ejecutará cuando esté listo para production
+   * Ejecuta renovación automática de membresías cada 30 minutos
+   * - Renueva membresías con pago pendiente (menos de X días vencidas)
+   * - Suspende membresías con pago pendiente (más de X días vencidas)
    */
-  // @Cron(CronExpression.EVERY_DAY_AT_2AM)
+  @Cron('0 */30 * * * *')
   async handleMembershipRenewal() {
     try {
       this.logger.log('Iniciando renovación automática de membresías...');

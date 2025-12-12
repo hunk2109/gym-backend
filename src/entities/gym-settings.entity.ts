@@ -58,6 +58,9 @@ export class GymSettings {
   @Column({ type: 'uuid', nullable: true })
   birthdayDiscountCouponId: string | null;
 
+  @Column({ type: 'int', default: 15 })
+  membershipSuspensionDays: number; // Días para suspender membresía con pago pendiente
+
   @CreateDateColumn()
   createdAt: Date;
 

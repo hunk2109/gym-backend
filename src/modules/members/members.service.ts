@@ -291,6 +291,7 @@ export class MembersService {
             currentMembership: null,
             hasMembership: false,
             hasPendingPayment: !!pendingRegistrationPayment,
+            isMembershipSuspended: false,
           };
           return mapped;
         }
@@ -369,6 +370,8 @@ export class MembersService {
           }
         }
 
+        const isMembershipSuspended = mostRecent.paymentStatus === 'suspended';
+
         const mapped = {
           ...member,
           memberships: sortedMemberships,
@@ -377,6 +380,7 @@ export class MembersService {
           hasPendingPayment: isPending,
           membershipType: mostRecent.membershipType,
           membershipStatusLabel,
+          isMembershipSuspended,
         };
         return mapped;
       }),

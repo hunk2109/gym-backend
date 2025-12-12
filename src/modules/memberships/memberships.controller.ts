@@ -72,6 +72,16 @@ export class MembershipsController {
     };
   }
 
+  // RUTAS ESPECÍFICAS - Deben ir ANTES de @Post() genérico
+
+  // Sincronizar membresías pendientes con sistema de pagos
+  @Post('sync-with-payments')
+  @Roles(UserRole.ADMIN, UserRole.ENCARGADO)
+  @HttpCode(HttpStatus.OK)
+  async syncWithPayments() {
+    return this.membershipsService.syncPendingMembershipsToPayments();
+  }
+
   // Membership endpoints - Ver todas las membresías
   @Get()
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -223,22 +233,6 @@ export class MemberMembershipsController {
     @Body() body: { amountPaid: number; paymentDate: Date },
   ) {
     return this.membershipsService.recordPayment(id, body.amountPaid, body.paymentDate);
-  }
-
-  // Renovación automática de membresías expiradas
-  @Post('auto-renew')
-  @Roles(UserRole.ADMIN, UserRole.ENCARGADO)
-  @HttpCode(HttpStatus.OK)
-  async autoRenewExpiredMemberships() {
-    return this.membershipsService.autoRenewExpiredMemberships();
-  }
-
-  // Sincronizar membresías pendientes con sistema de pagos
-  @Post('sync-with-payments')
-  @Roles(UserRole.ADMIN, UserRole.ENCARGADO)
-  @HttpCode(HttpStatus.OK)
-  async syncWithPayments() {
-    return this.membershipsService.syncPendingMembershipsToPayments();
   }
 
   // Remover membresía por ID

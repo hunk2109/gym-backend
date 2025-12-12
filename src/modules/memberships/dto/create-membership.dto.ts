@@ -34,6 +34,10 @@ export class CreateMembershipDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  @IsOptional()
+  @IsNumber()
+  maxGroupCompanions?: number; // null = unlimited, solo para membresías grupo
 }
 
 export class UpdateMembershipDto {
@@ -60,6 +64,10 @@ export class UpdateMembershipDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  @IsOptional()
+  @IsNumber()
+  maxGroupCompanions?: number; // null = unlimited, solo para membresías grupo
 }
 
 export class AssignMembershipDto {

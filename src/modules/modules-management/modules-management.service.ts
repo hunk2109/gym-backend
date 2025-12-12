@@ -9,13 +9,18 @@ export class ModulesManagementService {
   private readonly logger = new Logger('ModulesManagementService');
 
   private readonly DEFAULT_MODULES = [
-    { moduleName: 'inventory', description: 'Gestión de Inventario', settings: {} },
-    { moduleName: 'sales', description: 'Gestión de Ventas', settings: {} },
-    { moduleName: 'memberships', description: 'Gestión de Membresías', settings: { sendWelcomeEmailToMembers: false } },
-    { moduleName: 'employees', description: 'Gestión de Empleados', settings: { sendWelcomeEmailToEmployees: true } },
     { moduleName: 'dashboard', description: 'Dashboard Principal', settings: {} },
-    { moduleName: 'reports', description: 'Reportes', settings: {} },
+    { moduleName: 'members', description: 'Gestión de Miembros', settings: {} },
+    { moduleName: 'memberships', description: 'Gestión de Membresías', settings: { sendWelcomeEmailToMembers: false } },
     { moduleName: 'payments', description: 'Gestión de Pagos', settings: {} },
+    { moduleName: 'attendances', description: 'Gestión de Asistencias', settings: {} },
+    { moduleName: 'sales', description: 'Gestión de Ventas', settings: {} },
+    { moduleName: 'inventory', description: 'Gestión de Inventario', settings: {} },
+    { moduleName: 'employees', description: 'Gestión de Empleados', settings: { sendWelcomeEmailToEmployees: true } },
+    { moduleName: 'hr', description: 'Recursos Humanos', settings: {} },
+    { moduleName: 'payroll', description: 'Gestión de Nómina', settings: {} },
+    { moduleName: 'groups', description: 'Gestión de Grupos', settings: {} },
+    { moduleName: 'reports', description: 'Reportes', settings: {} },
     { moduleName: 'audit_logs', description: 'Registros de Auditoría', settings: {} },
   ];
 
@@ -41,6 +46,28 @@ export class ModulesManagementService {
 
       await this.moduleSettingsRepository.save(modules);
       this.logger.log('Módulos inicializados correctamente');
+    } else {
+      // Si hay módulos, agregar los que falten
+      this.logger.log('Sincronizando módulos faltantes...');
+      
+      for (const defaultModule of this.DEFAULT_MODULES) {
+        const existing = await this.moduleSettingsRepository.findOne({
+          where: { moduleName: defaultModule.moduleName },
+        });
+
+        if (!existing) {
+          this.logger.log(`Agregando módulo faltante: ${defaultModule.moduleName}`);
+          const newModule = this.moduleSettingsRepository.create({
+            moduleName: defaultModule.moduleName,
+            description: defaultModule.description,
+            isEnabled: true,
+            settings: defaultModule.settings || {},
+          });
+          await this.moduleSettingsRepository.save(newModule);
+        }
+      }
+
+      this.logger.log('Sincronización de módulos completada');
     }
   }
 

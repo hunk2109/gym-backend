@@ -8,14 +8,17 @@ import { Membership } from '../../entities/membership.entity';
 import { MemberMembership } from '../../entities/member-membership.entity';
 import { Member } from '../../entities/member.entity';
 import { Payment } from '../../entities/payment.entity';
+import { CronExecutionLog } from '../../entities/cron-execution-log.entity';
 import { PromotionsModule } from '../promotions/promotions.module';
 import { EmailSettingsModule } from '../email-settings/email-settings.module';
+import { GymSettingsModule } from '../gym-settings/gym-settings.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Membership, MemberMembership, Member, Payment]),
+    TypeOrmModule.forFeature([Membership, MemberMembership, Member, Payment, CronExecutionLog]),
     PromotionsModule,
     EmailSettingsModule,
+    GymSettingsModule,
   ],
   controllers: [MembershipsController],
   providers: [MembershipsService, MembershipsSeeder, MembershipsCronService],

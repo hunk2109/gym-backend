@@ -8,6 +8,7 @@ import { Member } from '../../entities/member.entity';
 import { Membership } from '../../entities/membership.entity';
 import { MemberMembership } from '../../entities/member-membership.entity';
 import { User } from '../../entities/user.entity';
+import { Payment, PaymentStatus } from '../../entities/payment.entity';
 
 @Injectable()
 export class GroupsService {
@@ -24,6 +25,8 @@ export class GroupsService {
     private memberMembershipRepository: Repository<MemberMembership>,
     @InjectRepository(User)
     private userRepository: Repository<User>,
+    @InjectRepository(Payment)
+    private paymentRepository: Repository<Payment>,
   ) {}
 
   async createGroup(
@@ -117,6 +120,9 @@ export class GroupsService {
         group.responsibleUser = responsibleUser;
       }
     }
+
+    // Asegurar que membership está presente
+    console.log(`[getGroupById] 📋 Membership: ${group.membership ? `CARGADA - maxGroupCompanions: ${group.membership.maxGroupCompanions}` : 'NO CARGADA'}`);
 
     console.log(`[getGroupById] 🔙 Retornando grupo - responsibleUserId: ${group.responsibleUserId}, responsibleUser.id: ${group.responsibleUser?.id}`);
     return group;
@@ -357,6 +363,9 @@ export class GroupsService {
     );
     console.log(`[addCompanionToGroup] ✅ Contador de acompañantes incrementado`);
 
+    // Recalcular el pago del grupo basado en la nueva cantidad de miembros
+    await this.recalculateGroupPayment(groupId);
+
     // Retornar el objeto directamente sin hacer query adicional
     return newCompanion;
   }
@@ -453,6 +462,9 @@ export class GroupsService {
       { companionCount: () => 'companionCount - 1' }
     );
     console.log(`[removeCompanionFromGroup] ✅ Grupo actualizado - contador decrementado`);
+
+    // Recalcular el pago del grupo basado en la nueva cantidad de miembros
+    await this.recalculateGroupPayment(groupId);
 
     // Limpiar cache de TypeORM para forzar que recargue desde BD
     await this.groupRepository.manager.connection.queryResultCache?.remove([groupId]);
@@ -680,6 +692,72 @@ export class GroupsService {
         `[getGroupsByResponsibleMember] ❌ Error: ${error.message}`,
       );
       throw error;
+    }
+  }
+
+  /**
+   * Recalcular el monto del pago del grupo basado en la cantidad de miembros actuales
+   * Precio de membresía × (1 responsable + cantidad de acompañantes activos)
+   */
+  private async recalculateGroupPayment(groupId: string): Promise<void> {
+    try {
+      console.log(`[recalculateGroupPayment] 🔄 Recalculando pago para grupo: ${groupId}`);
+
+      // Obtener grupo con membresía y acompañantes
+      const group = await this.groupRepository
+        .createQueryBuilder('group')
+        .leftJoinAndSelect('group.membership', 'membership')
+        .leftJoinAndSelect('group.companions', 'companions')
+        .where('group.id = :id', { id: groupId })
+        .getOne();
+
+      if (!group) {
+        console.warn(`[recalculateGroupPayment] ⚠️ Grupo no encontrado: ${groupId}`);
+        return;
+      }
+
+      // Calcular cantidad de miembros: 1 responsable + acompañantes activos
+      const activeCompanions = group.companions?.filter((c) => c.status === 'active').length ?? 0;
+      const totalMembers = 1 + activeCompanions; // 1 responsable + acompañantes
+
+      const membershipPrice = parseFloat(group.membership.price as any) || 0;
+      const newAmount = membershipPrice * totalMembers;
+
+      console.log(`[recalculateGroupPayment] 📊 Cálculo:`);
+      console.log(`  - Precio membresía: $${membershipPrice}`);
+      console.log(`  - Miembros: 1 responsable + ${activeCompanions} acompañantes = ${totalMembers}`);
+      console.log(`  - Nuevo monto total: $${newAmount}`);
+
+      // Obtener el miembro responsable del grupo para encontrar su payment PENDING
+      const responsibleMember = await this.memberRepository.findOne({
+        where: { userId: group.responsibleUserId },
+      });
+
+      if (!responsibleMember) {
+        console.warn(`[recalculateGroupPayment] ⚠️ Miembro responsable no encontrado`);
+        return;
+      }
+
+      // Buscar el payment PENDING más reciente del grupo (membresía grupal)
+      const pendingPayment = await this.paymentRepository
+        .createQueryBuilder('payment')
+        .where('payment.memberId = :memberId', { memberId: responsibleMember.id })
+        .andWhere('payment.status = :status', { status: PaymentStatus.PENDING })
+        .andWhere('payment.paymentType = :paymentType', { paymentType: 'MEMBERSHIP' })
+        .orderBy('payment.createdAt', 'DESC')
+        .getOne();
+
+      if (pendingPayment) {
+        // Actualizar el monto del payment
+        pendingPayment.amount = newAmount;
+        await this.paymentRepository.save(pendingPayment);
+        console.log(`[recalculateGroupPayment] ✅ Pago actualizado: ${pendingPayment.id} - Nuevo monto: $${newAmount}`);
+      } else {
+        console.warn(`[recalculateGroupPayment] ⚠️ No se encontró pago PENDING para el responsable`);
+      }
+    } catch (error) {
+      console.error(`[recalculateGroupPayment] ❌ Error: ${error.message}`);
+      // No lanzar error - no debe bloquear la operación principal
     }
   }
 }

@@ -44,6 +44,11 @@ export class CreateGymSettingsDto {
   membershipPrice?: number;
 
   @IsOptional()
+  @Transform(({ value }) => value ? parseInt(value) : undefined)
+  @IsNumber()
+  membershipSuspensionDays?: number;
+
+  @IsOptional()
   @IsString()
   policies?: string;
 }
@@ -89,6 +94,11 @@ export class UpdateGymSettingsDto {
   @Transform(({ value }) => value ? parseFloat(value) : undefined)
   @IsNumber()
   membershipPrice?: number;
+
+  @IsOptional()
+  @Transform(({ value }) => value ? parseInt(value) : undefined)
+  @IsNumber()
+  membershipSuspensionDays?: number;
 
   @IsOptional()
   @IsString()

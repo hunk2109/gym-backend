@@ -11,7 +11,7 @@ export class GymSettingsController {
   constructor(private readonly gymSettingsService: GymSettingsService) {}
 
   // Crear configuración del gimnasio - Solo ADMIN
-  @Post()
+  @Post('create')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
   @HttpCode(HttpStatus.CREATED)

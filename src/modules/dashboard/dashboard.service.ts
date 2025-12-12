@@ -50,12 +50,12 @@ export class DashboardService {
 
     const salesTotal = salesResult.total ? parseFloat(salesResult.total) : 0;
 
-    // Ingresos de membresías pagadas
-    const membershipResult = await this.memberMembershipRepository
-      .createQueryBuilder('mm')
-      .select('SUM(m.price)', 'total')
-      .leftJoin(Membership, 'm', 'm.id = mm.membershipId')
-      .where('mm.paymentStatus = :status', { status: 'paid' })
+    // Ingresos de membresías (tabla payments con paymentType MEMBERSHIP)
+    const membershipResult = await this.paymentRepository
+      .createQueryBuilder('payment')
+      .select('SUM(payment.amount)', 'total')
+      .where('payment.paymentType = :type', { type: 'MEMBERSHIP' })
+      .andWhere('payment.status = :status', { status: 'COMPLETED' })
       .getRawOne();
 
     const membershipTotal = membershipResult.total ? parseFloat(membershipResult.total) : 0;
@@ -239,12 +239,13 @@ export class DashboardService {
 
   async getMembershipRevenue(): Promise<number> {
     try {
-      const result = await this.memberMembershipRepository.query(`
-        SELECT SUM(mm.amountPaid) as total
-        FROM member_memberships mm
-        WHERE mm.paymentStatus = 'paid'
-      `);
-      return result[0]?.total ? parseFloat(result[0].total) : 0;
+      const result = await this.paymentRepository
+        .createQueryBuilder('payment')
+        .select('SUM(payment.amount)', 'total')
+        .where('payment.paymentType = :type', { type: 'MEMBERSHIP' })
+        .where('payment.status = :status', { status: 'COMPLETED' })
+        .getRawOne();
+      return result.total ? parseFloat(result.total) : 0;
     } catch (error) {
       console.error('[Dashboard] Error en getMembershipRevenue:', error);
       return 0;
@@ -254,16 +255,19 @@ export class DashboardService {
   async getMembershipRevenueByType() {
     try {
       console.log('[Dashboard] Iniciando getMembershipRevenueByType');
-      const result = await this.memberMembershipRepository.query(`
+      // Usar tabla payments y hacer LEFT JOIN con member_memberships para obtener el tipo de membresía
+      const result = await this.paymentRepository.query(`
         SELECT 
-          m.name,
-          COUNT(mm.id) as count,
-          SUM(mm.amountPaid) as revenue
-        FROM member_memberships mm
-        INNER JOIN memberships m ON m.id = mm.membershipId
-        WHERE mm.paymentStatus = 'paid'
+          COALESCE(m.name, 'Sin especificar') as name,
+          COUNT(p.id) as count,
+          SUM(p.amount) as revenue
+        FROM payments p
+        LEFT JOIN members mb ON p.memberId = mb.id
+        LEFT JOIN member_memberships mm ON mm.memberId = mb.id AND mm.isActive = true
+        LEFT JOIN memberships m ON m.id = mm.membershipId
+        WHERE p.paymentType = 'MEMBERSHIP' AND p.status = 'COMPLETED'
         GROUP BY m.id, m.name
-        HAVING SUM(mm.amountPaid) > 0
+        HAVING SUM(p.amount) > 0
         ORDER BY revenue DESC
       `);
 
@@ -326,12 +330,11 @@ export class DashboardService {
       `);
       const salesRevenue = salesResult[0]?.revenue ? parseFloat(salesResult[0].revenue) : 0;
 
-      // Ingresos de membresías
-      const membershipResult = await this.memberMembershipRepository.query(`
-        SELECT SUM(m.price) as revenue
-        FROM member_memberships mm
-        INNER JOIN memberships m ON m.id = mm.membershipId
-        WHERE mm.paymentStatus = 'paid'
+      // Ingresos de membresías (tabla payments con paymentType MEMBERSHIP)
+      const membershipResult = await this.paymentRepository.query(`
+        SELECT SUM(amount) as revenue
+        FROM payments
+        WHERE paymentType = 'MEMBERSHIP' AND status = 'COMPLETED'
       `);
       const membershipRevenue = membershipResult[0]?.revenue ? parseFloat(membershipResult[0].revenue) : 0;
 

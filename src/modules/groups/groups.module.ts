@@ -6,6 +6,7 @@ import { Member } from '../../entities/member.entity';
 import { Membership } from '../../entities/membership.entity';
 import { MemberMembership } from '../../entities/member-membership.entity';
 import { User } from '../../entities/user.entity';
+import { Payment } from '../../entities/payment.entity';
 import { GroupsService } from './groups.service';
 import { GroupsController } from './groups.controller';
 
@@ -18,6 +19,7 @@ import { GroupsController } from './groups.controller';
       Membership,
       MemberMembership,
       User,
+      Payment,
     ]),
   ],
   controllers: [GroupsController],
