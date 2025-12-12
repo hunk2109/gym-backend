@@ -9,3 +9,13 @@ export class RegisterByCodeDto {
   @MaxLength(500)
   notes?: string;
 }
+
+export class RegisterByNameDto {
+  @IsString()
+  memberName: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  notes?: string;
+}

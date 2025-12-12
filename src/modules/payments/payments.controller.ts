@@ -131,6 +131,16 @@ export class PaymentsController {
     return this.paymentsService.recordRefund(id, body.refundAmount);
   }
 
+  @Post('registration/:memberId/complete')
+  @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO)
+  @HttpCode(HttpStatus.OK)
+  async completeRegistrationPayment(
+    @Param('memberId') memberId: string,
+    @Body() body: { paymentMethod?: string },
+  ): Promise<any> {
+    return this.paymentsService.completeRegistrationPayment(memberId, body.paymentMethod || 'cash');
+  }
+
   @Delete(':id')
   @Roles(UserRole.ADMIN)
   @HttpCode(HttpStatus.NO_CONTENT)

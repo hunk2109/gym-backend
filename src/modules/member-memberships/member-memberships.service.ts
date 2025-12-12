@@ -109,6 +109,21 @@ export class MemberMembershipsService {
       throw new NotFoundException(`Miembro con ID ${memberId} no encontrado`);
     }
 
+    // ✅ Verificar que NO hay pago de inscripción pendiente
+    const pendingRegistrationPayment = await this.paymentRepository.findOne({
+      where: {
+        memberId: memberId,
+        paymentType: PaymentType.REGISTRATION,
+        status: PaymentStatus.PENDING,
+      },
+    });
+
+    if (pendingRegistrationPayment) {
+      throw new BadRequestException(
+        `No se puede asignar membresía. El miembro tiene un pago de inscripción pendiente por $${pendingRegistrationPayment.amount}. Debe completar el pago primero.`,
+      );
+    }
+
     // Verificar que la membresía existe
     const membership = await this.membershipRepository.findOne({
       where: { id: dto.membershipId },
@@ -509,26 +524,52 @@ export class MemberMembershipsService {
   ): Promise<{ data: any[]; pagination: any }> {
     const skip = (page - 1) * limit;
 
-    const [data, total] = await this.memberMembershipRepository
+    // Obtener membresías pendientes
+    const [membershipData, membershipTotal] = await this.memberMembershipRepository
       .createQueryBuilder('mm')
       .leftJoinAndSelect('mm.membership', 'membership')
       .leftJoinAndSelect('mm.member', 'member')
       .leftJoinAndSelect('member.user', 'user')
       .where('mm.paymentStatus = :status', { status: 'pending' })
       .andWhere('mm.membershipType IN (:...allowedTypes)', { allowedTypes: ['individual', 'responsible'] })
-      .skip(skip)
-      .take(limit)
       .orderBy('mm.createdAt', 'DESC')
       .getManyAndCount();
 
-    // Mapear datos para incluir estado legible
-    const dataWithStatus = data.map((mm: any) => ({
+    // Obtener pagos de inscripción pendientes
+    const registrationPayments = await this.paymentRepository
+      .createQueryBuilder('payment')
+      .leftJoinAndSelect('payment.member', 'member')
+      .leftJoinAndSelect('member.user', 'user')
+      .where('payment.paymentType = :type', { type: 'registration' })
+      .andWhere('payment.status = :status', { status: 'pending' })
+      .orderBy('payment.createdAt', 'DESC')
+      .getMany();
+
+    // Mapear datos de membresías
+    const mappedMemberships = membershipData.map((mm: any) => ({
       ...mm,
       membershipStatusLabel: mm.membershipType === 'responsible' ? 'Responsable' : 'Individual',
+      paymentType: 'membership',
     }));
 
+    // Mapear datos de pagos de inscripción
+    const mappedRegistration = registrationPayments.map((payment: any) => ({
+      id: payment.id,
+      memberId: payment.memberId,
+      member: payment.member,
+      amount: payment.amount,
+      paymentType: 'registration',
+      membershipStatusLabel: 'Inscripción Pendiente',
+      createdAt: payment.createdAt,
+    }));
+
+    // Combinar y paginar
+    const allData = [...mappedMemberships, ...mappedRegistration];
+    const total = allData.length;
+    const paginatedData = allData.slice(skip, skip + limit);
+
     return {
-      data: dataWithStatus,
+      data: paginatedData,
       pagination: {
         page,
         limit,

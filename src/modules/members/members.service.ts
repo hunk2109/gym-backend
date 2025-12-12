@@ -5,6 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { Member } from '../../entities/member.entity';
 import { User } from '../../entities/user.entity';
 import { MemberMembership } from '../../entities/member-membership.entity';
+import { Payment, PaymentType, PaymentStatus, PaymentMethod } from '../../entities/payment.entity';
 import { CreateMemberDto, UpdateMemberDto } from './dto/create-member.dto';
 import { EmailService } from '../email-settings/email.service';
 import { ModulesManagementService } from '../modules-management/modules-management.service';
@@ -21,6 +22,8 @@ export class MembersService {
     private userRepository: Repository<User>,
     @InjectRepository(MemberMembership)
     private memberMembershipRepository: Repository<MemberMembership>,
+    @InjectRepository(Payment)
+    private paymentRepository: Repository<Payment>,
     private emailService: EmailService,
     private modulesManagementService: ModulesManagementService,
     private gymSettingsService: GymSettingsService,
@@ -87,6 +90,36 @@ export class MembersService {
 
     const member = this.memberRepository.create(memberData);
     const savedMember = (await this.memberRepository.save(member)) as unknown as Member;
+
+    // Crear pago de inscripción pendiente
+    try {
+      const gymSettings = await this.gymSettingsService.getSettings();
+      const registrationPrice = gymSettings?.membershipPrice || 0;
+
+      console.log(`[MembersService] 🏋️ GymSettings.membershipPrice: ${registrationPrice}`, gymSettings);
+
+      if (registrationPrice > 0) {
+        const registrationPayment = this.paymentRepository.create({
+          id: uuidv4(),
+          memberId: savedMember.id,
+          member: savedMember,
+          amount: registrationPrice,
+          paymentType: PaymentType.REGISTRATION,
+          status: PaymentStatus.PENDING,
+          description: 'Pago de inscripción',
+          paymentMethod: PaymentMethod.CASH,
+          paymentDate: null,
+        });
+
+        await this.paymentRepository.save(registrationPayment);
+        console.log(`[MembersService] 💳 Registration payment created for member ${savedMember.id}: $${registrationPrice}`);
+        this.logger.log(`Registration payment created for member ${savedMember.id}: $${registrationPrice}`);
+      }
+    } catch (paymentError) {
+      console.error(`[MembersService] ❌ Failed to create registration payment: ${paymentError.message}`);
+      this.logger.error(`Failed to create registration payment for member ${savedMember.id}`, paymentError);
+      // No fallar la creación del miembro si el pago no se crea
+    }
 
     // Enviar email de bienvenida
     try {
@@ -204,6 +237,7 @@ export class MembersService {
       .select([
         'member.id',
         'member.userId',
+        'member.memberCode',
         'member.documentId',
         'member.emergencyContact',
         'member.emergencyPhone',
@@ -242,11 +276,21 @@ export class MembersService {
         
         if (memberships.length === 0) {
           console.log(`[MembersService] Miembro ${member.id}: SIN MEMBRESÍAS → hasMembership=false`);
+          
+          // Verificar si hay pago de inscripción pendiente
+          const pendingRegistrationPayment = await this.paymentRepository.findOne({
+            where: {
+              memberId: member.id,
+              paymentType: PaymentType.REGISTRATION,
+              status: PaymentStatus.PENDING,
+            },
+          });
+          
           const mapped = {
             ...member,
             currentMembership: null,
             hasMembership: false,
-            hasPendingPayment: false,
+            hasPendingPayment: !!pendingRegistrationPayment,
           };
           return mapped;
         }
@@ -384,7 +428,7 @@ export class MembersService {
     return this.memberRepository.save(member);
   }
 
-  async delete(id: string): Promise<void> {
+  async removeMemberships(id: string): Promise<{ message: string }> {
     // 1. Eliminar el acompañante del grupo (group_companions table)
     await this.memberRepository.manager.connection
       .createQueryBuilder()
@@ -393,9 +437,28 @@ export class MembersService {
       .where('memberId = :memberId', { memberId: id })
       .execute();
     
-    // 2. Eliminar todas las membresías del miembro (no el miembro mismo)
-    // Esto permite que el miembro siga existiendo pero sin membresías activas
+    // 2. Eliminar todas las membresías del miembro (pero mantener el miembro mismo)
     await this.memberMembershipRepository.delete({ memberId: id });
+    
+    return { message: 'Memberships and companions removed successfully' };
+  }
+
+  async delete(id: string): Promise<void> {
+    // Verificar que el miembro existe antes de intentar eliminarlo
+    const member = await this.memberRepository.findOne({ where: { id } });
+    if (!member) {
+      throw new NotFoundException(`Member with ID ${id} not found`);
+    }
+
+    // Primero remover membresías y companions
+    await this.removeMemberships(id);
+
+    // Luego eliminar el miembro completamente
+    const result = await this.memberRepository.delete(id);
+    
+    if (result.affected === 0) {
+      throw new NotFoundException(`Member with ID ${id} not found`);
+    }
   }
 
   async search(query: string, page: number = 1, limit: number = 10): Promise<{ data: Member[]; pagination: any }> {

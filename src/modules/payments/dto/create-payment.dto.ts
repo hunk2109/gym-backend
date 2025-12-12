@@ -34,8 +34,9 @@ export class CreatePaymentDto {
   @IsString()
   notes?: string;
 
+  @IsOptional()
   @IsDate()
-  paymentDate: Date;
+  paymentDate?: Date;
 
   @IsOptional()
   @IsDate()
@@ -108,8 +109,8 @@ export class PaymentResponseDto {
   transactionId?: string;
   reference?: string;
   notes?: string;
-  paymentDate: Date;
-  dueDate?: Date;
+  paymentDate: Date | null;
+  dueDate?: Date | null;
   discount: number;
   tax?: number;
   createdAt: Date;

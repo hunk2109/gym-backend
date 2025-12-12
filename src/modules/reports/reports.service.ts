@@ -428,7 +428,11 @@ export class ReportsService {
       // Agrupar pagos por día
       payments.forEach(payment => {
         try {
-          // Convertir a Date si es string
+          // Convertir a Date si es string, saltar si es null
+          if (!payment.paymentDate) {
+            return; // Skip payments without payment date
+          }
+          
           let paymentDate = payment.paymentDate;
           if (typeof paymentDate === 'string') {
             paymentDate = new Date(paymentDate);
@@ -436,7 +440,7 @@ export class ReportsService {
           
           const dateKey = paymentDate instanceof Date 
             ? paymentDate.toISOString().split('T')[0]
-            : new Date(paymentDate).toISOString().split('T')[0];
+            : new Date(paymentDate as unknown as Date).toISOString().split('T')[0];
           
           const existing = paymentsByDay.get(dateKey) || { amount: 0, count: 0 };
           existing.amount += parseFloat(payment.amount.toString());
@@ -667,7 +671,12 @@ export class ReportsService {
     // Agrupar pagos por día
     payments.forEach(payment => {
       try {
-        const paymentDate = payment.paymentDate instanceof Date ? payment.paymentDate : new Date(payment.paymentDate);
+        // Skip payments without payment date
+        if (!payment.paymentDate) {
+          return;
+        }
+        
+        const paymentDate = payment.paymentDate instanceof Date ? payment.paymentDate : new Date(payment.paymentDate as unknown as Date);
         const dateKey = paymentDate.toISOString().split('T')[0];
         const existing = revenueByDay.get(dateKey) || 0;
         revenueByDay.set(dateKey, existing + parseFloat(payment.amount.toString()));

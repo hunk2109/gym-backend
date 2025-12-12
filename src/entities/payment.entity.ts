@@ -25,6 +25,7 @@ export enum PaymentStatus {
 
 export enum PaymentType {
   MEMBERSHIP = 'membership',
+  REGISTRATION = 'registration',
   CLASS = 'class',
   PRODUCT = 'product',
   SERVICE = 'service',
@@ -82,11 +83,11 @@ export class Payment {
   @Column({ type: 'text', nullable: true })
   notes: string;
 
-  @Column({ type: 'date' })
-  paymentDate: Date;
+  @Column({ type: 'date', nullable: true })
+  paymentDate: Date | null;
 
   @Column({ type: 'date', nullable: true })
-  dueDate: Date;
+  dueDate: Date | null;
 
   @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
   discount: number;

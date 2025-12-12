@@ -6,6 +6,7 @@ import { Member } from '../../entities/member.entity';
 import { MemberMembership } from '../../entities/member-membership.entity';
 import { CreatePaymentDto, UpdatePaymentDto } from './dto/create-payment.dto';
 import { PermissionsService } from '../auth/services/permissions.service';
+import { EmailService } from '../email-settings/email.service';
 
 @Injectable()
 export class PaymentsService {
@@ -19,6 +20,7 @@ export class PaymentsService {
     @InjectRepository(MemberMembership)
     private memberMembershipRepository: Repository<MemberMembership>,
     private readonly permissionsService: PermissionsService,
+    private readonly emailService: EmailService,
   ) {}
 
   async createPayment(createPaymentDto: CreatePaymentDto): Promise<Payment> {
@@ -406,8 +408,8 @@ export class PaymentsService {
 
     // Combinar y ordenar por fecha
     const allPending = [...paymentRecords, ...membershipPayments].sort((a, b) => {
-      const dateA = new Date(a.dueDate || a.paymentDate).getTime();
-      const dateB = new Date(b.dueDate || b.paymentDate).getTime();
+      const dateA = new Date((a.dueDate || a.paymentDate) as Date).getTime();
+      const dateB = new Date((b.dueDate || b.paymentDate) as Date).getTime();
       return dateA - dateB;
     });
 
@@ -425,10 +427,12 @@ export class PaymentsService {
     try {
       this.logger.log(`[Payments] getAllPaymentsWithoutPagination - Obteniendo todos los pagos`);
 
-      const payments = await this.paymentRepository.find({
-        relations: ['member', 'member.user'],
-        order: { paymentDate: 'DESC' },
-      });
+      const payments = await this.paymentRepository
+        .createQueryBuilder('payment')
+        .leftJoinAndSelect('payment.member', 'member')
+        .leftJoinAndSelect('member.user', 'user')
+        .orderBy('COALESCE(payment.paymentDate, payment.createdAt)', 'DESC')
+        .getMany();
 
       this.logger.log(`[Payments] Total de pagos encontrados: ${payments.length}`);
       return payments;
@@ -436,5 +440,61 @@ export class PaymentsService {
       this.logger.error(`[Payments] Error en getAllPaymentsWithoutPagination: ${error.message}`);
       return [];
     }
+  }
+
+  /**
+   * Completar pago de inscripción de un miembro
+   */
+  async completeRegistrationPayment(memberId: string, paymentMethod: string = 'cash'): Promise<any> {
+    // Buscar pago de inscripción pendiente
+    const registrationPayment = await this.paymentRepository.findOne({
+      where: {
+        memberId,
+        paymentType: PaymentType.REGISTRATION,
+        status: PaymentStatus.PENDING,
+      },
+      relations: ['member', 'member.user'],
+    });
+
+    if (!registrationPayment) {
+      throw new NotFoundException(
+        `No hay pago de inscripción pendiente para el miembro ${memberId}`,
+      );
+    }
+
+    // Actualizar estado a COMPLETED
+    registrationPayment.status = PaymentStatus.COMPLETED;
+    registrationPayment.paymentMethod = paymentMethod as any;
+    registrationPayment.paymentDate = new Date();
+
+    const updatedPayment = await this.paymentRepository.save(registrationPayment);
+
+    this.logger.log(
+      `[Registration Payment] ✅ Payment completed for member ${memberId}. Amount: $${registrationPayment.amount}`,
+    );
+
+    // Enviar correo de confirmación
+    try {
+      const user = registrationPayment.member.user;
+      const emailContent = `Hola ${user.firstName} ${user.lastName},\n\nTu pago de inscripción de $${registrationPayment.amount} ha sido procesado exitosamente.\n\nAhora puedes asignar una membresía y comenzar a disfrutar del gimnasio.\n\nGracias por tu confianza.`;
+      
+      await this.emailService.sendEmailDirect({
+        to: user.email,
+        subject: 'Pago de Inscripción Completado',
+        text: emailContent,
+        html: `<p>${emailContent.replace(/\n/g, '<br>')}</p>`,
+      });
+      this.logger.log(`[Registration Payment] 📧 Confirmation email sent to ${user.email}`);
+    } catch (emailError) {
+      this.logger.error(`[Registration Payment] ⚠️ Failed to send confirmation email: ${emailError.message}`);
+      // No fallar si no se puede enviar el correo
+    }
+
+    return {
+      statusCode: 200,
+      success: true,
+      message: `✅ Pago de inscripción completado exitosamente para ${registrationPayment.member.user.firstName} ${registrationPayment.member.user.lastName}`,
+      data: updatedPayment,
+    };
   }
 }

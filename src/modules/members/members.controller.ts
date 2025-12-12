@@ -138,4 +138,10 @@ export class MembersController {
   async delete(@Param('id') id: string) {
     return this.membersService.delete(id);
   }
+
+  @Post(':id/remove-memberships')
+  @HttpCode(HttpStatus.OK)
+  async removeMemberships(@Param('id') id: string) {
+    return this.membersService.removeMemberships(id);
+  }
 }

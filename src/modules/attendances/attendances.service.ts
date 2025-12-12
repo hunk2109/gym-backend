@@ -5,7 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { Attendance } from '../../entities/attendance.entity';
 import { Member } from '../../entities/member.entity';
 import { CreateAttendanceDto, UpdateAttendanceDto } from './dto/create-attendance.dto';
-import { RegisterByCodeDto } from './dto/register-by-code.dto';
+import { RegisterByCodeDto, RegisterByNameDto } from './dto/register-by-code.dto';
 
 @Injectable()
 export class AttendancesService {
@@ -164,6 +164,40 @@ export class AttendancesService {
     const attendance = this.attendanceRepository.create(attendanceData);
     const savedAttendance = await this.attendanceRepository.save(attendance);
     console.log(`[AttendancesService] ✅ Asistencia registrada por código: ${savedAttendance.id}`);
+
+    return savedAttendance;
+  }
+
+  async registerByName(registerByNameDto: RegisterByNameDto): Promise<Attendance> {
+    console.log(`[AttendancesService] 👤 Registrando asistencia por nombre: ${registerByNameDto.memberName}`);
+
+    // Buscar miembro por nombre (usando relación con User)
+    const member = await this.memberRepository
+      .createQueryBuilder('member')
+      .leftJoinAndSelect('member.user', 'user')
+      .where('user.firstName LIKE :firstName OR user.lastName LIKE :lastName', {
+        firstName: `%${registerByNameDto.memberName}%`,
+        lastName: `%${registerByNameDto.memberName}%`,
+      })
+      .getOne();
+
+    if (!member) {
+      throw new NotFoundException(`Miembro con nombre "${registerByNameDto.memberName}" no encontrado`);
+    }
+
+    console.log(`[AttendancesService] ✅ Miembro encontrado: ${member.id}`);
+
+    // Crear registro de asistencia con timestamp actual
+    const attendanceData = {
+      id: uuidv4(),
+      memberId: member.id,
+      visitDate: new Date(), // Timestamp actual
+      notes: registerByNameDto.notes || undefined,
+    };
+
+    const attendance = this.attendanceRepository.create(attendanceData);
+    const savedAttendance = await this.attendanceRepository.save(attendance);
+    console.log(`[AttendancesService] ✅ Asistencia registrada por nombre: ${savedAttendance.id}`);
 
     return savedAttendance;
   }

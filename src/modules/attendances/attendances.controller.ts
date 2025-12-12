@@ -15,7 +15,7 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { AttendancesService } from './attendances.service';
 import { CreateAttendanceDto, UpdateAttendanceDto } from './dto/create-attendance.dto';
-import { RegisterByCodeDto } from './dto/register-by-code.dto';
+import { RegisterByCodeDto, RegisterByNameDto } from './dto/register-by-code.dto';
 import { Attendance } from '../../entities/attendance.entity';
 import { UserRole } from '../../entities/user.entity';
 
@@ -38,6 +38,13 @@ export class AttendancesController {
   async registerByCode(@Body() registerByCodeDto: RegisterByCodeDto): Promise<Attendance> {
     this.logger.log(`[AttendancesController] 🔐 POST /api/attendances/register-by-code - Registrando asistencia por código`);
     return this.attendancesService.registerByCode(registerByCodeDto);
+  }
+
+  @Post('register-by-name')
+  @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO)
+  async registerByName(@Body() registerByNameDto: RegisterByNameDto): Promise<Attendance> {
+    this.logger.log(`[AttendancesController] 👤 POST /api/attendances/register-by-name - Registrando asistencia por nombre`);
+    return this.attendancesService.registerByName(registerByNameDto);
   }
 
   @Get()
