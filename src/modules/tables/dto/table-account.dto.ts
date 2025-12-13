@@ -1,13 +1,15 @@
-import { IsUUID, IsInt, IsOptional, IsString, IsDecimal } from 'class-validator';
+import { IsUUID, IsInt, IsOptional, IsString, IsNumber, Min } from 'class-validator';
 
 export class AddItemToAccountDto {
   @IsUUID()
   productId: string;
 
   @IsInt()
+  @Min(1)
   quantity: number;
 
-  @IsDecimal({ decimal_digits: '2' })
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
   unitPrice: number;
 }
 
@@ -18,7 +20,8 @@ export class RemoveItemFromAccountDto {
 
 export class UpdateAccountDto {
   @IsOptional()
-  @IsDecimal({ decimal_digits: '2' })
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
   discount?: number;
 
   @IsOptional()

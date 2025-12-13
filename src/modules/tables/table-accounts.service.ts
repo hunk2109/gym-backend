@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger, forwardRef, Inject } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { TableAccount, AccountStatus } from '../../entities/table-account.entity';
@@ -7,6 +7,7 @@ import { Table, TableStatus } from '../../entities/table.entity';
 import { Product } from '../../entities/product.entity';
 import { AddItemToAccountDto, UpdateAccountDto } from './dto/table-account.dto';
 import { TablesService } from './tables.service';
+import { SalesService } from '../sales/sales.service';
 
 @Injectable()
 export class TableAccountsService {
@@ -22,6 +23,8 @@ export class TableAccountsService {
     @InjectRepository(Product)
     private productRepository: Repository<Product>,
     private tablesService: TablesService,
+    @Inject(forwardRef(() => SalesService))
+    private salesService: SalesService,
   ) {}
 
   async openAccount(tableId: string, userId: string) {
@@ -63,6 +66,11 @@ export class TableAccountsService {
 
     if (!account) {
       throw new NotFoundException('Account not found');
+    }
+
+    // Filtrar items no removidos antes de devolver
+    if (account.items) {
+      account.items = account.items.filter(item => !item.removedAt);
     }
 
     return this.calculateTotals(account);
@@ -196,21 +204,46 @@ export class TableAccountsService {
     return this.getAccountById(accountId);
   }
 
-  async completePayment(accountId: string) {
+  async completePayment(accountId: string, paymentMethod: string = 'cash') {
     const account = await this.getAccountById(accountId);
 
     if (account.status !== AccountStatus.CLOSED) {
       throw new BadRequestException('Account must be closed before payment');
     }
 
+    // Obtener items activos (no removidos)
+    const activeItems = account.items?.filter(item => !item.removedAt) || [];
+    
+    if (activeItems.length === 0) {
+      throw new BadRequestException('Cannot complete payment with no items');
+    }
+
+    // Crear la venta en el sistema de ventas
+    const saleDto = {
+      memberId: undefined, // Las ventas de mesa pueden no tener socio
+      items: activeItems.map(item => ({
+        productId: item.productId,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+      })),
+      discount: account.discount || 0,
+      paymentMethod: paymentMethod,
+      notes: `Venta de Mesa ${account.table?.tableNumber || 'N/A'}`,
+    };
+
+    this.logger.log(`Creating sale for table account ${accountId}`);
+    const sale = await this.salesService.createSale(saleDto);
+
+    // Actualizar la cuenta con el ID de la venta
     await this.accountRepository.update(accountId, {
       status: AccountStatus.PAID,
+      saleId: sale.id,
     });
 
     // Liberar mesa - vuelve a AVAILABLE
     await this.tablesService.updateTableStatus(account.tableId, TableStatus.AVAILABLE);
 
-    this.logger.log(`Payment completed: Account ${accountId}`);
+    this.logger.log(`Payment completed: Account ${accountId}, Sale ${sale.id}, Total: $${account.finalAmount}`);
 
     return this.getAccountById(accountId);
   }
@@ -253,6 +286,12 @@ export class TableAccountsService {
     
     const discount = Number(account.discount) || 0;
     const finalAmount = calculatedTotal - discount;
+
+    this.logger.debug(`[calculateTotals] Account: ${account.id}`);
+    this.logger.debug(`[calculateTotals] Active items: ${activeItems.length}`);
+    this.logger.debug(`[calculateTotals] Calculated total: ${calculatedTotal}`);
+    this.logger.debug(`[calculateTotals] Discount: ${discount}`);
+    this.logger.debug(`[calculateTotals] Final amount: ${finalAmount}`);
 
     return {
       ...account,
