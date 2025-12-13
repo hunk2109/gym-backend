@@ -23,6 +23,7 @@ export class ModulesManagementService {
     { moduleName: 'reports', description: 'Reportes', settings: {} },
     { moduleName: 'audit_logs', description: 'Registros de Auditoría', settings: {} },
     { moduleName: 'tables', description: 'Sistema de Mesas', settings: {} },
+    { moduleName: 'equipment', description: 'Gestión de Equipos', settings: {} },
   ];
 
   constructor(
