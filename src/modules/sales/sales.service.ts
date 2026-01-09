@@ -96,12 +96,15 @@ export class SalesService {
         unitPrice: item.unitPrice,
       });
       await this.saleItemRepository.save(saleItem);
+      console.log(`[🔴 SalesService.createSale] Saved sale item for productId=${item.productId}, quantity=${item.quantity}`);
 
       // Update stock
-      await this.productService.removeStock(
+      console.log(`[🔴 SalesService.createSale] Before removeStock - productId=${item.productId}, quantity=${item.quantity}`);
+      const updatedProduct = await this.productService.removeStock(
         item.productId,
         item.quantity,
       );
+      console.log(`[🔴 SalesService.createSale] After removeStock - New quantity=${updatedProduct.quantityAvailable} for product ${item.productId}`);
     }
 
     this.logger.log(`[Sales] Sale created successfully. ID: ${(savedSale as any).id}, Amount: ${totalAmount}`);
@@ -173,8 +176,8 @@ export class SalesService {
     };
   }
 
-  async getSalesByDateRange(startDate: string, endDate: string) {
-    this.logger.debug(`[getSalesByDateRange] Received: startDate=${startDate}, endDate=${endDate}`);
+  async getSalesByDateRange(startDate: string, endDate: string, cashRegisterId?: string) {
+    this.logger.debug(`[getSalesByDateRange] Received: startDate=${startDate}, endDate=${endDate}, cashRegisterId=${cashRegisterId}`);
     
     // Asegurar que las fechas incluyan "Z" para UTC si no lo tienen
     const startStr = startDate.includes('Z') ? startDate : `${startDate}Z`;
@@ -196,21 +199,32 @@ export class SalesService {
     
     this.logger.debug(`[getSalesByDateRange] DEBUG: Total sales in range (all statuses): ${allSales.length}`);
     allSales.forEach((sale, index) => {
-      this.logger.debug(`[getSalesByDateRange] DEBUG Sale ${index}: id=${sale.id}, status=${sale.status}, amount=${sale.totalAmount}`);
+      this.logger.debug(`[getSalesByDateRange] DEBUG Sale ${index}: id=${sale.id}, status=${sale.status}, cashRegisterId=${sale.cashRegisterId}, amount=${sale.totalAmount}`);
     });
     
-    // Solo obtener ventas completadas SIN asignar a un cierre (del turno actual)
+    // Construir la condición WHERE dinámicamente
+    const whereCondition: any = {
+      createdAt: Between(start, end),
+      status: SaleStatus.COMPLETED,
+    };
+    
+    // Si se especifica cashRegisterId, filtrar por esa caja específicamente
+    // Si no, solo traer las ventas sin asignar (cashRegisterId IS NULL)
+    if (cashRegisterId) {
+      whereCondition.cashRegisterId = cashRegisterId;
+      this.logger.debug(`[getSalesByDateRange] Filtrando por cashRegisterId: ${cashRegisterId}`);
+    } else {
+      whereCondition.cashRegisterId = IsNull();
+      this.logger.debug(`[getSalesByDateRange] Filtrando solo ventas sin asignar (cashRegisterId IS NULL)`);
+    }
+    
     const sales = await this.saleRepository.find({
-      where: {
-        createdAt: Between(start, end),
-        status: SaleStatus.COMPLETED, // Solo ventas completadas
-        cashRegisterId: IsNull(), // Solo ventas del turno actual (sin asignar a cierre)
-      },
+      where: whereCondition,
       relations: ['items', 'items.product', 'member'],
       order: { createdAt: 'DESC' },
     });
     
-    this.logger.debug(`[getSalesByDateRange] Found ${sales.length} completed sales with status=${SaleStatus.COMPLETED}`);
+    this.logger.debug(`[getSalesByDateRange] Found ${sales.length} completed sales`);
     
     if (sales.length > 0) {
       this.logger.debug(`[getSalesByDateRange] First sale: id=${sales[0].id}, amount=${sales[0].totalAmount}, status=${sales[0].status}, date=${sales[0].createdAt}`);

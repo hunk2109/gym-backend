@@ -351,7 +351,7 @@ export class MembersService {
         } else if (mostRecent.membershipType === 'individual') {
           // Si es 'individual' pero tiene groupId o hay acompañantes en su grupo, es Responsable de grupo
           if (mostRecent.groupId) {
-            membershipStatusLabel = 'Responsable';
+            membershipStatusLabel = 'Familiar';
           } else if (mostRecent.membershipId) {
             // Verificar si hay acompañantes en la misma membresía
             const companionCount = await this.memberMembershipRepository
@@ -361,7 +361,7 @@ export class MembersService {
               .getCount();
             
             if (companionCount > 0) {
-              membershipStatusLabel = 'Responsable';
+              membershipStatusLabel = 'Familiar';
             } else {
               membershipStatusLabel = 'Individual';
             }

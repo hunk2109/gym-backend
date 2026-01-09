@@ -11,6 +11,7 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
+import { Public } from '../auth/decorators/public.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -23,6 +24,7 @@ import { SalesService } from './sales.service';
 export class SalesController {
   constructor(private readonly salesService: SalesService) {}
 
+  @Public()
   @Get('health')
   async health() {
     console.log('[SalesController] Health check called');
@@ -100,9 +102,11 @@ export class SalesController {
   async getSalesByDateRange(
     @Param('startDate') startDate: string,
     @Param('endDate') endDate: string,
+    @Query('cashRegisterId') cashRegisterId?: string,
   ) {
     console.log('[SalesController] getSalesByDateRange - Raw startDate:', startDate);
     console.log('[SalesController] getSalesByDateRange - Raw endDate:', endDate);
+    console.log('[SalesController] getSalesByDateRange - cashRegisterId:', cashRegisterId);
     
     // Decodificar los parámetros de la URL
     const decodedStartDate = decodeURIComponent(startDate);
@@ -111,7 +115,7 @@ export class SalesController {
     console.log('[SalesController] getSalesByDateRange - Decoded startDate:', decodedStartDate);
     console.log('[SalesController] getSalesByDateRange - Decoded endDate:', decodedEndDate);
     
-    const result = await this.salesService.getSalesByDateRange(decodedStartDate, decodedEndDate);
+    const result = await this.salesService.getSalesByDateRange(decodedStartDate, decodedEndDate, cashRegisterId);
     console.log('[SalesController] getSalesByDateRange - result length:', result.length);
     console.log('[SalesController] getSalesByDateRange - result statuses:', result.map(r => r.status));
     return { data: result };

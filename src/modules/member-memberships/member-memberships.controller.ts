@@ -96,6 +96,14 @@ export class MemberMembershipsController {
   async assignMembership(
     @Body() dto: CreateMemberMembershipDto,
   ) {
+    console.log('[MemberMembershipsController] Raw body recibido en assignMembership');
+    console.log('[MemberMembershipsController] DTO:', JSON.stringify(dto, null, 2));
+    console.log('[MemberMembershipsController] DTO keys:', Object.keys(dto));
+    console.log('[MemberMembershipsController] memberId:', dto.memberId);
+    console.log('[MemberMembershipsController] membershipId:', dto.membershipId);
+    console.log('[MemberMembershipsController] startDate:', dto.startDate);
+    console.log('[MemberMembershipsController] endDate:', dto.endDate);
+    
     const memberMembership =
       await this.memberMembershipsService.assignMembership(dto.memberId, dto);
 

@@ -42,6 +42,8 @@ export class CashRegisterController {
     try {
       const userId = req.user.userId;
       console.log('[CashRegister] Closing cash register for user:', userId);
+      console.log('[CashRegister] Raw DTO:', JSON.stringify(dto, null, 2));
+      console.log('[CashRegister] closingAmount:', dto.closingAmount, '(tipo:', typeof dto.closingAmount, ')');
       const register = await this.cashRegisterService.closeCashRegister(userId, dto);
       return register;
     } catch (error) {

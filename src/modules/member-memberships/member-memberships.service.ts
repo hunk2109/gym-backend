@@ -84,10 +84,11 @@ export class MemberMembershipsService {
     memberId: string,
     dto: CreateMemberMembershipDto,
   ): Promise<MemberMembership> {
-    console.log('');
-    console.log('═══════════════════════════════════════════════════════════');
-    console.log('[ASSIGN MEMBERSHIP] 🎯 INICIANDO ASIGNACIÓN DE MEMBRESÍA');
-    console.log('═══════════════════════════════════════════════════════════');
+    try {
+      console.log('');
+      console.log('═══════════════════════════════════════════════════════════');
+      console.log('[ASSIGN MEMBERSHIP] 🎯 INICIANDO ASIGNACIÓN DE MEMBRESÍA');
+      console.log('═══════════════════════════════════════════════════════════');
     console.log('[DTO COMPLETO]:', JSON.stringify(dto, null, 2));
     console.log('[DTO KEYS]:', Object.keys(dto));
     console.log('[DTO.discountPercentage]:', dto.discountPercentage);
@@ -216,6 +217,10 @@ export class MemberMembershipsService {
     memberMembership.startDate = startDate;
     memberMembership.endDate = endDate;
     memberMembership.isActive = true;
+    
+    // Determinar el tipo de membresía (responsable si es de grupo, individual si no)
+    memberMembership.membershipType = membership.type === 'group' ? 'responsible' : 'individual';
+    console.log(`[MemberMembershipsService] membershipType asignado: ${memberMembership.membershipType} (membership.type: ${membership.type})`);
     
     // Calcular monto a pagar con descuento
     const finalAmount = membershipPrice - discountAmount;
@@ -435,6 +440,19 @@ export class MemberMembershipsService {
     // No duplicar aquí
 
     return savedMemberMembership;
+    } catch (error) {
+      console.error('[ASSIGN MEMBERSHIP] ❌ ERROR COMPLETO:', error);
+      console.error('[ASSIGN MEMBERSHIP] Mensaje:', error.message);
+      console.error('[ASSIGN MEMBERSHIP] Stack:', (error as any).stack);
+      
+      // Re-lanzar el error para que NestJS lo maneje
+      if (error instanceof BadRequestException || error instanceof NotFoundException) {
+        throw error;
+      }
+      
+      // Si es otro tipo de error, lanzar un BadRequestException con el mensaje
+      throw new BadRequestException(`Error al asignar membresía: ${error.message}`);
+    }
   }
 
   /**
@@ -548,7 +566,7 @@ export class MemberMembershipsService {
     // Mapear datos de membresías
     const mappedMemberships = membershipData.map((mm: any) => ({
       ...mm,
-      membershipStatusLabel: mm.membershipType === 'responsible' ? 'Responsable' : 'Individual',
+      membershipStatusLabel: mm.membershipType === 'responsible' ? 'Familiar' : 'Individual',
       paymentType: 'membership',
     }));
 

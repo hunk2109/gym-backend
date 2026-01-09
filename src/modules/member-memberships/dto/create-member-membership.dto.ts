@@ -1,19 +1,35 @@
+import { IsString, IsNumber, IsOptional, IsDateString } from 'class-validator';
+
 export class CreateMemberMembershipDto {
+  @IsString()
   memberId: string;
 
+  @IsString()
   membershipId: string;
 
-  startDate: Date;
+  @IsDateString()
+  startDate: string | Date;
 
-  endDate: Date;
+  @IsDateString()
+  endDate: string | Date;
 
+  @IsNumber()
+  @IsOptional()
   amountPaid?: number;
 
+  @IsDateString()
+  @IsOptional()
   paymentDate?: Date;
 
+  @IsString()
+  @IsOptional()
   promotionCode?: string; // Código de promoción/cupón para aplicar descuento
 
+  @IsNumber()
+  @IsOptional()
   discountPercentage?: number; // Porcentaje de descuento a aplicar
 
+  @IsString()
+  @IsOptional()
   discountReason?: string; // Razón del descuento adicional
 }

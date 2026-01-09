@@ -9,6 +9,7 @@ import { Membership } from '../../entities/membership.entity';
 import { MemberMembership } from '../../entities/member-membership.entity';
 import { User } from '../../entities/user.entity';
 import { Payment, PaymentStatus } from '../../entities/payment.entity';
+import { EmailService } from '../email-settings/email.service';
 
 @Injectable()
 export class GroupsService {
@@ -27,6 +28,7 @@ export class GroupsService {
     private userRepository: Repository<User>,
     @InjectRepository(Payment)
     private paymentRepository: Repository<Payment>,
+    private emailService: EmailService,
   ) {}
 
   async createGroup(
@@ -366,6 +368,69 @@ export class GroupsService {
     // Recalcular el pago del grupo basado en la nueva cantidad de miembros
     await this.recalculateGroupPayment(groupId);
 
+    // Enviar email de notificación al miembro agregado al grupo
+    try {
+      const companionWithUser = await this.memberRepository.findOne({
+        where: { id: memberId },
+        relations: ['user'],
+      });
+
+      if (companionWithUser?.user?.email) {
+        const companionEmail = companionWithUser.user.email;
+        const companionName = companionWithUser.user.firstName || companionWithUser.user.email;
+        const groupName = group.name;
+        const membershipName = group.membership?.name || 'Membresía';
+        const endDateFormatted = new Date(group.endDate).toLocaleDateString('es-ES');
+
+        const htmlContent = `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #007bff;">✓ ¡Se ha agregado a un grupo!</h2>
+            <p>Hola <strong>${companionName}</strong>,</p>
+            <p>Te complace comunicarte que has sido agregado como miembro de un grupo de membresía.</p>
+            
+            <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
+              <h3 style="margin-top: 0; color: #333;">Detalles del Grupo:</h3>
+              <table style="width: 100%; border-collapse: collapse;">
+                <tr>
+                  <td style="padding: 10px; border: 1px solid #ddd; font-weight: bold;">Grupo</td>
+                  <td style="padding: 10px; border: 1px solid #ddd;">${groupName}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 10px; border: 1px solid #ddd; font-weight: bold;">Membresía</td>
+                  <td style="padding: 10px; border: 1px solid #ddd;">${membershipName}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 10px; border: 1px solid #ddd; font-weight: bold;">Relación</td>
+                  <td style="padding: 10px; border: 1px solid #ddd;">${relationship || 'Acompañante'}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 10px; border: 1px solid #ddd; font-weight: bold;">Vigencia hasta</td>
+                  <td style="padding: 10px; border: 1px solid #ddd;">${endDateFormatted}</td>
+                </tr>
+              </table>
+            </div>
+
+            <p>Ahora puedes acceder a todas las instalaciones y servicios del gimnasio. Si tienes alguna pregunta, no dudes en contactarnos.</p>
+            <p style="color: #666; font-size: 12px; margin-top: 20px;">
+              Este es un correo automático. Por favor no responder a este correo.
+            </p>
+          </div>
+        `;
+
+        await this.emailService.sendEmail({
+          recipientEmail: companionEmail,
+          recipientName: companionName,
+          subject: `✓ Bienvenido al Grupo - ${groupName}`,
+          htmlContent,
+        });
+
+        console.log(`[addCompanionToGroup] ✅ Email de bienvenida enviado a: ${companionEmail}`);
+      }
+    } catch (emailError) {
+      console.error(`[addCompanionToGroup] ❌ Error al enviar email:`, emailError.message);
+      // No bloquear el flujo si hay error en el email
+    }
+
     // Retornar el objeto directamente sin hacer query adicional
     return newCompanion;
   }
@@ -466,6 +531,64 @@ export class GroupsService {
     // Recalcular el pago del grupo basado en la nueva cantidad de miembros
     await this.recalculateGroupPayment(groupId);
 
+    // Enviar email de notificación al miembro removido del grupo
+    try {
+      const companionWithUser = await this.memberRepository.findOne({
+        where: { id: companion.memberId },
+        relations: ['user'],
+      });
+
+      if (companionWithUser?.user?.email) {
+        const companionEmail = companionWithUser.user.email;
+        const companionName = companionWithUser.user.firstName || companionWithUser.user.email;
+        const groupName = group.name;
+        const membershipName = group.membership?.name || 'Membresía';
+
+        const htmlContent = `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #dc3545;">Notificación de Cambio en Grupo</h2>
+            <p>Hola <strong>${companionName}</strong>,</p>
+            <p>Te informamos que has sido removido del grupo de membresía.</p>
+            
+            <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
+              <h3 style="margin-top: 0; color: #333;">Detalles:</h3>
+              <table style="width: 100%; border-collapse: collapse;">
+                <tr>
+                  <td style="padding: 10px; border: 1px solid #ddd; font-weight: bold;">Grupo</td>
+                  <td style="padding: 10px; border: 1px solid #ddd;">${groupName}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 10px; border: 1px solid #ddd; font-weight: bold;">Membresía</td>
+                  <td style="padding: 10px; border: 1px solid #ddd;">${membershipName}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 10px; border: 1px solid #ddd; font-weight: bold;">Estado</td>
+                  <td style="padding: 10px; border: 1px solid #ddd; color: #dc3545; font-weight: bold;">Removido</td>
+                </tr>
+              </table>
+            </div>
+
+            <p>Si tienes alguna pregunta sobre este cambio, por favor contacta a nuestro equipo.</p>
+            <p style="color: #666; font-size: 12px; margin-top: 20px;">
+              Este es un correo automático. Por favor no responder a este correo.
+            </p>
+          </div>
+        `;
+
+        await this.emailService.sendEmail({
+          recipientEmail: companionEmail,
+          recipientName: companionName,
+          subject: `Notificación: Has sido removido del Grupo - ${groupName}`,
+          htmlContent,
+        });
+
+        console.log(`[removeCompanionFromGroup] ✅ Email de notificación enviado a: ${companionEmail}`);
+      }
+    } catch (emailError) {
+      console.error(`[removeCompanionFromGroup] ❌ Error al enviar email:`, emailError.message);
+      // No bloquear el flujo si hay error en el email
+    }
+
     // Limpiar cache de TypeORM para forzar que recargue desde BD
     await this.groupRepository.manager.connection.queryResultCache?.remove([groupId]);
     
@@ -481,6 +604,12 @@ export class GroupsService {
     requestingUserId: string,
     requestingUserRole?: string,
   ): Promise<Group> {
+    console.log(`[TransferResponsibility] 🚀 INICIANDO TRANSFERENCIA DE RESPONSABILIDAD`);
+    console.log(`[TransferResponsibility] - groupId: ${groupId}`);
+    console.log(`[TransferResponsibility] - newResponsibleMemberId: ${newResponsibleMemberId}`);
+    console.log(`[TransferResponsibility] - requestingUserId: ${requestingUserId}`);
+    console.log(`[TransferResponsibility] - requestingUserRole: ${requestingUserRole}`);
+    
     // Obtener grupo sin cache para esta operación
     const group = await this.groupRepository.findOne({
       where: { id: groupId },
@@ -642,6 +771,125 @@ export class GroupsService {
       { responsibleUserId: newResponsibleUserId }
     );
     console.log(`[TransferResponsibility] ✅ Grupo actualizado`);
+
+    // Enviar emails de notificación a ambos miembros
+    try {
+      console.log(`[TransferResponsibility] 📧 INICIANDO ENVÍO DE EMAILS`);
+      console.log(`[TransferResponsibility] - newResponsibleMember:`, newResponsibleMember);
+      console.log(`[TransferResponsibility] - oldResponsibleMember:`, oldResponsibleMember);
+      
+      const groupName = group.name;
+      const membershipName = group.membership?.name || 'Membresía';
+      const membershipPrice = Number(group.membership?.price) || 0;
+
+      console.log(`[TransferResponsibility] - groupName: ${groupName}`);
+      console.log(`[TransferResponsibility] - membershipPrice: ${membershipPrice}`);
+
+      // Email al nuevo responsable
+      const newResponsibleEmail = newResponsibleMember.user?.email;
+      const newResponsibleName = newResponsibleMember.user?.firstName || newResponsibleMember.user?.email;
+
+      console.log(`[TransferResponsibility] 📧 Nuevo responsable - Email: ${newResponsibleEmail}, Name: ${newResponsibleName}`);
+
+      if (newResponsibleEmail) {
+        const htmlContent = `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #28a745;">✓ ¡Eres el nuevo responsable del grupo!</h2>
+            <p>Hola <strong>${newResponsibleName}</strong>,</p>
+            <p>Te comunicamos que ahora eres el responsable del grupo de membresía.</p>
+            
+            <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
+              <h3 style="margin-top: 0; color: #333;">Información del Grupo:</h3>
+              <table style="width: 100%; border-collapse: collapse;">
+                <tr>
+                  <td style="padding: 10px; border: 1px solid #ddd; font-weight: bold;">Grupo</td>
+                  <td style="padding: 10px; border: 1px solid #ddd;">${groupName}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 10px; border: 1px solid #ddd; font-weight: bold;">Membresía</td>
+                  <td style="padding: 10px; border: 1px solid #ddd;">${membershipName}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 10px; border: 1px solid #ddd; font-weight: bold; color: #28a745;">Costo de Membresía</td>
+                  <td style="padding: 10px; border: 1px solid #ddd; font-weight: bold; color: #28a745;">RD\$ ${membershipPrice.toFixed(2)}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 10px; border: 1px solid #ddd; font-weight: bold;">Tu Rol</td>
+                  <td style="padding: 10px; border: 1px solid #ddd; color: #28a745; font-weight: bold;">Responsable</td>
+                </tr>
+              </table>
+            </div>
+
+            <p>Como responsable, tendrás acceso a gestionar los miembros del grupo y otros detalles administrativos. Si tienes alguna pregunta, no dudes en contactarnos.</p>
+            <p style="color: #666; font-size: 12px; margin-top: 20px;">
+              Este es un correo automático. Por favor no responder a este correo.
+            </p>
+          </div>
+        `;
+
+        await this.emailService.sendEmail({
+          recipientEmail: newResponsibleEmail,
+          recipientName: newResponsibleName,
+          subject: `✓ Eres el nuevo Responsable del Grupo - ${groupName}`,
+          htmlContent,
+        });
+
+        console.log(`[TransferResponsibility] ✅ Email enviado al nuevo responsable: ${newResponsibleEmail}`);
+      }
+
+      // Email al antiguo responsable
+      if (oldResponsibleMember?.user?.email) {
+        const oldResponsibleEmail = oldResponsibleMember.user.email;
+        const oldResponsibleName = oldResponsibleMember.user.firstName || oldResponsibleMember.user.email;
+
+        const htmlContent = `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #ffc107;">ℹ️ Cambio en la Responsabilidad del Grupo</h2>
+            <p>Hola <strong>${oldResponsibleName}</strong>,</p>
+            <p>Te informamos que la responsabilidad del grupo ha sido transferida a otro miembro.</p>
+            
+            <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
+              <h3 style="margin-top: 0; color: #333;">Información del Grupo:</h3>
+              <table style="width: 100%; border-collapse: collapse;">
+                <tr>
+                  <td style="padding: 10px; border: 1px solid #ddd; font-weight: bold;">Grupo</td>
+                  <td style="padding: 10px; border: 1px solid #ddd;">${groupName}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 10px; border: 1px solid #ddd; font-weight: bold;">Membresía</td>
+                  <td style="padding: 10px; border: 1px solid #ddd;">${membershipName}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 10px; border: 1px solid #ddd; font-weight: bold;">Costo de Membresía</td>
+                  <td style="padding: 10px; border: 1px solid #ddd;">RD\$ ${membershipPrice.toFixed(2)}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 10px; border: 1px solid #ddd; font-weight: bold;">Tu Rol</td>
+                  <td style="padding: 10px; border: 1px solid #ddd; color: #ffc107; font-weight: bold;">Acompañante</td>
+                </tr>
+              </table>
+            </div>
+
+            <p>Ahora eres miembro del grupo como acompañante y sigues teniendo acceso a todos los servicios del gimnasio. Si tienes alguna pregunta, no dudes en contactarnos.</p>
+            <p style="color: #666; font-size: 12px; margin-top: 20px;">
+              Este es un correo automático. Por favor no responder a este correo.
+            </p>
+          </div>
+        `;
+
+        await this.emailService.sendEmail({
+          recipientEmail: oldResponsibleEmail,
+          recipientName: oldResponsibleName,
+          subject: `ℹ️ Cambio en la Responsabilidad del Grupo - ${groupName}`,
+          htmlContent,
+        });
+
+        console.log(`[TransferResponsibility] ✅ Email enviado al antiguo responsable: ${oldResponsibleEmail}`);
+      }
+    } catch (emailError) {
+      console.error(`[TransferResponsibility] ❌ Error al enviar emails:`, emailError.message);
+      // No bloquear el flujo si hay error en el email
+    }
     
     // Retornar el grupo con todas sus relaciones cargadas
     const result = await this.getGroupById(groupId);

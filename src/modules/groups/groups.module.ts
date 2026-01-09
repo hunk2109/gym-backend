@@ -9,6 +9,7 @@ import { User } from '../../entities/user.entity';
 import { Payment } from '../../entities/payment.entity';
 import { GroupsService } from './groups.service';
 import { GroupsController } from './groups.controller';
+import { EmailSettingsModule } from '../email-settings/email-settings.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { GroupsController } from './groups.controller';
       User,
       Payment,
     ]),
+    EmailSettingsModule,
   ],
   controllers: [GroupsController],
   providers: [GroupsService],
