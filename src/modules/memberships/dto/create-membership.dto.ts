@@ -37,7 +37,14 @@ export class CreateMembershipDto {
 
   @IsOptional()
   @IsNumber()
-  maxGroupCompanions?: number; // null = unlimited, solo para membresías grupo
+  maxGroupCompanions?: number;
+
+  @IsOptional()
+  @IsArray()
+  accessSchedules?: Array<{
+    dayOfWeek: string;
+    timeStart: string;
+    timeEnd: string;    isEnabled?: boolean;  }>;
 }
 
 export class UpdateMembershipDto {
@@ -67,7 +74,16 @@ export class UpdateMembershipDto {
 
   @IsOptional()
   @IsNumber()
-  maxGroupCompanions?: number; // null = unlimited, solo para membresías grupo
+  maxGroupCompanions?: number;
+
+  @IsOptional()
+  @IsArray()
+  accessSchedules?: Array<{
+    dayOfWeek: string;
+    timeStart: string;
+    timeEnd: string;
+    isEnabled?: boolean;
+  }>;
 }
 
 export class AssignMembershipDto {

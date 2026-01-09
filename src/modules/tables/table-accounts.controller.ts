@@ -82,10 +82,12 @@ export class TableAccountsController {
   @Put(':accountId/pay')
   @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO)
   async completePayment(
+    @Request() req: any,
     @Param('accountId') accountId: string,
     @Body() body: { paymentMethod?: string }
   ) {
-    return this.accountsService.completePayment(accountId, body.paymentMethod);
+    const userId = req.user.userId;
+    return this.accountsService.completePayment(accountId, body.paymentMethod, userId);
   }
 
   @Put(':accountId/cancel')

@@ -6,12 +6,14 @@ import { SalesService } from './sales.service';
 import { SalesController } from './sales.controller';
 import { ProductsModule } from '../products/products.module';
 import { AuthModule } from '../auth/auth.module';
+import { CashRegisterModule } from '../cash-register/cash-register.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Sale, SaleItem]),
     ProductsModule,
     AuthModule,
+    CashRegisterModule,
   ],
   providers: [SalesService],
   controllers: [SalesController],

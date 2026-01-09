@@ -22,7 +22,14 @@ export class ResponseInterceptor implements NestInterceptor {
       map((data) => {
         const statusCode = response.statusCode;
         const isSuccess = statusCode >= 200 && statusCode < 300;
-        const message = this.getSuccessMessage(request.method, statusCode);
+        
+        // Si la respuesta del servicio ya tiene estructura personalizada (como attendances), retornarla así
+        if (data?.statusCode && data?.message && (data?.status || data?.attendance)) {
+          return data;
+        }
+        
+        // Si la respuesta tiene un mensaje personalizado, usarlo
+        let message = data?.message || this.getSuccessMessage(request.method, statusCode);
 
         return {
           statusCode,

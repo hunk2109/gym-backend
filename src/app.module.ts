@@ -14,6 +14,7 @@ import { GymSettings } from './entities/gym-settings.entity';
 import { Employee } from './entities/employee.entity';
 import { Member } from './entities/member.entity';
 import { Membership } from './entities/membership.entity';
+import { MembershipAccessSchedule } from './entities/membership-access-schedule.entity';
 import { MemberMembership } from './entities/member-membership.entity';
 import { Group } from './entities/group.entity';
 import { GroupCompanion } from './entities/group-companion.entity';
@@ -78,7 +79,7 @@ import { LoggerMiddleware } from './common/middleware';
       username: process.env.DB_USERNAME || 'root',
       password: process.env.DB_PASSWORD || 'password',
       database: process.env.DB_NAME || 'gym_manager',
-      entities: [User, Product, Equipment, Sale, SaleItem, GymSettings, Employee, Member, Membership, MemberMembership, Group, GroupCompanion, GymClass, ClassEnrollment, Payment, Payroll, AuditLog, ModuleSettings, CashRegister, Coupon, Promotion, EmailConfig, EmailTemplate, EmailLog, PaymentReminder, CronExecutionLog, Attendance, Table, TableAccount, TableAccountItem],
+      entities: [User, Product, Equipment, Sale, SaleItem, GymSettings, Employee, Member, Membership, MembershipAccessSchedule, MemberMembership, Group, GroupCompanion, GymClass, ClassEnrollment, Payment, Payroll, AuditLog, ModuleSettings, CashRegister, Coupon, Promotion, EmailConfig, EmailTemplate, EmailLog, PaymentReminder, CronExecutionLog, Attendance, Table, TableAccount, TableAccountItem],
       synchronize: true,
       logging: false,
     }),

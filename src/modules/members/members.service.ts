@@ -91,30 +91,28 @@ export class MembersService {
     const member = this.memberRepository.create(memberData);
     const savedMember = (await this.memberRepository.save(member)) as unknown as Member;
 
-    // Crear pago de inscripción pendiente
+    // Crear pago de inscripción SIEMPRE (aunque sea por $0)
     try {
       const gymSettings = await this.gymSettingsService.getSettings();
       const registrationPrice = gymSettings?.membershipPrice || 0;
 
-      console.log(`[MembersService] 🏋️ GymSettings.membershipPrice: ${registrationPrice}`, gymSettings);
+      console.log(`[MembersService] 🏋️ Creating registration payment with price: $${registrationPrice}`);
 
-      if (registrationPrice > 0) {
-        const registrationPayment = this.paymentRepository.create({
-          id: uuidv4(),
-          memberId: savedMember.id,
-          member: savedMember,
-          amount: registrationPrice,
-          paymentType: PaymentType.REGISTRATION,
-          status: PaymentStatus.PENDING,
-          description: 'Pago de inscripción',
-          paymentMethod: PaymentMethod.CASH,
-          paymentDate: null,
-        });
+      const registrationPayment = this.paymentRepository.create({
+        id: uuidv4(),
+        memberId: savedMember.id,
+        member: savedMember,
+        amount: registrationPrice,
+        paymentType: PaymentType.REGISTRATION,
+        status: PaymentStatus.PENDING,
+        description: 'Pago de inscripción',
+        paymentMethod: PaymentMethod.CASH,
+        paymentDate: null,
+      });
 
-        await this.paymentRepository.save(registrationPayment);
-        console.log(`[MembersService] 💳 Registration payment created for member ${savedMember.id}: $${registrationPrice}`);
-        this.logger.log(`Registration payment created for member ${savedMember.id}: $${registrationPrice}`);
-      }
+      const createdPayment = await this.paymentRepository.save(registrationPayment);
+      console.log(`[MembersService] 💳 Registration payment created: ID=${createdPayment.id}, Amount=$${registrationPrice}, Status=${createdPayment.status}`);
+      this.logger.log(`Registration payment created for member ${savedMember.id}: $${registrationPrice}`);
     } catch (paymentError) {
       console.error(`[MembersService] ❌ Failed to create registration payment: ${paymentError.message}`);
       this.logger.error(`Failed to create registration payment for member ${savedMember.id}`, paymentError);

@@ -9,22 +9,32 @@ import {
   Query,
   UseGuards,
   Logger,
+  Request,
+  ForbiddenException,
 } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { AttendancesService } from './attendances.service';
 import { CreateAttendanceDto, UpdateAttendanceDto } from './dto/create-attendance.dto';
 import { RegisterByCodeDto, RegisterByNameDto } from './dto/register-by-code.dto';
-import { Attendance } from '../../entities/attendance.entity';
+import { Attendance, AttendanceStatus } from '../../entities/attendance.entity';
+import { Member } from '../../entities/member.entity';
 import { UserRole } from '../../entities/user.entity';
+import { MembershipAccessScheduleService } from '../memberships/membership-access-schedule.service';
 
 @Controller('attendances')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class AttendancesController {
   private readonly logger = new Logger(AttendancesController.name);
 
-  constructor(private attendancesService: AttendancesService) {}
+  constructor(
+    private attendancesService: AttendancesService,
+    private accessScheduleService: MembershipAccessScheduleService,
+    @InjectRepository(Member) private memberRepository: Repository<Member>,
+  ) {}
 
   @Post()
   @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO)
@@ -35,9 +45,104 @@ export class AttendancesController {
 
   @Post('register-by-code')
   @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO)
-  async registerByCode(@Body() registerByCodeDto: RegisterByCodeDto): Promise<Attendance> {
+  async registerByCode(@Body() registerByCodeDto: RegisterByCodeDto): Promise<any> {
     this.logger.log(`[AttendancesController] 🔐 POST /api/attendances/register-by-code - Registrando asistencia por código`);
+    
+    // Validar horario de acceso
+    const validation = await this.accessScheduleService.validateMemberAccessBySchedule(
+      registerByCodeDto.memberCode,
+    );
+
+    if (!validation.allowed) {
+      const reason = validation.reason || 'Access denied';
+      this.logger.warn(`[AttendancesController] Acceso rechazado: ${reason}`);
+      
+      // Cargar información del miembro
+      const member = await this.memberRepository.findOne({
+        where: { memberCode: registerByCodeDto.memberCode },
+        relations: ['user'],
+      });
+      
+      // Registrar intento rechazado
+      const rejectedAttendance = await this.attendancesService.registerRejectedAttendance(
+        registerByCodeDto.memberCode,
+        reason,
+      );
+      
+      // Retornar respuesta amigable en lugar de error
+      return {
+        statusCode: 200,
+        success: false,
+        status: 'REJECTED',
+        message: this._getFriendlyMessage(reason),
+        reason: reason,
+        memberCode: registerByCodeDto.memberCode,
+        memberName: member?.user?.firstName || 'Desconocido',
+        memberLastName: member?.user?.lastName || '',
+        attendance: rejectedAttendance,
+        timestamp: new Date().toISOString(),
+      };
+    }
+
     return this.attendancesService.registerByCode(registerByCodeDto);
+  }
+
+  @Post('register-by-id')
+  @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO)
+  async registerById(@Body() body: { memberId: string; notes?: string }): Promise<any> {
+    this.logger.log(`[AttendancesController] 🔐 POST /api/attendances/register-by-id - Registrando asistencia por ID`);
+    
+    // Validar horario de acceso usando el ID
+    const validation = await this.accessScheduleService.validateMemberAccessByScheduleId(
+      body.memberId,
+    );
+
+    if (!validation.allowed) {
+      const reason = validation.reason || 'Access denied';
+      this.logger.warn(`[AttendancesController] Acceso rechazado: ${reason}`);
+      
+      // Cargar información del miembro
+      const member = await this.memberRepository.findOne({
+        where: { id: body.memberId },
+        relations: ['user'],
+      });
+      
+      // Registrar intento rechazado
+      const rejectedAttendance = await this.attendancesService.registerRejectedAttendanceById(
+        body.memberId,
+        reason,
+      );
+      
+      // Retornar respuesta amigable en lugar de error
+      return {
+        statusCode: 200,
+        success: false,
+        status: 'REJECTED',
+        message: this._getFriendlyMessage(reason),
+        reason: reason,
+        memberId: body.memberId,
+        memberName: member?.user?.firstName || 'Desconocido',
+        memberLastName: member?.user?.lastName || '',
+        attendance: rejectedAttendance,
+        timestamp: new Date().toISOString(),
+      };
+    }
+
+    return this.attendancesService.registerById(body.memberId, body.notes);
+  }
+
+  private _getFriendlyMessage(reason: string): string {
+    const messages: { [key: string]: string } = {
+      'Payment pending or suspended': '⚠️ El pago de la membresía está pendiente o suspendido. Por favor, contacta con administración.',
+      'Member not found': '❌ Miembro no encontrado. Verifica el código.',
+      'No active membership': '❌ El miembro no tiene una membresía activa.',
+      'Membership expired': '⏰ La membresía ha expirado. Debe renovarse para continuar.',
+      'Access outside schedule hours': '🕐 El acceso está restringido por horario. Tu membresía solo permite acceso en horarios específicos.',
+      'Schedule not configured for this day': '📅 No hay horarios configurados para hoy.',
+      'Access denied': '❌ Acceso denegado.',
+    };
+    
+    return messages[reason] || `❌ Acceso denegado: ${reason}`;
   }
 
   @Post('register-by-name')

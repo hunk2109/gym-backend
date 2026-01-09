@@ -88,9 +88,22 @@ export class MembershipsController {
   @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO, UserRole.CLIENTE)
   @HttpCode(HttpStatus.OK)
   async getAllMemberships(@Query('page') page: string = '1', @Query('limit') limit: string = '10') {
-    const result = await this.membershipsService.getAllMemberships(parseInt(page), parseInt(limit));
-    console.log('[MembershipsController] GET /memberships - Retornando:', JSON.stringify(result, null, 2).substring(0, 200));
-    return result;
+    try {
+      console.log('[MembershipsController] GET /memberships - page:', page, 'limit:', limit);
+      const result = await this.membershipsService.getAllMemberships(parseInt(page), parseInt(limit));
+      console.log('[MembershipsController] GET /memberships - result data count:', result.data?.length);
+      console.log('[MembershipsController] GET /memberships - first membership:', JSON.stringify(result.data?.[0], null, 2));
+      return {
+        statusCode: 200,
+        success: true,
+        message: 'Membresías obtenidas correctamente',
+        data: result,
+      };
+    } catch (error) {
+      console.error('[MembershipsController] ❌ Error al obtener membresías:', error.message);
+      console.error('[MembershipsController] Stack:', error.stack);
+      throw error;
+    }
   }
 
   // Ver membresías activas
@@ -128,6 +141,9 @@ export class MembershipsController {
     @Param('id') id: string,
     @Body() updateMembershipDto: UpdateMembershipDto,
   ) {
+    console.log('[MembershipsController] PUT /memberships/:id - id:', id);
+    console.log('[MembershipsController] PUT /memberships/:id - Raw body:', JSON.stringify(updateMembershipDto));
+    console.log('[MembershipsController] PUT /memberships/:id - accessSchedules:', updateMembershipDto.accessSchedules);
     return this.membershipsService.updateMembership(id, updateMembershipDto);
   }
 

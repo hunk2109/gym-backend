@@ -4,9 +4,10 @@ import { AttendancesService } from './attendances.service';
 import { AttendancesController } from './attendances.controller';
 import { Attendance } from '../../entities/attendance.entity';
 import { Member } from '../../entities/member.entity';
+import { MembershipsModule } from '../memberships/memberships.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Attendance, Member])],
+  imports: [TypeOrmModule.forFeature([Attendance, Member]), MembershipsModule],
   controllers: [AttendancesController],
   providers: [AttendancesService],
   exports: [AttendancesService],

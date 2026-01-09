@@ -2,7 +2,7 @@ import { Injectable, BadRequestException, NotFoundException, Logger } from '@nes
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { v4 as uuidv4 } from 'uuid';
-import { Attendance } from '../../entities/attendance.entity';
+import { Attendance, AttendanceStatus } from '../../entities/attendance.entity';
 import { Member } from '../../entities/member.entity';
 import { CreateAttendanceDto, UpdateAttendanceDto } from './dto/create-attendance.dto';
 import { RegisterByCodeDto, RegisterByNameDto } from './dto/register-by-code.dto';
@@ -35,6 +35,8 @@ export class AttendancesService {
       id: uuidv4(),
       memberId: createAttendanceDto.memberId,
       visitDate: new Date(createAttendanceDto.visitDate),
+      status: createAttendanceDto.status || AttendanceStatus.ACCEPTED,
+      rejectionReason: createAttendanceDto.rejectionReason || undefined,
       notes: createAttendanceDto.notes || undefined,
     };
 
@@ -45,32 +47,49 @@ export class AttendancesService {
     return savedAttendance;
   }
 
-  async findAllByMember(memberId: string, page: number = 1, limit: number = 50): Promise<{ data: Attendance[]; total: number }> {
+  async findAllByMember(memberId: string, page: number = 1, limit: number = 50): Promise<{ data: any[]; total: number }> {
     console.log(`[AttendancesService] 🔍 Obteniendo asistencias del miembro: ${memberId}`);
 
     const [data, total] = await this.attendanceRepository.findAndCount({
       where: { memberId },
+      relations: ['member', 'member.user'],
       order: { visitDate: 'DESC' },
       skip: (page - 1) * limit,
       take: limit,
     });
 
+    // Enriquecer datos con información del miembro
+    const enrichedData = data.map(attendance => ({
+      ...attendance,
+      memberCode: attendance.member?.memberCode,
+      memberName: attendance.member?.user?.firstName || 'Desconocido',
+      memberLastName: attendance.member?.user?.lastName || '',
+    }));
+
     console.log(`[AttendancesService] ✅ Se encontraron ${total} registros`);
-    return { data, total };
+    return { data: enrichedData, total };
   }
 
-  async findAll(page: number = 1, limit: number = 50): Promise<{ data: Attendance[]; total: number }> {
+  async findAll(page: number = 1, limit: number = 50): Promise<{ data: any[]; total: number }> {
     console.log(`[AttendancesService] 🔍 Obteniendo todas las asistencias`);
 
     const [data, total] = await this.attendanceRepository.findAndCount({
-      relations: ['member'],
+      relations: ['member', 'member.user'],
       order: { visitDate: 'DESC' },
       skip: (page - 1) * limit,
       take: limit,
     });
 
+    // Enriquecer datos con información del miembro
+    const enrichedData = data.map(attendance => ({
+      ...attendance,
+      memberCode: attendance.member?.memberCode,
+      memberName: attendance.member?.user?.firstName || 'Desconocido',
+      memberLastName: attendance.member?.user?.lastName || '',
+    }));
+
     console.log(`[AttendancesService] ✅ Se encontraron ${total} registros`);
-    return { data, total };
+    return { data: enrichedData, total };
   }
 
   async findOne(id: string): Promise<Attendance> {
@@ -139,12 +158,13 @@ export class AttendancesService {
     return result;
   }
 
-  async registerByCode(registerByCodeDto: RegisterByCodeDto): Promise<Attendance> {
+  async registerByCode(registerByCodeDto: RegisterByCodeDto): Promise<any> {
     console.log(`[AttendancesService] 🔐 Registrando asistencia por código: ${registerByCodeDto.memberCode}`);
 
-    // Buscar miembro por código
+    // Buscar miembro por código con relación user
     const member = await this.memberRepository.findOne({
       where: { memberCode: registerByCodeDto.memberCode },
+      relations: ['user'],
     });
 
     if (!member) {
@@ -158,6 +178,7 @@ export class AttendancesService {
       id: uuidv4(),
       memberId: member.id,
       visitDate: new Date(), // Timestamp actual
+      status: AttendanceStatus.ACCEPTED,
       notes: registerByCodeDto.notes || undefined,
     };
 
@@ -165,7 +186,18 @@ export class AttendancesService {
     const savedAttendance = await this.attendanceRepository.save(attendance);
     console.log(`[AttendancesService] ✅ Asistencia registrada por código: ${savedAttendance.id}`);
 
-    return savedAttendance;
+    // Retornar respuesta amigable
+    const response = {
+      statusCode: 200,
+      success: true,
+      status: 'ACCEPTED',
+      message: 'Acceso permitido',
+      attendance: savedAttendance,
+      timestamp: new Date().toISOString(),
+    };
+    
+    console.log(`[AttendancesService] 📤 Respuesta: ${JSON.stringify(response)}`);
+    return response;
   }
 
   async registerByName(registerByNameDto: RegisterByNameDto): Promise<Attendance> {
@@ -198,6 +230,104 @@ export class AttendancesService {
     const attendance = this.attendanceRepository.create(attendanceData);
     const savedAttendance = await this.attendanceRepository.save(attendance);
     console.log(`[AttendancesService] ✅ Asistencia registrada por nombre: ${savedAttendance.id}`);
+
+    return savedAttendance;
+  }
+
+  async registerRejectedAttendance(memberCode: string, rejectionReason: string): Promise<Attendance> {
+    console.log(`[AttendancesService] ❌ Registrando intento rechazado para código: ${memberCode}`);
+
+    // Buscar miembro por código
+    const member = await this.memberRepository.findOne({
+      where: { memberCode },
+    });
+
+    if (!member) {
+      throw new NotFoundException(`Miembro con código ${memberCode} no encontrado`);
+    }
+
+    // Crear registro de asistencia rechazada
+    const attendanceData = {
+      id: uuidv4(),
+      memberId: member.id,
+      visitDate: new Date(),
+      status: AttendanceStatus.REJECTED,
+      rejectionReason,
+    };
+
+    const attendance = this.attendanceRepository.create(attendanceData);
+    const savedAttendance = await this.attendanceRepository.save(attendance);
+    console.log(`[AttendancesService] ❌ Intento rechazado registrado: ${savedAttendance.id}`);
+
+    return savedAttendance;
+  }
+
+  async registerById(memberId: string, notes?: string): Promise<any> {
+    console.log(`[AttendancesService] 🔐 Registrando asistencia por ID: ${memberId}`);
+
+    // Buscar miembro por ID con relación user
+    const member = await this.memberRepository.findOne({
+      where: { id: memberId },
+      relations: ['user'],
+    });
+
+    if (!member) {
+      throw new NotFoundException(`Miembro con ID ${memberId} no encontrado`);
+    }
+
+    console.log(`[AttendancesService] ✅ Miembro encontrado: ${member.id}`);
+
+    // Crear registro de asistencia con timestamp actual
+    const attendanceData = {
+      id: uuidv4(),
+      memberId: member.id,
+      visitDate: new Date(), // Timestamp actual
+      status: AttendanceStatus.ACCEPTED,
+      notes: notes || undefined,
+    };
+
+    const attendance = this.attendanceRepository.create(attendanceData);
+    const savedAttendance = await this.attendanceRepository.save(attendance);
+    console.log(`[AttendancesService] ✅ Asistencia registrada por ID: ${savedAttendance.id}`);
+
+    // Retornar respuesta amigable
+    const response = {
+      statusCode: 200,
+      success: true,
+      status: 'ACCEPTED',
+      message: 'Acceso permitido',
+      attendance: savedAttendance,
+      timestamp: new Date().toISOString(),
+    };
+    
+    console.log(`[AttendancesService] 📤 Respuesta: ${JSON.stringify(response)}`);
+    return response;
+  }
+
+  async registerRejectedAttendanceById(memberId: string, rejectionReason: string): Promise<Attendance> {
+    console.log(`[AttendancesService] ❌ Registrando intento rechazado para ID: ${memberId}`);
+
+    // Verificar que el miembro existe
+    const member = await this.memberRepository.findOne({
+      where: { id: memberId },
+    });
+
+    if (!member) {
+      throw new NotFoundException(`Miembro con ID ${memberId} no encontrado`);
+    }
+
+    // Crear registro de asistencia rechazada
+    const attendanceData = {
+      id: uuidv4(),
+      memberId: member.id,
+      visitDate: new Date(),
+      status: AttendanceStatus.REJECTED,
+      rejectionReason,
+    };
+
+    const attendance = this.attendanceRepository.create(attendanceData);
+    const savedAttendance = await this.attendanceRepository.save(attendance);
+    console.log(`[AttendancesService] ❌ Intento rechazado registrado: ${savedAttendance.id}`);
 
     return savedAttendance;
   }

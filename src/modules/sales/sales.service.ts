@@ -5,6 +5,7 @@ import { Sale, SaleStatus } from '../../entities/sale.entity';
 import { SaleItem } from '../../entities/sale-item.entity';
 import { CreateSaleDto, UpdateSaleDto } from './dto/create-sale.dto';
 import { ProductService } from '../products/product.service';
+import { CashRegisterService } from '../cash-register/cash-register.service';
 import { PermissionsService } from '../auth/services/permissions.service';
 import { UserRole } from '../../entities/user.entity';
 
@@ -18,6 +19,7 @@ export class SalesService {
     @InjectRepository(SaleItem)
     private saleItemRepository: Repository<SaleItem>,
     private productService: ProductService,
+    private cashRegisterService: CashRegisterService,
     private readonly permissionsService: PermissionsService,
   ) {}
 
@@ -48,9 +50,10 @@ export class SalesService {
     return this.transformSaleWithSubtotals(sale);
   }
 
-  async createSale(createSaleDto: CreateSaleDto) {
+  async createSale(createSaleDto: CreateSaleDto, userId: string) {
     this.logger.debug('[SalesService] Creating sale with DTO:', createSaleDto);
     console.log('[🔴 SalesService.createSale] Received DTO:', JSON.stringify(createSaleDto, null, 2));
+    console.log('[🔴 SalesService.createSale] userId:', userId);
     
     // Validar que paymentMethod existe
     if (!createSaleDto.paymentMethod) {
@@ -75,6 +78,11 @@ export class SalesService {
     
     console.log(`[🔴 SalesService.createSale] ✓ Final totalAmount: ${totalAmount}`);
 
+    // Obtener el cash register abierto para este usuario
+    const openCashRegister = await this.cashRegisterService.getTodayRegister(userId);
+    const cashRegisterId = openCashRegister?.id || null;
+    console.log('[🔴 SalesService.createSale] Open cash register:', cashRegisterId);
+
     // Create sale
     const sale = this.saleRepository.create({
       memberId: createSaleDto.memberId,
@@ -83,6 +91,8 @@ export class SalesService {
       paymentMethod: createSaleDto.paymentMethod,
       notes: createSaleDto.notes,
       status: 'completed' as any,
+      userId: userId,
+      cashRegisterId: cashRegisterId,
     });
 
     const savedSale = await this.saleRepository.save(sale);
@@ -209,13 +219,11 @@ export class SalesService {
     };
     
     // Si se especifica cashRegisterId, filtrar por esa caja específicamente
-    // Si no, solo traer las ventas sin asignar (cashRegisterId IS NULL)
     if (cashRegisterId) {
       whereCondition.cashRegisterId = cashRegisterId;
       this.logger.debug(`[getSalesByDateRange] Filtrando por cashRegisterId: ${cashRegisterId}`);
     } else {
-      whereCondition.cashRegisterId = IsNull();
-      this.logger.debug(`[getSalesByDateRange] Filtrando solo ventas sin asignar (cashRegisterId IS NULL)`);
+      this.logger.debug(`[getSalesByDateRange] Mostrando TODAS las ventas (sin filtrar por cashRegisterId)`);
     }
     
     const sales = await this.saleRepository.find({

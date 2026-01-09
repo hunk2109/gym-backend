@@ -118,11 +118,11 @@ export class CashRegisterService {
       const startOfDay = new Date(year, month - 1, day, 0, 0, 0, 0);
       const endOfDay = new Date(year, month - 1, day, 23, 59, 59, 999);
       
-      // Obtener total de ventas del día sin asignar a cierre
+      // Obtener total de ventas del día para esta caja (incluyendo las ya asignadas)
       const salesQuery = await this.saleRepository.query(
         `SELECT COALESCE(SUM(totalAmount - discount), 0) as total FROM sales 
-         WHERE createdAt >= ? AND createdAt <= ? AND status = 'completed' AND cashRegisterId IS NULL`,
-        [startOfDay, endOfDay]
+         WHERE createdAt >= ? AND createdAt <= ? AND status = 'completed' AND (cashRegisterId = ? OR cashRegisterId IS NULL)`,
+        [startOfDay, endOfDay, cashRegister.id]
       );
       
       const totalSales = Number(salesQuery[0]?.total || 0);
@@ -354,10 +354,10 @@ export class CashRegisterService {
       return sum + (closing - opening);
     }, 0);
 
-    // Encontrar discrepancias importantes
+    // Encontrar discrepancias (cualquier diferencia != 0)
     const discrepancies = registers.filter(r => {
       const diff = typeof r.difference === 'string' ? parseFloat(r.difference) : (r.difference || 0);
-      return Math.abs(diff) > 100;
+      return diff !== 0;
     });
 
     return {
@@ -412,13 +412,19 @@ export class CashRegisterService {
            .andWhere('cr.registerDate <= :end', { end });
     }
 
-    if (severity === 'HIGH') {
-      query.andWhere('ABS(cr.difference) > 500');
-    } else if (severity === 'MEDIUM') {
-      query.andWhere('ABS(cr.difference) BETWEEN 100 AND 500');
-    } else if (severity === 'LOW') {
-      query.andWhere('ABS(cr.difference) BETWEEN 1 AND 99');
+    console.log('[Discrepancies] Severity filter:', severity);
+    if (severity === 'HIGH' || severity === 'high') {
+      console.log('[Discrepancies] Applying HIGH filter: ABS(difference) > 100');
+      query.andWhere('ABS(cr.difference) > 100');
+    } else if (severity === 'MEDIUM' || severity === 'medium') {
+      console.log('[Discrepancies] Applying MEDIUM filter: ABS(difference) BETWEEN 10 AND 100');
+      query.andWhere('ABS(cr.difference) BETWEEN 10 AND 100');
+    } else if (severity === 'LOW' || severity === 'low') {
+      console.log('[Discrepancies] Applying LOW filter: ABS(difference) < 10');
+      query.andWhere('ABS(cr.difference) < 10');
     }
+
+    console.log('[Discrepancies] SQL Query:', query.getSql());
 
     const [data, total] = await query
       .skip((page - 1) * limit)
@@ -426,6 +432,7 @@ export class CashRegisterService {
       .getManyAndCount();
 
     console.log('[Discrepancies] Found:', total, 'records');
+    console.log('[Discrepancies] Data:', data.map(r => ({ id: r.id, difference: r.difference })));
 
     return {
       data: data.map(r => ({
@@ -435,7 +442,7 @@ export class CashRegisterService {
         difference: r.difference,
         expectedClosure: r.expectedClosure,
         closingAmount: r.closingAmount,
-        severity: Math.abs(r.difference || 0) > 500 ? 'HIGH' : Math.abs(r.difference || 0) > 100 ? 'MEDIUM' : 'LOW',
+        severity: Math.abs(r.difference || 0) > 100 ? 'HIGH' : Math.abs(r.difference || 0) >= 10 ? 'MEDIUM' : 'LOW',
       })),
       total,
       page,

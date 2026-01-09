@@ -8,6 +8,11 @@ import {
 } from 'typeorm';
 import { Member } from './member.entity';
 
+export enum AttendanceStatus {
+  ACCEPTED = 'accepted',
+  REJECTED = 'rejected',
+}
+
 @Entity('attendances')
 export class Attendance {
   @PrimaryColumn({ type: 'varchar', length: 36 })
@@ -22,6 +27,16 @@ export class Attendance {
 
   @Column({ type: 'datetime' })
   visitDate: Date;
+
+  @Column({
+    type: 'enum',
+    enum: AttendanceStatus,
+    default: AttendanceStatus.ACCEPTED,
+  })
+  status: AttendanceStatus;
+
+  @Column({ type: 'varchar', nullable: true })
+  rejectionReason?: string;
 
   @Column({ type: 'varchar', nullable: true })
   notes?: string;

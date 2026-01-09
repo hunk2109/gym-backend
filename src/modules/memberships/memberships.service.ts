@@ -7,6 +7,7 @@ import { MemberMembership } from '../../entities/member-membership.entity';
 import { Member } from '../../entities/member.entity';
 import { Payment, PaymentStatus, PaymentMethod, PaymentType } from '../../entities/payment.entity';
 import { CronExecutionLog } from '../../entities/cron-execution-log.entity';
+import { MembershipAccessSchedule, DayOfWeek } from '../../entities/membership-access-schedule.entity';
 import { CreateMembershipDto, UpdateMembershipDto, AssignMembershipDto, RenewMembershipDto } from './dto/create-membership.dto';
 import { PromotionsService } from '../promotions/promotions.service';
 import { EmailService } from '../email-settings/email.service';
@@ -25,6 +26,8 @@ export class MembershipsService {
     private paymentRepository: Repository<Payment>,
     @InjectRepository(CronExecutionLog)
     private cronExecutionLogRepository: Repository<CronExecutionLog>,
+    @InjectRepository(MembershipAccessSchedule)
+    private accessScheduleRepository: Repository<MembershipAccessSchedule>,
     private promotionsService: PromotionsService,
     private emailService: EmailService,
     private gymSettingsService: GymSettingsService,
@@ -60,7 +63,36 @@ export class MembershipsService {
     });
     
     console.log('[MembershipsService] Creating membership with type:', membership.type, 'maxGroupCompanions:', membership.maxGroupCompanions);
-    return this.membershipRepository.save(membership);
+    const savedMembership = await this.membershipRepository.save(membership);
+
+    // Guardar horarios de acceso si se proporcionan
+    if (createMembershipDto.accessSchedules && createMembershipDto.accessSchedules.length > 0) {
+      console.log('[MembershipsService] Saving access schedules:', createMembershipDto.accessSchedules);
+      
+      const schedules = createMembershipDto.accessSchedules.map(schedule => 
+        this.accessScheduleRepository.create({
+          id: uuidv4(),
+          membershipId: savedMembership.id,
+          dayOfWeek: schedule.dayOfWeek as DayOfWeek,
+          timeStart: schedule.timeStart,
+          timeEnd: schedule.timeEnd,
+          isEnabled: schedule.isEnabled !== false, // Por defecto true
+        })
+      );
+
+      await this.accessScheduleRepository.save(schedules);
+      console.log('[MembershipsService] Access schedules saved successfully');
+      
+      // Cargar la membresía con los horarios recién guardados
+      const membershipWithSchedules = await this.membershipRepository.findOne({
+        where: { id: savedMembership.id },
+        relations: ['accessSchedules'],
+      });
+      
+      return membershipWithSchedules || savedMembership;
+    }
+
+    return savedMembership;
   }
 
   async getAllMemberships(page: number = 1, limit: number = 10): Promise<{ data: Membership[]; pagination: any }> {
@@ -70,6 +102,7 @@ export class MembershipsService {
       skip,
       take: limit,
       order: { createdAt: 'DESC' },
+      relations: ['accessSchedules'],
     });
 
     return {
@@ -84,7 +117,10 @@ export class MembershipsService {
   }
 
   async getMembershipById(id: string): Promise<Membership> {
-    const membership = await this.membershipRepository.findOne({ where: { id } });
+    const membership = await this.membershipRepository.findOne({ 
+      where: { id },
+      relations: ['accessSchedules'],
+    });
 
     if (!membership) {
       throw new NotFoundException('Membership not found');
@@ -97,10 +133,54 @@ export class MembershipsService {
     const membership = await this.getMembershipById(id);
 
     console.log('[MembershipsService] Updating membership:', id, 'with:', updateMembershipDto);
-    Object.assign(membership, updateMembershipDto);
+    console.log('[MembershipsService] accessSchedules received:', updateMembershipDto.accessSchedules);
+    
+    // Extraer accessSchedules antes de hacer assign
+    const { accessSchedules, ...updateData } = updateMembershipDto as any;
+    
+    console.log('[MembershipsService] updateData (without schedules):', updateData);
+    console.log('[MembershipsService] accessSchedules extracted:', accessSchedules);
+    
+    Object.assign(membership, updateData);
     console.log('[MembershipsService] Membership after assign:', membership);
 
-    return this.membershipRepository.save(membership);
+    const updatedMembership = await this.membershipRepository.save(membership);
+    console.log('[MembershipsService] Membership saved');
+
+    // Si hay nuevos horarios, eliminar los antiguos y guardar los nuevos
+    if (accessSchedules && accessSchedules.length > 0) {
+      console.log('[MembershipsService] Updating access schedules:', accessSchedules);
+      
+      // Eliminar horarios antiguos
+      await this.accessScheduleRepository.delete({ membershipId: id });
+      console.log('[MembershipsService] Old schedules deleted');
+      
+      // Crear nuevos horarios
+      const schedules = accessSchedules.map(schedule => 
+        this.accessScheduleRepository.create({
+          id: uuidv4(),
+          membershipId: id,
+          dayOfWeek: schedule.dayOfWeek as DayOfWeek,
+          timeStart: schedule.timeStart,
+          timeEnd: schedule.timeEnd,
+          isEnabled: schedule.isEnabled !== false, // Por defecto true
+        })
+      );
+
+      const saved = await this.accessScheduleRepository.save(schedules);
+      console.log('[MembershipsService] Access schedules saved:', saved);
+      
+      // Retornar membresía con horarios actualizados
+      const membershipWithSchedules = await this.membershipRepository.findOne({
+        where: { id },
+        relations: ['accessSchedules'],
+      });
+      return membershipWithSchedules || updatedMembership;
+    } else {
+      console.log('[MembershipsService] No access schedules to update');
+    }
+
+    return updatedMembership;
   }
 
   async deleteMembership(id: string): Promise<void> {
@@ -112,6 +192,7 @@ export class MembershipsService {
     return this.membershipRepository.find({
       where: { isActive: true },
       order: { price: 'ASC' },
+      relations: ['accessSchedules'],
     });
   }
 

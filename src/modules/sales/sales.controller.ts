@@ -10,6 +10,7 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
+  Request,
 } from '@nestjs/common';
 import { Public } from '../auth/decorators/public.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -130,8 +131,9 @@ export class SalesController {
   @Post()
   @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO)
   @HttpCode(HttpStatus.CREATED)
-  async createSale(@Body() createSaleDto: CreateSaleDto) {
-    return this.salesService.createSale(createSaleDto);
+  async createSale(@Request() req: any, @Body() createSaleDto: CreateSaleDto) {
+    const userId = req.user.userId;
+    return this.salesService.createSale(createSaleDto, userId);
   }
 
   @Put(':id')

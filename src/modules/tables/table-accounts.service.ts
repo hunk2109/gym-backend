@@ -204,7 +204,7 @@ export class TableAccountsService {
     return this.getAccountById(accountId);
   }
 
-  async completePayment(accountId: string, paymentMethod: string = 'cash') {
+  async completePayment(accountId: string, paymentMethod: string = 'cash', userId: string) {
     const account = await this.getAccountById(accountId);
 
     if (account.status !== AccountStatus.CLOSED) {
@@ -232,7 +232,7 @@ export class TableAccountsService {
     };
 
     this.logger.log(`Creating sale for table account ${accountId}`);
-    const sale = await this.salesService.createSale(saleDto);
+    const sale = await this.salesService.createSale(saleDto, userId);
 
     // Actualizar la cuenta con el ID de la venta
     await this.accountRepository.update(accountId, {
