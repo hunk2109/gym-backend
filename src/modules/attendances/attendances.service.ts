@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { v4 as uuidv4 } from 'uuid';
 import { Attendance, AttendanceStatus } from '../../entities/attendance.entity';
 import { Member } from '../../entities/member.entity';
+import { Employee } from '../../entities/employee.entity';
 import { CreateAttendanceDto, UpdateAttendanceDto } from './dto/create-attendance.dto';
 import { RegisterByCodeDto, RegisterByNameDto } from './dto/register-by-code.dto';
 
@@ -11,40 +12,91 @@ import { RegisterByCodeDto, RegisterByNameDto } from './dto/register-by-code.dto
 export class AttendancesService {
   private readonly logger = new Logger(AttendancesService.name);
 
+  // Mapeo de roles en inglés a español
+  private readonly roleTranslations: { [key: string]: string } = {
+    manager: 'Gerente',
+    trainer: 'Entrenador',
+    receptionist: 'Recepcionista',
+    cleaner: 'Limpieza',
+    nutritionist: 'Nutricionista',
+    supervisor: 'Supervisor',
+    cashier: 'Cajero',
+  };
+
   constructor(
     @InjectRepository(Attendance)
     private attendanceRepository: Repository<Attendance>,
     @InjectRepository(Member)
     private memberRepository: Repository<Member>,
+    @InjectRepository(Employee)
+    private employeeRepository: Repository<Employee>,
   ) {}
 
+  private translateRole(role: string): string {
+    return this.roleTranslations[role.toLowerCase()] || role;
+  }
+
   async create(createAttendanceDto: CreateAttendanceDto): Promise<Attendance> {
-    console.log(`[AttendancesService] 📝 Registrando asistencia para memberId: ${createAttendanceDto.memberId}`);
+    const attendanceType = createAttendanceDto.attendanceType || 'member';
+    
+    if (attendanceType === 'member') {
+      console.log(`[AttendancesService] 📝 Registrando asistencia para miembro: ${createAttendanceDto.memberId}`);
 
-    // Verificar que el miembro existe
-    const member = await this.memberRepository.findOne({
-      where: { id: createAttendanceDto.memberId },
-    });
+      // Verificar que el miembro existe
+      const member = await this.memberRepository.findOne({
+        where: { id: createAttendanceDto.memberId },
+      });
 
-    if (!member) {
-      throw new NotFoundException(`Miembro ${createAttendanceDto.memberId} no encontrado`);
+      if (!member) {
+        throw new NotFoundException(`Miembro ${createAttendanceDto.memberId} no encontrado`);
+      }
+
+      // Crear registro de asistencia para miembro
+      const attendanceData = {
+        id: uuidv4(),
+        memberId: createAttendanceDto.memberId,
+        attendanceType: 'member' as const,
+        visitDate: new Date(createAttendanceDto.visitDate),
+        status: createAttendanceDto.status || AttendanceStatus.ACCEPTED,
+        rejectionReason: createAttendanceDto.rejectionReason || undefined,
+        notes: createAttendanceDto.notes || undefined,
+      };
+
+      const attendance = this.attendanceRepository.create(attendanceData);
+      const savedAttendance = await this.attendanceRepository.save(attendance);
+      console.log(`[AttendancesService] ✅ Asistencia de miembro registrada: ${savedAttendance.id}`);
+
+      return savedAttendance;
+    } else {
+      // Empleado
+      console.log(`[AttendancesService] 📝 Registrando asistencia para empleado: ${createAttendanceDto.employeeId}`);
+
+      // Verificar que el empleado existe
+      const employee = await this.employeeRepository.findOne({
+        where: { id: createAttendanceDto.employeeId },
+      });
+
+      if (!employee) {
+        throw new NotFoundException(`Empleado ${createAttendanceDto.employeeId} no encontrado`);
+      }
+
+      // Crear registro de asistencia para empleado
+      const attendanceData = {
+        id: uuidv4(),
+        employeeId: createAttendanceDto.employeeId,
+        attendanceType: 'employee' as const,
+        visitDate: new Date(createAttendanceDto.visitDate),
+        status: createAttendanceDto.status || AttendanceStatus.ACCEPTED,
+        rejectionReason: createAttendanceDto.rejectionReason || undefined,
+        notes: createAttendanceDto.notes || undefined,
+      };
+
+      const attendance = this.attendanceRepository.create(attendanceData);
+      const savedAttendance = await this.attendanceRepository.save(attendance);
+      console.log(`[AttendancesService] ✅ Asistencia de empleado registrada: ${savedAttendance.id}`);
+
+      return savedAttendance;
     }
-
-    // Crear registro de asistencia
-    const attendanceData = {
-      id: uuidv4(),
-      memberId: createAttendanceDto.memberId,
-      visitDate: new Date(createAttendanceDto.visitDate),
-      status: createAttendanceDto.status || AttendanceStatus.ACCEPTED,
-      rejectionReason: createAttendanceDto.rejectionReason || undefined,
-      notes: createAttendanceDto.notes || undefined,
-    };
-
-    const attendance = this.attendanceRepository.create(attendanceData);
-    const savedAttendance = await this.attendanceRepository.save(attendance);
-    console.log(`[AttendancesService] ✅ Asistencia registrada: ${savedAttendance.id}`);
-
-    return savedAttendance;
   }
 
   async findAllByMember(memberId: string, page: number = 1, limit: number = 50): Promise<{ data: any[]; total: number }> {
@@ -64,6 +116,7 @@ export class AttendancesService {
       memberCode: attendance.member?.memberCode,
       memberName: attendance.member?.user?.firstName || 'Desconocido',
       memberLastName: attendance.member?.user?.lastName || '',
+      employeeRole: null,
     }));
 
     console.log(`[AttendancesService] ✅ Se encontraron ${total} registros`);
@@ -74,18 +127,25 @@ export class AttendancesService {
     console.log(`[AttendancesService] 🔍 Obteniendo todas las asistencias`);
 
     const [data, total] = await this.attendanceRepository.findAndCount({
-      relations: ['member', 'member.user'],
+      relations: ['member', 'member.user', 'employee'],
       order: { visitDate: 'DESC' },
       skip: (page - 1) * limit,
       take: limit,
     });
 
-    // Enriquecer datos con información del miembro
+    // Enriquecer datos con información del miembro o empleado
     const enrichedData = data.map(attendance => ({
       ...attendance,
-      memberCode: attendance.member?.memberCode,
-      memberName: attendance.member?.user?.firstName || 'Desconocido',
-      memberLastName: attendance.member?.user?.lastName || '',
+      memberCode: attendance.member?.memberCode || null,
+      memberName: attendance.attendanceType === 'member' 
+        ? (attendance.member?.user?.firstName || 'Desconocido')
+        : (attendance.employee?.firstName || 'Desconocido'),
+      memberLastName: attendance.attendanceType === 'member'
+        ? (attendance.member?.user?.lastName || '')
+        : (attendance.employee?.lastName || ''),
+      employeeRole: attendance.attendanceType === 'employee'
+        ? this.translateRole(attendance.employee?.role || 'Empleado')
+        : null,
     }));
 
     console.log(`[AttendancesService] ✅ Se encontraron ${total} registros`);
@@ -186,13 +246,30 @@ export class AttendancesService {
     const savedAttendance = await this.attendanceRepository.save(attendance);
     console.log(`[AttendancesService] ✅ Asistencia registrada por código: ${savedAttendance.id}`);
 
+    // Serializar la respuesta con los campos esperados por el cliente
+    const serializedAttendance = {
+      id: savedAttendance.id,
+      memberId: savedAttendance.memberId,
+      employeeId: savedAttendance.employeeId || null,
+      attendanceType: savedAttendance.attendanceType || 'member',
+      visitDate: savedAttendance.visitDate.toISOString(),
+      notes: savedAttendance.notes || null,
+      createdAt: savedAttendance.createdAt.toISOString(),
+      status: savedAttendance.status,
+      rejectionReason: savedAttendance.rejectionReason || null,
+      memberCode: member.memberCode || null,
+      memberName: member.user?.firstName || 'Desconocido',
+      memberLastName: member.user?.lastName || '',
+      employeeRole: null,
+    };
+
     // Retornar respuesta amigable
     const response = {
       statusCode: 200,
       success: true,
       status: 'ACCEPTED',
       message: 'Acceso permitido',
-      attendance: savedAttendance,
+      attendance: serializedAttendance,
       timestamp: new Date().toISOString(),
     };
     
@@ -290,13 +367,30 @@ export class AttendancesService {
     const savedAttendance = await this.attendanceRepository.save(attendance);
     console.log(`[AttendancesService] ✅ Asistencia registrada por ID: ${savedAttendance.id}`);
 
+    // Serializar la respuesta con los campos esperados por el cliente
+    const serializedAttendance = {
+      id: savedAttendance.id,
+      memberId: savedAttendance.memberId,
+      employeeId: savedAttendance.employeeId || null,
+      attendanceType: savedAttendance.attendanceType || 'member',
+      visitDate: savedAttendance.visitDate.toISOString(),
+      notes: savedAttendance.notes || null,
+      createdAt: savedAttendance.createdAt.toISOString(),
+      status: savedAttendance.status,
+      rejectionReason: savedAttendance.rejectionReason || null,
+      memberCode: member.memberCode || null,
+      memberName: member.user?.firstName || 'Desconocido',
+      memberLastName: member.user?.lastName || '',
+      employeeRole: null,
+    };
+
     // Retornar respuesta amigable
     const response = {
       statusCode: 200,
       success: true,
       status: 'ACCEPTED',
       message: 'Acceso permitido',
-      attendance: savedAttendance,
+      attendance: serializedAttendance,
       timestamp: new Date().toISOString(),
     };
     
@@ -330,5 +424,101 @@ export class AttendancesService {
     console.log(`[AttendancesService] ❌ Intento rechazado registrado: ${savedAttendance.id}`);
 
     return savedAttendance;
+  }
+
+  async findAllByEmployee(employeeId: string, page: number = 1, limit: number = 50): Promise<{ data: any[]; total: number }> {
+    console.log(`[AttendancesService] 🔍 Obteniendo asistencias del empleado: ${employeeId}`);
+
+    const [data, total] = await this.attendanceRepository.findAndCount({
+      where: { employeeId, attendanceType: 'employee' },
+      relations: ['employee'],
+      order: { visitDate: 'DESC' },
+      skip: (page - 1) * limit,
+      take: limit,
+    });
+
+    // Enriquecer datos con información del empleado (usar nombres consistentes con memberName/memberLastName)
+    const enrichedData = data.map(attendance => ({
+      ...attendance,
+      memberCode: null,
+      memberName: attendance.employee?.firstName || 'Desconocido',
+      memberLastName: attendance.employee?.lastName || '',
+      employeeRole: this.translateRole(attendance.employee?.role || 'Empleado'),
+      employeeName: attendance.employee?.firstName || 'Desconocido',
+      employeeLastName: attendance.employee?.lastName || '',
+    }));
+
+    console.log(`[AttendancesService] ✅ Se encontraron ${total} registros de empleado`);
+    return { data: enrichedData, total };
+  }
+
+  async getEmployeeAttendanceSummary(employeeId: string): Promise<{ totalVisits: number; lastVisit: Date | null }> {
+    console.log(`[AttendancesService] 📊 Obteniendo resumen de asistencias del empleado: ${employeeId}`);
+
+    const attendances = await this.attendanceRepository.find({
+      where: { employeeId, attendanceType: 'employee' },
+      order: { visitDate: 'DESC' },
+    });
+
+    const totalVisits = attendances.length;
+    const lastVisit = attendances.length > 0 ? attendances[0].visitDate : null;
+
+    return {
+      totalVisits,
+      lastVisit,
+    };
+  }
+
+  async registerEmployeeById(employeeId: string, notes?: string): Promise<any> {
+    console.log(`[AttendancesService] 👔 Registrando asistencia de empleado: ${employeeId}`);
+
+    // Verificar que el empleado existe
+    const employee = await this.employeeRepository.findOne({
+      where: { id: employeeId },
+    });
+
+    if (!employee) {
+      throw new NotFoundException(`Empleado ${employeeId} no encontrado`);
+    }
+
+    // Crear registro de asistencia para empleado
+    const attendanceData = {
+      id: uuidv4(),
+      employeeId: employeeId,
+      attendanceType: 'employee' as const,
+      visitDate: new Date(),
+      status: AttendanceStatus.ACCEPTED,
+      notes: notes || undefined,
+    };
+
+    const attendance = this.attendanceRepository.create(attendanceData);
+    const savedAttendance = await this.attendanceRepository.save(attendance);
+    console.log(`[AttendancesService] ✅ Asistencia de empleado registrada: ${savedAttendance.id}`);
+
+    // Serializar la respuesta con los campos esperados por el cliente
+    const serializedAttendance = {
+      id: savedAttendance.id,
+      memberId: savedAttendance.memberId || null,
+      employeeId: savedAttendance.employeeId,
+      attendanceType: savedAttendance.attendanceType,
+      visitDate: savedAttendance.visitDate.toISOString(),
+      notes: savedAttendance.notes || null,
+      createdAt: savedAttendance.createdAt.toISOString(),
+      status: savedAttendance.status,
+      rejectionReason: savedAttendance.rejectionReason || null,
+      memberCode: null,
+      memberName: employee.firstName || 'Empleado',
+      memberLastName: employee.lastName || '',
+      employeeRole: this.translateRole(employee.role || 'Empleado'),
+    };
+
+    return {
+      statusCode: 200,
+      success: true,
+      status: 'ACCEPTED',
+      message: `✅ Asistencia de ${employee.firstName} ${employee.lastName} registrada correctamente`,
+      attendance: serializedAttendance,
+      timestamp: new Date().toISOString(),
+    };
   }
 }

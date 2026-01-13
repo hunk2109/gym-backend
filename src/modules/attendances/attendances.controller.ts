@@ -131,6 +131,13 @@ export class AttendancesController {
     return this.attendancesService.registerById(body.memberId, body.notes);
   }
 
+  @Post('register-employee')
+  @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO)
+  async registerEmployeeAttendance(@Body() body: { employeeId: string; notes?: string }): Promise<any> {
+    this.logger.log(`[AttendancesController] 👔 POST /api/attendances/register-employee - Registrando asistencia de empleado`);
+    return this.attendancesService.registerEmployeeById(body.employeeId, body.notes);
+  }
+
   private _getFriendlyMessage(reason: string): string {
     const messages: { [key: string]: string } = {
       'Payment pending or suspended': '⚠️ El pago de la membresía está pendiente o suspendido. Por favor, contacta con administración.',
@@ -204,5 +211,24 @@ export class AttendancesController {
   async delete(@Param('id') id: string): Promise<void> {
     this.logger.log(`[AttendancesController] 🗑️ DELETE /api/attendances/${id}`);
     return this.attendancesService.delete(id);
+  }
+
+  // Endpoints para empleados
+  @Get('employee/:employeeId')
+  @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO)
+  async getByEmployee(
+    @Param('employeeId') employeeId: string,
+    @Query('page') page: number = 1,
+    @Query('limit') limit: number = 50,
+  ): Promise<any> {
+    this.logger.log(`[AttendancesController] 🔍 GET /api/attendances/employee/${employeeId}`);
+    return this.attendancesService.findAllByEmployee(employeeId, page, limit);
+  }
+
+  @Get('employee/:employeeId/summary')
+  @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO)
+  async getEmployeeSummary(@Param('employeeId') employeeId: string): Promise<any> {
+    this.logger.log(`[AttendancesController] 📊 GET /api/attendances/employee/${employeeId}/summary`);
+    return this.attendancesService.getEmployeeAttendanceSummary(employeeId);
   }
 }

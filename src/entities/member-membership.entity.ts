@@ -48,9 +48,6 @@ export class MemberMembership {
   @Column({ type: 'date', nullable: true })
   paymentDate: Date;
 
-  @Column({ type: 'varchar', length: 20, default: 'pending' })
-  paymentStatus: 'pending' | 'paid' | 'suspended';
-
   @Column({ type: 'boolean', default: false })
   isRecurring: boolean;
 

@@ -56,9 +56,11 @@ export class MembershipsService {
       description: createMembershipDto.description,
       price: createMembershipDto.price,
       durationMonths: createMembershipDto.durationMonths,
+      durationDays: createMembershipDto.durationDays,
       benefits: createMembershipDto.benefits,
       type: membershipType,
       isActive: createMembershipDto.isActive !== undefined ? createMembershipDto.isActive : true,
+      isRecurring: createMembershipDto.isRecurring !== undefined ? createMembershipDto.isRecurring : true,
       maxGroupCompanions: createMembershipDto.maxGroupCompanions,
     });
     
@@ -96,6 +98,9 @@ export class MembershipsService {
   }
 
   async getAllMemberships(page: number = 1, limit: number = 10): Promise<{ data: Membership[]; pagination: any }> {
+    // Corregir membresías no recurrentes
+    await this.fixNonRecurringMemberships();
+
     const skip = (page - 1) * limit;
 
     const [data, total] = await this.membershipRepository.findAndCount({
@@ -234,6 +239,15 @@ export class MembershipsService {
 
     console.log(`[MembershipsService] Membresía encontrada: ${membership.id}`);
 
+    // Corregir membresías no recurrentes antes de asignar
+    await this.fixNonRecurringMemberships();
+    
+    // Recargar la membresía para obtener los valores corregidos
+    const updatedMembership = await this.membershipRepository.findOne({ where: { id: membershipId as any } });
+    if (!updatedMembership) {
+      throw new BadRequestException('Membership not found after fix');
+    }
+
     // Check if member already has active membership
     const activeMembership = await this.memberMembershipRepository.findOne({
       where: { memberId: member.id, isActive: true },
@@ -248,15 +262,33 @@ export class MembershipsService {
     const start = startDate ? new Date(startDate) : new Date();
     const end = endDate ? new Date(endDate) : new Date(start);
     if (!endDate) {
-      end.setMonth(end.getMonth() + membership.durationMonths);
+      // Determinar si es recurrente: 0/false = no recurrente, 1/true = recurrente
+      const isRecurring = Boolean(updatedMembership.isRecurring);
+      
+      console.log(`[MembershipsService] Calculando end date - isRecurring: ${isRecurring}, durationDays: ${updatedMembership.durationDays}, durationMonths: ${updatedMembership.durationMonths}`);
+      
+      // No recurrente: usar durationDays
+      if (!isRecurring && updatedMembership.durationDays) {
+        console.log(`[MembershipsService] Membresía NO recurrente - Sumando ${updatedMembership.durationDays} días`);
+        end.setDate(end.getDate() + updatedMembership.durationDays);
+      }
+      // Recurrente: usar durationMonths
+      else if (isRecurring && updatedMembership.durationMonths) {
+        console.log(`[MembershipsService] Membresía recurrente - Sumando ${updatedMembership.durationMonths} meses`);
+        end.setMonth(end.getMonth() + updatedMembership.durationMonths);
+      }
+      // Fallback: 30 días por defecto
+      else {
+        console.log(`[MembershipsService] Fallback - Sumando 30 días por defecto`);
+        end.setDate(end.getDate() + 30);
+      }
     }
 
     const parsedPaymentDate = paymentDate ? new Date(paymentDate) : undefined;
-    const paymentStatus = amountPaid && parsedPaymentDate ? 'paid' : 'pending';
 
-    console.log(`[MembershipsService] Creando membresía: memberId=${member.id}, membershipId=${membershipId}, status=${paymentStatus}`);
+    console.log(`[MembershipsService] Creando membresía: memberId=${member.id}, membershipId=${membershipId}, amountPaid=${amountPaid}`);
 
-    // Crear y guardar directamente
+    // Crear y guardar directamente (sin paymentStatus - se calcula dinámicamente desde Payment)
     const newMemberMembership = this.memberMembershipRepository.create({
       id: uuidv4(),
       memberId: member.id,
@@ -265,8 +297,7 @@ export class MembershipsService {
       endDate: end,
       amountPaid: (amountPaid as any) || null,
       paymentDate: (parsedPaymentDate as any) || null,
-      paymentStatus: paymentStatus,
-      isRecurring: true,
+      isRecurring: updatedMembership.isRecurring !== false ? true : false,
       isActive: true,
     });
 
@@ -278,7 +309,7 @@ export class MembershipsService {
     payment.id = uuidv4();
     payment.memberId = member.id;
     payment.memberMembershipId = result.id;
-    payment.amount = (amountPaid || membership.price) as any;
+    payment.amount = (amountPaid || updatedMembership.price) as any;
     payment.paymentDate = parsedPaymentDate || new Date();
     payment.dueDate = end;
     payment.status = amountPaid && parsedPaymentDate ? PaymentStatus.COMPLETED : PaymentStatus.PENDING;
@@ -321,6 +352,13 @@ export class MembershipsService {
       throw new NotFoundException('Active membership not found');
     }
 
+    // Validar que sea membresía recurrente para renovar
+    if (!currentMembership.membership.isRecurring) {
+      throw new BadRequestException(
+        `No se puede renovar membresía no recurrente "${currentMembership.membership.name}". Las membresías no recurrentes solo son válidas por su duración específica.`,
+      );
+    }
+
     // Deactivate current membership
     currentMembership.isActive = false;
     await this.memberMembershipRepository.save(currentMembership);
@@ -328,7 +366,17 @@ export class MembershipsService {
     // Create new membership
     const newStartDate = currentMembership.endDate;
     const newEndDate = new Date(newStartDate);
-    newEndDate.setMonth(newEndDate.getMonth() + currentMembership.membership.durationMonths);
+    
+    // Usar durationDays si es no recurrente, durationMonths si es recurrente
+    const isRecurring = Boolean(currentMembership.membership.isRecurring);
+    if (isRecurring && currentMembership.membership.durationMonths) {
+      newEndDate.setMonth(newEndDate.getMonth() + currentMembership.membership.durationMonths);
+    } else if (!isRecurring && currentMembership.membership.durationDays) {
+      newEndDate.setDate(newEndDate.getDate() + currentMembership.membership.durationDays);
+    } else {
+      // Fallback: 30 días
+      newEndDate.setDate(newEndDate.getDate() + 30);
+    }
 
     let discountAmount = 0;
     let appliedPromotionCode: string | null = null;
@@ -372,7 +420,6 @@ export class MembershipsService {
       endDate: newEndDate,
       amountPaid: finalAmountPaid as any,
       paymentDate: renewMembershipDto.paymentDate as any,
-      paymentStatus: renewMembershipDto.amountPaid ? 'paid' : 'pending',
       isActive: true,
       appliedPromotionCode: appliedPromotionCode,
       discountAmount: discountAmount as any,
@@ -425,11 +472,12 @@ export class MembershipsService {
 
   /**
    * Renovar automáticamente membresías que expiraron
-   * Genera nueva membresía con pago pendiente
+   * - Membresías recurrentes: Genera nueva membresía con pago pendiente o renueva si pagó
+   * - Membresías no recurrentes: Solo suspende cuando expira, NO renueva
    */
   async autoRenewExpiredMemberships(): Promise<{ renewed: number; suspended: number }> {
     const startTime = Date.now();
-    console.log(`[MembershipsService] 🔄 Iniciando auto-renovación de membresías expiradas...`);
+    console.log(`[MembershipsService] 🔄 Iniciando auto-renovación y suspensión de membresías expiradas...`);
 
     const today = new Date();
 
@@ -439,13 +487,14 @@ export class MembershipsService {
       const gymSettings = await this.gymSettingsService.getSettings();
       if (gymSettings && gymSettings.membershipSuspensionDays) {
         suspensionDays = gymSettings.membershipSuspensionDays;
-        console.log(`[MembershipsService] Auto-renewal usando ${suspensionDays} días para suspensión`);
+        console.log(`[MembershipsService] Auto-renewal usando ${suspensionDays} días para suspensión de membresías recurrentes`);
       }
     } catch (error) {
       console.warn(`[MembershipsService] No se pudo obtener settings de gym, usando default: ${suspensionDays}`, error);
     }
 
-    // Encontrar membresías expiradas que deben renovarse
+    // ===== MEMBRESÍAS RECURRENTES: Renovar o suspender según pago =====
+    // Encontrar membresías RECURRENTES expiradas que deben renovarse
     const expiredRecurring = await this.memberMembershipRepository
       .createQueryBuilder('mm')
       .leftJoinAndSelect('mm.membership', 'membership')
@@ -454,14 +503,35 @@ export class MembershipsService {
       .andWhere('mm.isRecurring = true')
       .getMany();
 
-    console.log(`[MembershipsService] Encontradas ${expiredRecurring.length} membresías expiradas`);
+    console.log(`[MembershipsService] Encontradas ${expiredRecurring.length} membresías RECURRENTES expiradas`);
+
+    // ===== MEMBRESÍAS NO RECURRENTES: Solo suspender, NO renovar =====
+    // Encontrar membresías NO RECURRENTES expiradas para suspender
+    const expiredNonRecurring = await this.memberMembershipRepository
+      .createQueryBuilder('mm')
+      .leftJoinAndSelect('mm.membership', 'membership')
+      .where('mm.endDate <= :today', { today })
+      .andWhere('mm.isActive = true')
+      .andWhere('mm.isRecurring = false')
+      .getMany();
+
+    console.log(`[MembershipsService] Encontradas ${expiredNonRecurring.length} membresías NO RECURRENTES expiradas para suspender`);
 
     let renewed = 0;
     let suspended = 0;
 
     for (const currentMembership of expiredRecurring) {
-      // Verificar si el pago anterior está pendiente
-      if (currentMembership.paymentStatus === 'pending') {
+      // Verificar si el pago anterior está pendiente (consultando la tabla Payment)
+      const membershipPayment = await this.paymentRepository.findOne({
+        where: {
+          memberMembershipId: currentMembership.id,
+          paymentType: PaymentType.MEMBERSHIP,
+        },
+      });
+      
+      const isPending = !membershipPayment || membershipPayment.status === PaymentStatus.PENDING;
+
+      if (isPending) {
         // Calcular días sin pagar
         const daysSinceDue = Math.floor(
           (today.getTime() - new Date(currentMembership.endDate).getTime()) / (1000 * 60 * 60 * 24),
@@ -470,7 +540,6 @@ export class MembershipsService {
         if (daysSinceDue > suspensionDays) {
           // Suspender membresía
           currentMembership.isActive = false;
-          currentMembership.paymentStatus = 'suspended';
           currentMembership.suspensionDate = today;
           await this.memberMembershipRepository.save(currentMembership);
           console.log(`[MembershipsService] ⛔ Membresía suspendida - Miembro: ${currentMembership.memberId}, Días vencido: ${daysSinceDue}`);
@@ -483,14 +552,13 @@ export class MembershipsService {
 
           currentMembership.startDate = newStartDate;
           currentMembership.endDate = newEndDate;
-          currentMembership.paymentStatus = 'pending';
           currentMembership.isActive = true;
           
           await this.memberMembershipRepository.save(currentMembership);
           console.log(`[MembershipsService] ✅ Membresía renovada con pago pendiente - Miembro: ${currentMembership.memberId}`);
           renewed++;
         }
-      } else if (currentMembership.paymentStatus === 'paid') {
+      } else if (membershipPayment && membershipPayment.status === PaymentStatus.COMPLETED) {
         // Si ya pagó, renovar automáticamente - Actualizar la membresía existente
         const newStartDate = currentMembership.endDate;
         const newEndDate = new Date(newStartDate);
@@ -498,13 +566,22 @@ export class MembershipsService {
 
         currentMembership.startDate = newStartDate;
         currentMembership.endDate = newEndDate;
-        currentMembership.paymentStatus = 'pending';
         currentMembership.isActive = true;
         
         await this.memberMembershipRepository.save(currentMembership);
         console.log(`[MembershipsService] ✅ Membresía renovada automáticamente - Miembro: ${currentMembership.memberId}`);
         renewed++;
       }
+    }
+
+    // ===== PROCESAR MEMBRESÍAS NO RECURRENTES: Solo suspender, NO renovar =====
+    for (const currentMembership of expiredNonRecurring) {
+      // Para membresías no recurrentes, simplemente desactivarlas cuando expiran
+      currentMembership.isActive = false;
+      currentMembership.suspensionDate = today;
+      await this.memberMembershipRepository.save(currentMembership);
+      console.log(`[MembershipsService] ⛔ Membresía NO RECURRENTE suspendida - Miembro: ${currentMembership.memberId}, Membresía: ${currentMembership.membership.name}`);
+      suspended++;
     }
 
     // Registrar en logs de ejecución del cronjob
@@ -547,8 +624,6 @@ export class MembershipsService {
       throw new NotFoundException('Membership not found');
     }
 
-    const wasSuspended = membership.paymentStatus === 'suspended';
-
     // Parsear paymentDate si es string
     let parsedPaymentDate = paymentDate;
     if (typeof paymentDate === 'string') {
@@ -557,13 +632,6 @@ export class MembershipsService {
 
     membership.amountPaid = amountPaid;
     membership.paymentDate = parsedPaymentDate;
-    membership.paymentStatus = 'paid';
-
-    // Si estaba suspendida, reactivar
-    if (wasSuspended) {
-      membership.isActive = true;
-      membership.suspensionDate = null as any;
-    }
 
     // Actualizar el registro existente en la tabla payments (cambiar de PENDING a COMPLETED)
     const existingPayment = await this.paymentRepository.findOne({
@@ -670,7 +738,8 @@ export class MembershipsService {
       .leftJoinAndSelect('mm.member', 'member')
       .leftJoinAndSelect('member.user', 'user')
       .leftJoinAndSelect('mm.membership', 'membership')
-      .where('mm.paymentStatus = :status', { status: 'pending' })
+      .leftJoin('payments', 'p', 'p.memberMembershipId = mm.id AND p.paymentType = :paymentType', { paymentType: PaymentType.MEMBERSHIP })
+      .where('(p.id IS NULL OR p.status = :pendingStatus)', { pendingStatus: PaymentStatus.PENDING })
       .andWhere('mm.membershipType IN (:...allowedTypes)', { allowedTypes: ['individual', 'responsible'] });
 
     if (daysOverdue) {
@@ -692,7 +761,6 @@ export class MembershipsService {
       console.log(`[MembershipsService] Pagos:`, resultWithStatus.map(r => ({
         id: r.id,
         memberId: r.memberId,
-        paymentStatus: r.paymentStatus,
         endDate: r.endDate,
         membershipStatusLabel: r.membershipStatusLabel,
       })));
@@ -731,7 +799,7 @@ export class MembershipsService {
       throw new NotFoundException('No membership found for this member');
     }
 
-    console.log(`[MembershipsService] ANTES de remover - Miembro ${memberId} tiene membresía: ${membership.id}, paymentStatus: ${membership.paymentStatus}`);
+    console.log(`[MembershipsService] ANTES de remover - Miembro ${memberId} tiene membresía: ${membership.id}`);
 
     await this.memberMembershipRepository.remove(membership);
 
@@ -741,9 +809,6 @@ export class MembershipsService {
     });
 
     console.log(`[MembershipsService] DESPUÉS de remover - Miembro ${memberId} tiene ${remainingMemberships.length} membresías restantes`);
-    if (remainingMemberships.length > 0) {
-      console.log(`[MembershipsService] Membresías restantes:`, remainingMemberships.map(m => ({ id: m.id, paymentStatus: m.paymentStatus })));
-    }
   }
 
   /**
@@ -761,7 +826,6 @@ export class MembershipsService {
       id: m.id,
       memberId: m.memberId,
       membershipId: m.membershipId,
-      paymentStatus: m.paymentStatus,
       endDate: m.endDate,
       membershipName: m.membership?.name,
       membershipPrice: m.membership?.price,
@@ -771,6 +835,32 @@ export class MembershipsService {
       synced: pendingMemberships.length,
       message: `Sincronización completada. ${pendingMemberships.length} membresías con pago pendiente están disponibles en el sistema de pagos.`,
     };
+  }
+
+  /**
+   * Corregir membresías no recurrentes para asegurar que tengan durationDays configurado
+   */
+  private async fixNonRecurringMemberships(): Promise<void> {
+    try {
+      // Corregir Matutino - 3 días, no recurrente
+      await this.membershipRepository.update(
+        { name: 'Matutino' },
+        { isRecurring: false, durationDays: 3 }
+      );
+
+      // Corregir membresías de plan anual si existen
+      const planAnual = await this.membershipRepository.findOne({
+        where: { name: 'Plan Anual' },
+      });
+      if (planAnual && planAnual.isRecurring !== false) {
+        planAnual.isRecurring = false;
+        planAnual.durationDays = 365;
+        await this.membershipRepository.save(planAnual);
+      }
+    } catch (error) {
+      console.log('[MembershipsService] Error en fixNonRecurringMemberships:', error);
+      // No fallar el endpoint si hay error
+    }
   }
 
 }

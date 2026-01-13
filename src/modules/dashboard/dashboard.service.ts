@@ -7,7 +7,7 @@ import { Employee } from '../../entities/employee.entity';
 import { Member } from '../../entities/member.entity';
 import { MemberMembership } from '../../entities/member-membership.entity';
 import { Membership } from '../../entities/membership.entity';
-import { Payment, PaymentStatus } from '../../entities/payment.entity';
+import { Payment, PaymentStatus, PaymentType } from '../../entities/payment.entity';
 
 @Injectable()
 export class DashboardService {
@@ -390,24 +390,28 @@ export class DashboardService {
 
     const paymentAmount = paymentAmountResult?.total ? parseFloat(paymentAmountResult.total) : 0;
 
-    // 2. Contar membresías con pago pendiente (SOLO estas se cuentan para evitar duplicados)
-    const membershipCount = await this.memberMembershipRepository.count({
-      where: { paymentStatus: 'pending' },
-    });
-
-    const membershipAmountResult = await this.memberMembershipRepository
+    // Contar pagos de membresía con pago pendiente (consultando Payment table)
+    const membershipCount = await this.memberMembershipRepository
       .createQueryBuilder('mm')
-      .select('SUM(mm.amountPaid)', 'total')
-      .where('mm.paymentStatus = :status', { status: 'pending' })
+      .leftJoin('payments', 'p', 'p.memberMembershipId = mm.id AND p.paymentType = :paymentType', { paymentType: PaymentType.MEMBERSHIP })
+      .where('(p.id IS NULL OR p.status = :status)', { status: PaymentStatus.PENDING })
+      .getCount();
+
+    // Obtener membresías con pago PENDIENTE (consultando Payment table)
+    const membershipPaymentsResult = await this.memberMembershipRepository
+      .createQueryBuilder('mm')
+      .select('SUM(COALESCE(p.amount, 0))', 'total')
+      .leftJoin('payments', 'p', 'p.memberMembershipId = mm.id AND p.paymentType = :paymentType', { paymentType: PaymentType.MEMBERSHIP })
+      .where('(p.id IS NULL OR p.status = :status)', { status: PaymentStatus.PENDING })
       .getRawOne();
 
-    const membershipAmount = membershipAmountResult?.total ? parseFloat(membershipAmountResult.total) : 0;
+    const membershipAmount = membershipPaymentsResult?.total ? parseFloat(membershipPaymentsResult.total) : 0;
 
     const totalCount = paymentCount + membershipCount;
     const totalAmount = paymentAmount + membershipAmount;
 
-    console.log(`[Dashboard] Pagos pendientes encontrados: ${paymentCount} (Payment sin membresía) + ${membershipCount} (MemberMembership) = ${totalCount} total`);
-    console.log(`[Dashboard] Monto pendiente: $${paymentAmount} (Payment) + $${membershipAmount} (MemberMembership) = $${totalAmount} total`);
+    console.log(`[Dashboard] Pagos pendientes encontrados: ${paymentCount} (Payment table) `);
+    console.log(`[Dashboard] Monto pendiente: $${paymentAmount} (Payment) + $${membershipAmount} (memberships via Payment) = $${totalAmount} total`);
 
     return {
       count: totalCount,

@@ -19,7 +19,19 @@ export class GymSettingsService {
       throw new Error('Gym settings already exist');
     }
 
-    const settings = this.gymSettingsRepository.create(createDto);
+    // Convertir base64 a Buffer si viene logoImage
+    const createData: any = { ...createDto };
+    if (createDto.logoImage) {
+      try {
+        createData.logoImage = Buffer.from(createDto.logoImage, 'base64');
+        this.logger.log(`[CREATE] Logo image convertido: ${createData.logoImage.length} bytes`);
+      } catch (error) {
+        this.logger.error(`[CREATE] Error convertiendo logoImage: ${error.message}`);
+        delete createData.logoImage;
+      }
+    }
+
+    const settings = this.gymSettingsRepository.create(createData);
     return this.gymSettingsRepository.save(settings) as any;
   }
 
@@ -52,17 +64,41 @@ export class GymSettingsService {
       this.logger.log('[GET] Default gym settings created');
     }
 
-    return settings;
+    // Convertir logoImage Buffer a base64 string si existe
+    const response = { ...settings } as any;
+    if (response.logoImage && Buffer.isBuffer(response.logoImage)) {
+      try {
+        response.logoImage = response.logoImage.toString('base64');
+        this.logger.log('[GET] Logo image convertido a base64');
+      } catch (error) {
+        this.logger.error(`[GET] Error convirtiendo logoImage a base64: ${error.message}`);
+      }
+    }
+
+    return response;
   }
 
   async update(updateDto: UpdateGymSettingsDto): Promise<GymSettings> {
-    this.logger.log(`[UPDATE] Received updateDto: ${JSON.stringify(updateDto)}`);
+    this.logger.log(`[UPDATE] Received updateDto with fields: ${Object.keys(updateDto).join(', ')}`);
     const settings = await this.getSettings();
-    this.logger.log(`[UPDATE] Current settings: ${JSON.stringify(settings)}`);
-    Object.assign(settings, updateDto);
-    this.logger.log(`[UPDATE] Settings after assign: ${JSON.stringify(settings)}`);
+    
+    // Convertir base64 a Buffer si viene logoImage
+    const updateData: any = { ...updateDto };
+    if (updateDto.logoImage) {
+      try {
+        // El base64 viene como string, convertir a Buffer
+        updateData.logoImage = Buffer.from(updateDto.logoImage, 'base64');
+        this.logger.log(`[UPDATE] Logo image convertido: ${updateData.logoImage.length} bytes`);
+      } catch (error) {
+        this.logger.error(`[UPDATE] Error convertiendo logoImage: ${error.message}`);
+        delete updateData.logoImage;
+      }
+    }
+    
+    Object.assign(settings, updateData);
+    this.logger.log(`[UPDATE] Settings after assign`);
     const saved = await this.gymSettingsRepository.save(settings);
-    this.logger.log(`[UPDATE] Settings saved successfully: ${JSON.stringify(saved)}`);
+    this.logger.log(`[UPDATE] Settings saved successfully`);
     return saved as any;
   }
 

@@ -61,6 +61,31 @@ export class GymSettings {
   @Column({ type: 'int', default: 15 })
   membershipSuspensionDays: number; // Días para suspender membresía con pago pendiente
 
+  @Column({ type: 'longblob', nullable: true })
+  logoImage: Buffer; // Logo/imagen para facturas (BLOB)
+
+  // MB360 Biometric Device Configuration
+  @Column({ type: 'boolean', default: false })
+  mb360Enabled: boolean; // ¿Habilitado control biométrico?
+
+  @Column({ type: 'varchar', nullable: true })
+  mb360Ip: string; // IP del dispositivo MB360
+
+  @Column({ type: 'int', nullable: true })
+  mb360Port: number; // Puerto del dispositivo MB360 (default: 80)
+
+  @Column({ type: 'varchar', nullable: true })
+  mb360Username: string; // Usuario para conectar al MB360
+
+  @Column({ type: 'varchar', nullable: true })
+  mb360Password: string; // Contraseña para conectar al MB360
+
+  @Column({ type: 'int', nullable: true })
+  mb360RelayId: number; // ID del relé para abrir puerta (1-4 típicamente)
+
+  @Column({ type: 'varchar', nullable: true })
+  mb360Timezone: string; // Zona horaria del dispositivo
+
   @CreateDateColumn()
   createdAt: Date;
 

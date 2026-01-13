@@ -27,9 +27,21 @@ export class GymSettingsController {
   @Get()
   async getSettings() {
     const settings = await this.gymSettingsService.getSettings();
+    
+    // Asegurar que logoImage es base64 string
+    const response = { ...settings } as any;
+    if (response.logoImage && typeof response.logoImage === 'object') {
+      try {
+        response.logoImage = response.logoImage.toString('base64');
+      } catch (error) {
+        // Si falla, eliminar la imagen
+        delete response.logoImage;
+      }
+    }
+    
     return {
       success: true,
-      data: settings,
+      data: response,
     };
   }
 
@@ -39,9 +51,21 @@ export class GymSettingsController {
   @Roles(UserRole.ADMIN, UserRole.ENCARGADO)
   async update(@Body() updateDto: UpdateGymSettingsDto) {
     const settings = await this.gymSettingsService.update(updateDto);
+    
+    // Asegurar que logoImage es base64 string
+    const response = { ...settings } as any;
+    if (response.logoImage && typeof response.logoImage === 'object') {
+      try {
+        response.logoImage = response.logoImage.toString('base64');
+      } catch (error) {
+        // Si falla, eliminar la imagen
+        delete response.logoImage;
+      }
+    }
+    
     return {
       success: true,
-      data: settings,
+      data: response,
     };
   }
 }

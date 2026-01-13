@@ -1,7 +1,9 @@
 import { AttendanceStatus } from '../../../entities/attendance.entity';
 
 export class CreateAttendanceDto {
-  memberId: string;
+  memberId?: string;
+  employeeId?: string;
+  attendanceType: 'member' | 'employee'; // Requerido: indicar si es miembro o empleado
   visitDate: string | Date;
   status?: AttendanceStatus;
   rejectionReason?: string;
@@ -14,3 +16,4 @@ export class UpdateAttendanceDto {
   rejectionReason?: string;
   notes?: string;
 }
+

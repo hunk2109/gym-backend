@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsNumber, IsEmail } from 'class-validator';
+import { IsString, IsOptional, IsNumber, IsEmail, IsBoolean } from 'class-validator';
 import { Transform } from 'class-transformer';
 
 export class CreateGymSettingsDto {
@@ -51,6 +51,41 @@ export class CreateGymSettingsDto {
   @IsOptional()
   @IsString()
   policies?: string;
+
+  @IsOptional()
+  @IsString()
+  logoImage?: string; // Base64 encoded image para logo de facturas
+
+  // MB360 Configuration
+  @IsOptional()
+  @IsBoolean()
+  mb360Enabled?: boolean;
+
+  @IsOptional()
+  @IsString()
+  mb360Ip?: string;
+
+  @IsOptional()
+  @Transform(({ value }) => value ? parseInt(value) : undefined)
+  @IsNumber()
+  mb360Port?: number;
+
+  @IsOptional()
+  @IsString()
+  mb360Username?: string;
+
+  @IsOptional()
+  @IsString()
+  mb360Password?: string;
+
+  @IsOptional()
+  @Transform(({ value }) => value ? parseInt(value) : undefined)
+  @IsNumber()
+  mb360RelayId?: number;
+
+  @IsOptional()
+  @IsString()
+  mb360Timezone?: string;
 }
 
 export class UpdateGymSettingsDto {
@@ -103,4 +138,39 @@ export class UpdateGymSettingsDto {
   @IsOptional()
   @IsString()
   policies?: string;
+
+  @IsOptional()
+  @IsString()
+  logoImage?: string; // Base64 encoded image para logo de facturas
+
+  // MB360 Configuration
+  @IsOptional()
+  @IsBoolean()
+  mb360Enabled?: boolean;
+
+  @IsOptional()
+  @IsString()
+  mb360Ip?: string;
+
+  @IsOptional()
+  @Transform(({ value }) => value ? parseInt(value) : undefined)
+  @IsNumber()
+  mb360Port?: number;
+
+  @IsOptional()
+  @IsString()
+  mb360Username?: string;
+
+  @IsOptional()
+  @IsString()
+  mb360Password?: string;
+
+  @IsOptional()
+  @Transform(({ value }) => value ? parseInt(value) : undefined)
+  @IsNumber()
+  mb360RelayId?: number;
+
+  @IsOptional()
+  @IsString()
+  mb360Timezone?: string;
 }

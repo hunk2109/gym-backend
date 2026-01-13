@@ -76,6 +76,12 @@ export class Member {
   @Column({ type: 'boolean', default: false })
   hasPendingPayment: boolean;
 
+  @Column({ type: 'boolean', default: false })
+  hasRegistrationPaymentPending: boolean;
+
+  @Column({ type: 'boolean', default: false })
+  hasMembershipPaymentPending: boolean;
+
   @Column({ type: 'longtext', nullable: true })
   fingerprints?: string; // JSON con información de huellas dactilares
 

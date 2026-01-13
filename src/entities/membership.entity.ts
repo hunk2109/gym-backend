@@ -40,19 +40,21 @@ export class Membership {
   }})
   price: number;
 
-  @Column({ type: 'decimal', precision: 10, scale: 4, transformer: {
+  @Column({ type: 'decimal', precision: 10, scale: 2, transformer: {
     to: (value: number) => {
       if (value === null || value === undefined) return null;
       return value;
     },
     from: (value: string | number) => {
-      if (value === null || value === undefined) return 0;
+      if (value === null || value === undefined) return 1;
       const parsed = parseFloat(String(value));
-      // Redondear a 4 decimales para precisión
-      return Math.round(parsed * 10000) / 10000;
+      return parsed > 0 ? parsed : 1;
     },
   }})
   durationMonths: number;
+
+  @Column({ type: 'int', nullable: true })
+  durationDays?: number; // Para membresías no recurrentes (días específicos en lugar de meses)
 
   @Column({ type: 'simple-array', nullable: true })
   benefits: string[];
@@ -73,6 +75,9 @@ export class Membership {
 
   @Column({ type: 'boolean', default: true })
   isActive: boolean;
+
+  @Column({ type: 'boolean', default: true })
+  isRecurring: boolean; // Si es true, genera renovaciones automáticas. Si es false, solo pago inicial al asignar
 
   @Column({ type: 'int', nullable: true })
   maxGroupCompanions?: number; // Máximo de acompañantes si es membresía grupal

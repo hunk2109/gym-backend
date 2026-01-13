@@ -251,10 +251,11 @@ export class EmailSchedulerService {
       .leftJoinAndSelect('membership.member', 'member')
       .leftJoinAndSelect('member.user', 'user')
       .leftJoinAndSelect('membership.membership', 'membershipType')
+      .leftJoin('payments', 'p', 'p.memberMembershipId = membership.id AND p.paymentType = :paymentType', { paymentType: 'MEMBERSHIP' })
       .where(`DATE_FORMAT(membership.createdAt, '%m-%d') = :monthDay`, {
         monthDay: `${month}-${day}`,
       })
-      .andWhere('membership.paymentStatus = :paymentStatus', { paymentStatus: 'paid' })
+      .andWhere('p.status = :paymentStatus', { paymentStatus: 'COMPLETED' })
       .getMany();
   }
 

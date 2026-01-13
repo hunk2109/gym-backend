@@ -104,10 +104,10 @@ export class MembersService {
         member: savedMember,
         amount: registrationPrice,
         paymentType: PaymentType.REGISTRATION,
-        status: PaymentStatus.PENDING,
+        status: registrationPrice === 0 ? PaymentStatus.COMPLETED : PaymentStatus.PENDING,
         description: 'Pago de inscripción',
         paymentMethod: PaymentMethod.CASH,
-        paymentDate: null,
+        paymentDate: registrationPrice === 0 ? new Date() : null,
       });
 
       const createdPayment = await this.paymentRepository.save(registrationPayment);
@@ -289,6 +289,8 @@ export class MembersService {
             currentMembership: null,
             hasMembership: false,
             hasPendingPayment: !!pendingRegistrationPayment,
+            hasRegistrationPaymentPending: !!pendingRegistrationPayment,
+            hasMembershipPaymentPending: false,
             isMembershipSuspended: false,
           };
           return mapped;
@@ -300,7 +302,19 @@ export class MembersService {
         );
         
         const mostRecent = sortedMemberships[0];
-        let isPending = mostRecent.paymentStatus === 'pending';
+        
+        // Calcular si el pago está pendiente verificando directamente en la tabla Payment
+        let isPending = true;
+        const membershipPayment = await this.paymentRepository.findOne({
+          where: {
+            memberMembershipId: mostRecent.id,
+            paymentType: PaymentType.MEMBERSHIP,
+          },
+        });
+        
+        if (membershipPayment && membershipPayment.status === PaymentStatus.COMPLETED) {
+          isPending = false;
+        }
         
         // LÓGICA DE ACOMPAÑANTES: Si es acompañante, verificar si el responsable del grupo pagó
         if (mostRecent.membershipType === 'companion' && isPending) {
@@ -334,8 +348,16 @@ export class MembersService {
               .getOne();
           }
           
-          if (responsibleMembership && responsibleMembership.paymentStatus === 'paid') {
-            isPending = false;
+          if (responsibleMembership) {
+            const responsiblePayment = await this.paymentRepository.findOne({
+              where: {
+                memberMembershipId: responsibleMembership.id,
+                paymentType: PaymentType.MEMBERSHIP,
+              },
+            });
+            if (responsiblePayment && responsiblePayment.status === PaymentStatus.COMPLETED) {
+              isPending = false;
+            }
           }
         }
         
@@ -368,7 +390,38 @@ export class MembersService {
           }
         }
 
-        const isMembershipSuspended = mostRecent.paymentStatus === 'suspended';
+        // Verificar si la membresía está suspendida por falta de pago
+        // Usar directamente el Payment para determinar suspensión
+        const missedPaymentsCount = await this.paymentRepository.count({
+          where: {
+            memberMembershipId: mostRecent.id,
+            status: PaymentStatus.PENDING,
+            paymentType: PaymentType.MEMBERSHIP,
+          },
+        });
+        
+        const isMembershipSuspended = 
+          missedPaymentsCount > 0 && 
+          mostRecent.suspensionDate !== null;
+
+        // Verificar si hay pago de inscripción pendiente (además del pago de membresía)
+        const pendingRegistrationPayment = await this.paymentRepository.findOne({
+          where: {
+            memberId: member.id,
+            paymentType: PaymentType.REGISTRATION,
+            status: PaymentStatus.PENDING,
+          },
+        });
+
+        // Verificar si hay pago de membresía pendiente (basándose en la tabla Payment, no en MemberMembership)
+        const pendingMembershipPayment = await this.paymentRepository.findOne({
+          where: {
+            memberId: member.id,
+            memberMembershipId: mostRecent.id,
+            paymentType: PaymentType.MEMBERSHIP,
+            status: PaymentStatus.PENDING,
+          },
+        });
 
         const mapped = {
           ...member,
@@ -376,6 +429,8 @@ export class MembersService {
           currentMembership: mostRecent,
           hasMembership: true,
           hasPendingPayment: isPending,
+          hasRegistrationPaymentPending: !!pendingRegistrationPayment,
+          hasMembershipPaymentPending: !!pendingMembershipPayment,
           membershipType: mostRecent.membershipType,
           membershipStatusLabel,
           isMembershipSuspended,
@@ -399,6 +454,7 @@ export class MembersService {
     const member = await this.memberRepository
       .createQueryBuilder('member')
       .leftJoinAndSelect('member.user', 'user')
+      .leftJoinAndSelect('member.memberships', 'memberships')
       .where('member.id = :id', { id })
       .getOne();
 
@@ -406,7 +462,42 @@ export class MembersService {
       throw new NotFoundException('Member not found');
     }
 
-    return member;
+    // Calcular hasRegistrationPaymentPending y hasMembershipPaymentPending
+    const pendingRegistrationPayment = await this.paymentRepository.findOne({
+      where: {
+        memberId: id,
+        paymentType: PaymentType.REGISTRATION,
+        status: PaymentStatus.PENDING,
+      },
+    });
+
+    let hasMembershipPaymentPending = false;
+    const memberships = member.memberships || [];
+    
+    if (memberships.length > 0) {
+      const mostRecent = memberships.sort(
+        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+      )[0];
+      // Verificar directamente en Payment si hay pago pendiente
+      const pendingMembershipPayment = await this.paymentRepository.findOne({
+        where: {
+          memberId: id,
+          memberMembershipId: mostRecent.id,
+          paymentType: PaymentType.MEMBERSHIP,
+          status: PaymentStatus.PENDING,
+        },
+      });
+      hasMembershipPaymentPending = !!pendingMembershipPayment;
+    }
+
+    const result = {
+      ...member,
+      hasRegistrationPaymentPending: !!pendingRegistrationPayment,
+      hasMembershipPaymentPending,
+      hasPendingPayment: !!pendingRegistrationPayment || hasMembershipPaymentPending,
+    };
+
+    return result as unknown as Member;
   }
 
   async findByUserId(userId: string): Promise<Member> {

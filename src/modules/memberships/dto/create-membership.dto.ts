@@ -17,6 +17,10 @@ export class CreateMembershipDto {
   durationMonths: number;
 
   @IsOptional()
+  @IsNumber()
+  durationDays?: number; // Para membresías no recurrentes (días específicos en lugar de meses)
+
+  @IsOptional()
   @IsArray()
   benefits?: string[];
 
@@ -34,6 +38,10 @@ export class CreateMembershipDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  isRecurring?: boolean; // Si es true, genera renovaciones automáticas. Si es false, solo pago inicial al asignar
 
   @IsOptional()
   @IsNumber()
@@ -65,6 +73,10 @@ export class UpdateMembershipDto {
   durationMonths?: number;
 
   @IsOptional()
+  @IsNumber()
+  durationDays?: number; // Para membresías no recurrentes (días específicos en lugar de meses)
+
+  @IsOptional()
   @IsArray()
   benefits?: string[];
 
@@ -73,8 +85,13 @@ export class UpdateMembershipDto {
   isActive?: boolean;
 
   @IsOptional()
+  @IsBoolean()
+  isRecurring?: boolean; // Si es true, genera renovaciones automáticas. Si es false, solo pago inicial al asignar
+
+  @IsOptional()
   @IsNumber()
   maxGroupCompanions?: number;
+
 
   @IsOptional()
   @IsArray()

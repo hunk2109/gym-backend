@@ -180,14 +180,7 @@ export class MembershipAccessScheduleService {
       };
     }
 
-    // Verificar que el estado de pago sea "paid"
-    if (activeMembership.paymentStatus !== 'paid') {
-      return {
-        allowed: false,
-        reason: 'Pago pendiente',
-        membership: activeMembership.membership,
-      };
-    }
+    // TODO: Verificar estado de pago mediante tabla Payment (requiere PaymentRepository)
 
     // Obtener el horario de la membresía
     const membership = await this.membershipRepository.findOne({
@@ -323,14 +316,7 @@ export class MembershipAccessScheduleService {
       };
     }
 
-    // Verificar que el estado de pago sea "paid"
-    if (activeMembership.paymentStatus !== 'paid') {
-      return {
-        allowed: false,
-        reason: 'Pago pendiente',
-        membership: activeMembership.membership,
-      };
-    }
+    // TODO: Verificar estado de pago mediante tabla Payment (requiere PaymentRepository)
 
     // Obtener el horario de la membresía
     const membership = await this.membershipRepository.findOne({

@@ -28,6 +28,24 @@ export class MemberMembershipsService {
   ) {}
 
   /**
+   * Calcular dinámicamente el estado de pago desde la tabla Payment
+   */
+  async getPaymentStatus(memberMembershipId: string): Promise<'pending' | 'paid' | 'suspended'> {
+    const payment = await this.paymentRepository.findOne({
+      where: {
+        memberMembershipId: memberMembershipId,
+        paymentType: PaymentType.MEMBERSHIP,
+      },
+    });
+
+    if (!payment) {
+      return 'pending'; // Si no hay pago registrado, es pendiente
+    }
+
+    return payment.status === PaymentStatus.COMPLETED ? 'paid' : 'pending';
+  }
+
+  /**
    * Obtener la membresía activa de un miembro
    */
   async getMemberActiveMembership(memberId: string): Promise<MemberMembership | null> {
@@ -110,21 +128,6 @@ export class MemberMembershipsService {
       throw new NotFoundException(`Miembro con ID ${memberId} no encontrado`);
     }
 
-    // ✅ Verificar que NO hay pago de inscripción pendiente
-    const pendingRegistrationPayment = await this.paymentRepository.findOne({
-      where: {
-        memberId: memberId,
-        paymentType: PaymentType.REGISTRATION,
-        status: PaymentStatus.PENDING,
-      },
-    });
-
-    if (pendingRegistrationPayment) {
-      throw new BadRequestException(
-        `No se puede asignar membresía. El miembro tiene un pago de inscripción pendiente por $${pendingRegistrationPayment.amount}. Debe completar el pago primero.`,
-      );
-    }
-
     // Verificar que la membresía existe
     const membership = await this.membershipRepository.findOne({
       where: { id: dto.membershipId },
@@ -140,13 +143,33 @@ export class MemberMembershipsService {
 
     // Validar fechas
     const startDate = new Date(dto.startDate);
-    const endDate = new Date(dto.endDate);
+    let endDate = new Date(dto.endDate);
 
     if (endDate <= startDate) {
       throw new BadRequestException(
         'La fecha de fin debe ser posterior a la fecha de inicio',
       );
     }
+
+    // IMPORTANTE: Recalcular endDate según si es recurrente o no
+    // Si es NO recurrente (isRecurring = false), usar durationDays
+    // Si es recurrente (isRecurring = true), usar durationMonths
+    const isRecurring = Boolean(membership.isRecurring);
+    console.log(`[MemberMembershipsService] Evaluando duración - isRecurring: ${isRecurring}, durationDays: ${membership.durationDays}, durationMonths: ${membership.durationMonths}`);
+    
+    // RECALCULAR endDate basado en los campos correctos de la membresía
+    endDate = new Date(startDate);
+    if (!isRecurring && membership.durationDays) {
+      console.log(`[MemberMembershipsService] Membresía NO recurrente - Sumando ${membership.durationDays} días a partir de ${startDate.toISOString()}`);
+      endDate.setDate(endDate.getDate() + membership.durationDays);
+    } else if (isRecurring && membership.durationMonths) {
+      console.log(`[MemberMembershipsService] Membresía recurrente - Sumando ${membership.durationMonths} meses a partir de ${startDate.toISOString()}`);
+      endDate.setMonth(endDate.getMonth() + membership.durationMonths);
+    } else {
+      console.log(`[MemberMembershipsService] Fallback - Sumando 30 días por defecto`);
+      endDate.setDate(endDate.getDate() + 30);
+    }
+    console.log(`[MemberMembershipsService] endDate RECALCULADA: ${endDate.toISOString()}`);
 
     // Procesar cupón de promoción si se proporciona
     let discountAmount = 0;
@@ -226,13 +249,13 @@ export class MemberMembershipsService {
     const finalAmount = membershipPrice - discountAmount;
     console.log(`[MemberMembershipsService] Cálculos finales - membershipPrice: ${membershipPrice}, discountAmount: ${discountAmount}, finalAmount: ${finalAmount}`);
     
-    // Determinar el monto pagado y el estado
+    // Determinar el monto pagado
     const amountPaidValue = dto.amountPaid ? Number(dto.amountPaid) : 0;
     memberMembership.amountPaid = amountPaidValue > 0 ? amountPaidValue : finalAmount;
     memberMembership.paymentDate = (dto.paymentDate ?? null) as any;
-    // Si se pagó algo (amountPaid > 0), marcar como 'paid', si no, marcar como 'pending'
-    memberMembership.paymentStatus = amountPaidValue > 0 ? 'paid' : 'pending';
-    memberMembership.isRecurring = false;
+    // El paymentStatus se calcula dinámicamente desde la tabla Payment
+    // Usar el valor de isRecurring de la membresía (por defecto true para compatibilidad)
+    memberMembership.isRecurring = membership.isRecurring !== false;
     
     // Almacenar información del descuento aplicado
     memberMembership.appliedPromotionCode = appliedPromotionCode;
@@ -345,7 +368,13 @@ export class MemberMembershipsService {
     payment.amount = memberMembership.amountPaid as any; // Usar amountPaid que ya tiene descuento aplicado
     payment.paymentDate = memberMembership.paymentDate || new Date();
     payment.dueDate = endDate;
-    payment.status = memberMembership.paymentStatus === 'paid' ? PaymentStatus.COMPLETED : PaymentStatus.PENDING;
+    // Si el monto es $0, marcar automáticamente como completado
+    if (payment.amount === 0) {
+      payment.status = PaymentStatus.COMPLETED;
+    } else {
+      // Si el monto es > 0 pero existe paymentDate, significa que ya se pagó
+      payment.status = (memberMembership.amountPaid && memberMembership.paymentDate) ? PaymentStatus.COMPLETED : PaymentStatus.PENDING;
+    }
     payment.paymentMethod = PaymentMethod.CASH;
     payment.paymentType = PaymentType.MEMBERSHIP;
 
@@ -542,13 +571,14 @@ export class MemberMembershipsService {
   ): Promise<{ data: any[]; pagination: any }> {
     const skip = (page - 1) * limit;
 
-    // Obtener membresías pendientes
+    // Obtener membresías pendientes de pago (desde Payment table)
     const [membershipData, membershipTotal] = await this.memberMembershipRepository
       .createQueryBuilder('mm')
       .leftJoinAndSelect('mm.membership', 'membership')
       .leftJoinAndSelect('mm.member', 'member')
       .leftJoinAndSelect('member.user', 'user')
-      .where('mm.paymentStatus = :status', { status: 'pending' })
+      .leftJoin('payments', 'p', 'p.memberMembershipId = mm.id AND p.paymentType = :paymentType', { paymentType: PaymentType.MEMBERSHIP })
+      .where('(p.id IS NULL OR p.status = :status)', { status: PaymentStatus.PENDING })
       .andWhere('mm.membershipType IN (:...allowedTypes)', { allowedTypes: ['individual', 'responsible'] })
       .orderBy('mm.createdAt', 'DESC')
       .getManyAndCount();
@@ -558,8 +588,8 @@ export class MemberMembershipsService {
       .createQueryBuilder('payment')
       .leftJoinAndSelect('payment.member', 'member')
       .leftJoinAndSelect('member.user', 'user')
-      .where('payment.paymentType = :type', { type: 'registration' })
-      .andWhere('payment.status = :status', { status: 'pending' })
+      .where('payment.paymentType = :type', { type: PaymentType.REGISTRATION })
+      .andWhere('payment.status = :status', { status: PaymentStatus.PENDING })
       .orderBy('payment.createdAt', 'DESC')
       .getMany();
 
@@ -618,7 +648,6 @@ export class MemberMembershipsService {
 
     memberMembership.amountPaid = amountPaid;
     memberMembership.paymentDate = paymentDate;
-    memberMembership.paymentStatus = 'paid';
 
     const saved = await this.memberMembershipRepository.save(memberMembership);
 

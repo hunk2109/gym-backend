@@ -34,7 +34,17 @@ export class PaymentsService {
     }
 
     const payment = this.paymentRepository.create(createPaymentDto);
+    
+    // Si el monto es $0, marcar automáticamente como completado
+    if (payment.amount === 0) {
+      payment.status = PaymentStatus.COMPLETED;
+      this.logger.log(`[Payment] Auto-completing $0 payment for member ${createPaymentDto.memberId}`);
+    }
+    
     const savedPayment = await this.paymentRepository.save(payment);
+    
+    // paymentStatus se calcula dinámicamente desde la tabla Payment
+    // Ya no se actualiza member_membership.paymentStatus
     
     this.logger.log(`[Payment] Payment created. ID: ${savedPayment.id}, Amount: ${createPaymentDto.amount}, Member: ${createPaymentDto.memberId}`);
     return savedPayment;
@@ -85,7 +95,17 @@ export class PaymentsService {
 
     Object.assign(payment, updatePaymentDto);
 
-    return this.paymentRepository.save(payment);
+    // Si el monto es $0, marcar automáticamente como completado
+    if (payment.amount === 0) {
+      payment.status = PaymentStatus.COMPLETED;
+      this.logger.log(`[Payment] Auto-completing $0 payment ${id}`);
+    }
+
+    const savedPayment = await this.paymentRepository.save(payment);
+    // paymentStatus se calcula dinámicamente desde la tabla Payment
+    // Ya no se actualiza member_membership.paymentStatus
+
+    return savedPayment;
   }
 
   async deletePayment(id: string): Promise<void> {
@@ -367,16 +387,20 @@ export class PaymentsService {
 
     // Obtener membresías con pago pendiente
     // FILTRO: Solo mostrar si membershipType != 'companion'
+    // IMPORTANTE: Verificar que realmente hay un pago PENDING en la tabla Payment
     const membershipRecords = await this.memberMembershipRepository
       .createQueryBuilder('mm')
       .leftJoinAndSelect('mm.member', 'member')
       .leftJoinAndSelect('member.user', 'user')
       .leftJoinAndSelect('mm.membership', 'membership')
-      .where('mm.paymentStatus = :status', { status: 'pending' })
-      .andWhere('mm.endDate <= :cutoffDate', { cutoffDate })
+      .leftJoin(Payment, 'p', 'p.memberMembershipId = mm.id AND p.paymentType = :paymentType AND p.status = :status', 
+        { paymentType: PaymentType.MEMBERSHIP, status: PaymentStatus.PENDING }
+      )
+      .where('mm.endDate <= :cutoffDate', { cutoffDate })
       .andWhere('mm.membershipType IS NULL OR mm.membershipType IN (:...allowedTypes)', { 
         allowedTypes: ['individual', 'responsible'] 
       })
+      .andWhere('p.id IS NOT NULL')
       .orderBy('mm.endDate', 'ASC')
       .getMany();
 
