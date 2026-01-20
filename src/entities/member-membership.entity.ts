@@ -57,7 +57,7 @@ export class MemberMembership {
   isRecurring: boolean;
 
   @Column({ type: 'date', nullable: true })
-  suspensionDate: Date;
+  suspensionDate: Date | null;
 
   @Column({ type: 'varchar', length: 50, nullable: true })
   appliedPromotionCode?: string | null; // Código de cupón/promoción aplicado

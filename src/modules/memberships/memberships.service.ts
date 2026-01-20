@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { DataSource } from 'typeorm';
 import { v4 as uuidv4 } from 'uuid';
 import { Membership, MembershipType, PriceType } from '../../entities/membership.entity';
 import { MemberMembership } from '../../entities/member-membership.entity';
@@ -504,77 +505,205 @@ export class MembershipsService {
    * - Membresías recurrentes: Genera nueva membresía con pago pendiente o renueva si pagó
    * - Membresías no recurrentes: Solo suspende cuando expira, NO renueva
    */
-  async autoRenewExpiredMemberships(): Promise<{ renewed: number; suspended: number }> {
+  async autoRenewExpiredMemberships(): Promise<{ renewed: number; suspended: number; notified: number; companions: number; reactivated: number }> {
     const startTime = Date.now();
     console.log(`[MembershipsService] 🔄 Iniciando auto-renovación y suspensión de membresías expiradas...`);
 
+    // Usar fecha actual sin horas/minutos/segundos para comparaciones consistentes
     const today = new Date();
+    today.setHours(0, 0, 0, 0);
 
     // Obtener la configuración del gimnasio para los días de suspensión
     let suspensionDays = 15; // default
+    let notificationDaysBefore = 3; // default
     try {
       const gymSettings = await this.gymSettingsService.getSettings();
       if (gymSettings && gymSettings.membershipSuspensionDays) {
         suspensionDays = gymSettings.membershipSuspensionDays;
-        console.log(`[MembershipsService] Auto-renewal usando ${suspensionDays} días para suspensión de membresías recurrentes`);
       }
+      console.log(`[MembershipsService] Usando ${suspensionDays} días para suspensión y ${notificationDaysBefore} días antes para notificación`);
     } catch (error) {
-      console.warn(`[MembershipsService] No se pudo obtener settings de gym, usando default: ${suspensionDays}`, error);
+      console.warn(`[MembershipsService] No se pudo obtener settings de gym, usando defaults`, error);
     }
 
     // ===== MEMBRESÍAS RECURRENTES: Renovar o suspender según pago =====
-    // Encontrar membresías RECURRENTES expiradas que deben renovarse
-    const expiredRecurring = await this.memberMembershipRepository
-      .createQueryBuilder('mm')
-      .leftJoinAndSelect('mm.membership', 'membership')
-      .where('mm.endDate <= :today', { today })
-      .andWhere('mm.isActive = true')
-      .andWhere('mm.isRecurring = true')
-      .getMany();
+    // Encontrar membresías RECURRENTES expiradas - usar paginación para no sobrecargar
+    const pageSize = 100;
+    let page = 0;
+    const allExpiredRecurring: MemberMembership[] = [];
+    let hasMore = true;
 
-    console.log(`[MembershipsService] Encontradas ${expiredRecurring.length} membresías RECURRENTES expiradas`);
+    while (hasMore) {
+      const expiredRecurring = await this.memberMembershipRepository
+        .createQueryBuilder('mm')
+        .leftJoinAndSelect('mm.membership', 'membership')
+        .leftJoinAndSelect('mm.member', 'member')
+        .where('mm.endDate <= :today', { today })
+        .andWhere('mm.isActive = true')
+        .andWhere('mm.isRecurring = true')
+        .andWhere('mm.membershipType IN (:...types)', { types: ['individual', 'responsible'] })
+        .orderBy('mm.endDate', 'ASC')
+        .skip(page * pageSize)
+        .take(pageSize)
+        .getMany();
+
+      if (expiredRecurring.length === 0) {
+        hasMore = false;
+      } else {
+        allExpiredRecurring.push(...expiredRecurring);
+        page++;
+      }
+    }
+
+    console.log(`[MembershipsService] Encontradas ${allExpiredRecurring.length} membresías RECURRENTES expiradas`);
 
     // ===== MEMBRESÍAS NO RECURRENTES: Solo suspender, NO renovar =====
-    // Encontrar membresías NO RECURRENTES expiradas para suspender
-    const expiredNonRecurring = await this.memberMembershipRepository
-      .createQueryBuilder('mm')
-      .leftJoinAndSelect('mm.membership', 'membership')
-      .where('mm.endDate <= :today', { today })
-      .andWhere('mm.isActive = true')
-      .andWhere('mm.isRecurring = false')
-      .getMany();
+    page = 0;
+    const allExpiredNonRecurring: MemberMembership[] = [];
+    hasMore = true;
 
-    console.log(`[MembershipsService] Encontradas ${expiredNonRecurring.length} membresías NO RECURRENTES expiradas para suspender`);
+    while (hasMore) {
+      const expiredNonRecurring = await this.memberMembershipRepository
+        .createQueryBuilder('mm')
+        .leftJoinAndSelect('mm.membership', 'membership')
+        .leftJoinAndSelect('mm.member', 'member')
+        .where('mm.endDate <= :today', { today })
+        .andWhere('mm.isActive = true')
+        .andWhere('mm.isRecurring = false')
+        .orderBy('mm.endDate', 'ASC')
+        .skip(page * pageSize)
+        .take(pageSize)
+        .getMany();
+
+      if (expiredNonRecurring.length === 0) {
+        hasMore = false;
+      } else {
+        allExpiredNonRecurring.push(...expiredNonRecurring);
+        page++;
+      }
+    }
+
+    console.log(`[MembershipsService] Encontradas ${allExpiredNonRecurring.length} membresías NO RECURRENTES expiradas`);
+
+    // ===== MEMBRESÍAS COMPANIONS: Expiradas y vinculadas a responsable con pago =====
+    page = 0;
+    const allExpiredCompanions: MemberMembership[] = [];
+    hasMore = true;
+
+    while (hasMore) {
+      const expiredCompanions = await this.memberMembershipRepository
+        .createQueryBuilder('mm')
+        .leftJoinAndSelect('mm.membership', 'membership')
+        .leftJoinAndSelect('mm.member', 'member')
+        .leftJoinAndSelect('mm.group', 'group')
+        .where('mm.endDate <= :today', { today })
+        .andWhere('mm.isActive = true')
+        .andWhere('mm.membershipType = :type', { type: 'companion' })
+        .orderBy('mm.endDate', 'ASC')
+        .skip(page * pageSize)
+        .take(pageSize)
+        .getMany();
+
+      if (expiredCompanions.length === 0) {
+        hasMore = false;
+      } else {
+        allExpiredCompanions.push(...expiredCompanions);
+        page++;
+      }
+    }
+
+    console.log(`[MembershipsService] Encontradas ${allExpiredCompanions.length} membresías COMPANIONS expiradas`);
+
+    // ===== MEMBRESÍAS SUSPENDIDAS: Reactivar si ya pagaron =====
+    page = 0;
+    const allSuspendedMemberships: MemberMembership[] = [];
+    hasMore = true;
+
+    while (hasMore) {
+      const suspendedMemberships = await this.memberMembershipRepository
+        .createQueryBuilder('mm')
+        .leftJoinAndSelect('mm.membership', 'membership')
+        .leftJoinAndSelect('mm.member', 'member')
+        .where('mm.isActive = false')
+        .andWhere('mm.suspensionDate IS NOT NULL')
+        .orderBy('mm.suspensionDate', 'DESC')
+        .skip(page * pageSize)
+        .take(pageSize)
+        .getMany();
+
+      if (suspendedMemberships.length === 0) {
+        hasMore = false;
+      } else {
+        allSuspendedMemberships.push(...suspendedMemberships);
+        page++;
+      }
+    }
+
+    console.log(`[MembershipsService] Encontradas ${allSuspendedMemberships.length} membresías SUSPENDIDAS para verificar reactivación`);
 
     let renewed = 0;
     let suspended = 0;
+    let notified = 0;
+    let companions = 0;
+    let reactivated = 0;
 
-    for (const currentMembership of expiredRecurring) {
-      // Verificar si el pago anterior está pendiente (consultando por paymentId)
-      let membershipPayment: Payment | null = null;
-      if (currentMembership.paymentId) {
-        membershipPayment = await this.paymentRepository.findOne({
-          where: { id: currentMembership.paymentId },
-        });
-      }
-      
-      const isPending = !membershipPayment || (membershipPayment && membershipPayment.status === PaymentStatus.PENDING);
+    // ===== PROCESAR MEMBRESÍAS RECURRENTES =====
+    for (const currentMembership of allExpiredRecurring) {
+      try {
+        // Validar que sea recurrente
+        if (!currentMembership.isRecurring) {
+          console.warn(`[MembershipsService] ⚠️ Membresía ${currentMembership.id} marcada como recurrente pero no lo es`);
+          continue;
+        }
 
-      if (isPending) {
-        // Calcular días sin pagar
-        const daysSinceDue = Math.floor(
-          (today.getTime() - new Date(currentMembership.endDate).getTime()) / (1000 * 60 * 60 * 24),
-        );
+        // Verificar si el pago anterior está pendiente (consultando por paymentId)
+        let membershipPayment: Payment | null = null;
+        if (currentMembership.paymentId) {
+          membershipPayment = await this.paymentRepository.findOne({
+            where: { id: currentMembership.paymentId },
+          });
+        }
+        
+        const isPending = !membershipPayment || (membershipPayment && membershipPayment.status === PaymentStatus.PENDING);
 
-        if (daysSinceDue > suspensionDays) {
-          // Suspender membresía
-          currentMembership.isActive = false;
-          currentMembership.suspensionDate = today;
-          await this.memberMembershipRepository.save(currentMembership);
-          console.log(`[MembershipsService] ⛔ Membresía suspendida - Miembro: ${currentMembership.memberId}, Días vencido: ${daysSinceDue}`);
-          suspended++;
-        } else {
-          // Renovar con pago pendiente - Actualizar la membresía existente
+        if (isPending) {
+          // Calcular días sin pagar
+          const daysSinceDue = Math.floor(
+            (today.getTime() - new Date(currentMembership.endDate).getTime()) / (1000 * 60 * 60 * 24),
+          );
+
+          // Enviar notificación 3 días antes de la suspensión
+          const daysUntilSuspension = suspensionDays - daysSinceDue;
+          if (daysUntilSuspension === notificationDaysBefore && currentMembership.member?.user) {
+            try {
+              await this.emailService.sendEmailDirect({
+                to: currentMembership.member.user.email,
+                subject: '⚠️ Tu membresía será suspendida en 3 días',
+                text: `Hola ${currentMembership.member.user.firstName},\n\nTu pago de membresía está pendiente desde hace ${daysSinceDue} días.\n\nSi no realizas el pago en los próximos 3 días, tu membresía será suspendida.\n\nAccede al portal para completar el pago.\n\nGracias.`,
+                html: `<p>Hola ${currentMembership.member.user.firstName},</p><p>Tu pago de membresía está pendiente desde hace ${daysSinceDue} días.</p><p>Si no realizas el pago en los próximos <strong>3 días</strong>, tu membresía será suspendida.</p><p>Accede al portal para completar el pago.</p>`,
+              });
+              notified++;
+              console.log(`[MembershipsService] 📧 Notificación de suspensión próxima enviada - Miembro: ${currentMembership.memberId}`);
+            } catch (emailError) {
+              console.warn(`[MembershipsService] Error enviando notificación: ${emailError.message}`);
+            }
+          }
+
+          if (daysSinceDue > suspensionDays) {
+            // Suspender membresía
+            currentMembership.isActive = false;
+            currentMembership.suspensionDate = today;
+            await this.memberMembershipRepository.save(currentMembership);
+            console.log(`[MembershipsService] ⛔ Membresía suspendida - Miembro: ${currentMembership.memberId}, Días vencido: ${daysSinceDue}`);
+            suspended++;
+          } else {
+            // Renovar con pago pendiente y crear nuevo Payment
+            await this.renewMembershipWithPendingPayment(currentMembership);
+            console.log(`[MembershipsService] ✅ Membresía renovada con pago pendiente - Miembro: ${currentMembership.memberId}`);
+            renewed++;
+          }
+        } else if (membershipPayment && membershipPayment.status === PaymentStatus.COMPLETED) {
+          // Si ya pagó, renovar automáticamente
           const newStartDate = currentMembership.endDate;
           const newEndDate = new Date(newStartDate);
           newEndDate.setMonth(newEndDate.getMonth() + currentMembership.membership.durationMonths);
@@ -583,44 +712,126 @@ export class MembershipsService {
           currentMembership.endDate = newEndDate;
           currentMembership.isActive = true;
           
+          // Crear nuevo pago completado para el registro
+          const renewalPayment = new Payment();
+          renewalPayment.id = uuidv4();
+          renewalPayment.amount = parseFloat(currentMembership.membership.price as any) || 0;
+          renewalPayment.status = PaymentStatus.COMPLETED;
+          renewalPayment.paymentMethod = PaymentMethod.CASH;
+          renewalPayment.paymentType = PaymentType.MEMBERSHIP;
+          renewalPayment.paymentDate = today;
+          renewalPayment.description = `Auto-renewal for membership: ${currentMembership.membership.name}`;
+          const savedPayment = await this.paymentRepository.save(renewalPayment);
+          
+          currentMembership.paymentId = savedPayment.id;
+          currentMembership.payAmount = renewalPayment.amount as any;
+          
           await this.memberMembershipRepository.save(currentMembership);
-          console.log(`[MembershipsService] ✅ Membresía renovada con pago pendiente - Miembro: ${currentMembership.memberId}`);
+          console.log(`[MembershipsService] ✅ Membresía renovada automáticamente (pago completado) - Miembro: ${currentMembership.memberId}`);
           renewed++;
         }
-      } else if (membershipPayment && membershipPayment.status === PaymentStatus.COMPLETED) {
-        // Si ya pagó, renovar automáticamente - Actualizar la membresía existente
-        const newStartDate = currentMembership.endDate;
-        const newEndDate = new Date(newStartDate);
-        newEndDate.setMonth(newEndDate.getMonth() + currentMembership.membership.durationMonths);
-
-        currentMembership.startDate = newStartDate;
-        currentMembership.endDate = newEndDate;
-        currentMembership.isActive = true;
-        
-        await this.memberMembershipRepository.save(currentMembership);
-        console.log(`[MembershipsService] ✅ Membresía renovada automáticamente - Miembro: ${currentMembership.memberId}`);
-        renewed++;
+      } catch (error) {
+        console.error(`[MembershipsService] ❌ Error procesando membresía recurrente ${currentMembership.id}:`, error.message);
       }
     }
 
     // ===== PROCESAR MEMBRESÍAS NO RECURRENTES: Solo suspender, NO renovar =====
-    for (const currentMembership of expiredNonRecurring) {
-      // Para membresías no recurrentes, simplemente desactivarlas cuando expiran
-      currentMembership.isActive = false;
-      currentMembership.suspensionDate = today;
-      await this.memberMembershipRepository.save(currentMembership);
-      console.log(`[MembershipsService] ⛔ Membresía NO RECURRENTE suspendida - Miembro: ${currentMembership.memberId}, Membresía: ${currentMembership.membership.name}`);
-      suspended++;
+    for (const currentMembership of allExpiredNonRecurring) {
+      try {
+        // Validar que no sea recurrente
+        if (currentMembership.isRecurring) {
+          console.warn(`[MembershipsService] ⚠️ Membresía ${currentMembership.id} marcada como no recurrente pero sí lo es`);
+          continue;
+        }
+
+        currentMembership.isActive = false;
+        currentMembership.suspensionDate = today;
+        await this.memberMembershipRepository.save(currentMembership);
+        console.log(`[MembershipsService] ⛔ Membresía NO RECURRENTE suspendida - Miembro: ${currentMembership.memberId}, Membresía: ${currentMembership.membership.name}`);
+        suspended++;
+      } catch (error) {
+        console.error(`[MembershipsService] ❌ Error procesando membresía no recurrente ${currentMembership.id}:`, error.message);
+      }
+    }
+
+    // ===== PROCESAR MEMBRESÍAS COMPANIONS: Sincronizar con responsable =====
+    for (const companionMembership of allExpiredCompanions) {
+      try {
+        // Encontrar al responsable del grupo
+        const responsibleMembership = await this.memberMembershipRepository.findOne({
+          where: {
+            groupId: companionMembership.groupId,
+            membershipType: 'responsible',
+            isActive: true,
+          },
+          relations: ['member', 'member.user'],
+        });
+
+        if (!responsibleMembership) {
+          console.warn(`[MembershipsService] ⚠️ No encontrado responsable para companion ${companionMembership.memberId}`);
+          continue;
+        }
+
+        // ✅ SINCRONIZAR: El companion debe tener las mismas fechas del responsable
+        companionMembership.startDate = responsibleMembership.startDate;
+        companionMembership.endDate = responsibleMembership.endDate;
+        companionMembership.isActive = true;
+        
+        // ✅ COMPARTIR PAYMENT: El companion usa el mismo paymentId del responsable
+        companionMembership.paymentId = responsibleMembership.paymentId;
+        companionMembership.payAmount = companionMembership.membership.pricePerCompanion as any || 0;
+        
+        await this.memberMembershipRepository.save(companionMembership);
+        console.log(`[MembershipsService] ✅ Companion renovado (sincronizado con responsable) - Companion: ${companionMembership.memberId}, Responsable: ${responsibleMembership.memberId}`);
+        companions++;
+      } catch (error) {
+        console.error(`[MembershipsService] ❌ Error procesando companion ${companionMembership.id}:`, error.message);
+      }
+    }
+
+    // ===== PROCESAR MEMBRESÍAS SUSPENDIDAS: Reactivar si el pago está COMPLETED =====
+    for (const suspendedMembership of allSuspendedMemberships) {
+      try {
+        // Verificar si el pago fue completado después de la suspensión
+        if (!suspendedMembership.paymentId) {
+          continue;
+        }
+
+        const payment = await this.paymentRepository.findOne({
+          where: { id: suspendedMembership.paymentId },
+        });
+
+        if (!payment) {
+          continue;
+        }
+
+        // ✅ Si el pago fue COMPLETADO después de la suspensión, REACTIVAR
+        if (payment.status === PaymentStatus.COMPLETED && payment.paymentDate && suspendedMembership.suspensionDate) {
+          const paymentDate = new Date(payment.paymentDate);
+          paymentDate.setHours(0, 0, 0, 0);
+
+          // Solo reactivar si el pago es más reciente que la suspensión
+          if (paymentDate >= suspendedMembership.suspensionDate) {
+            suspendedMembership.isActive = true;
+            suspendedMembership.suspensionDate = null;
+            await this.memberMembershipRepository.save(suspendedMembership);
+            console.log(`[MembershipsService] 🔁 Membresía REACTIVADA - Miembro: ${suspendedMembership.memberId}, Pago: ${payment.id}`);
+            reactivated++;
+          }
+        }
+      } catch (error) {
+        console.error(`[MembershipsService] ❌ Error procesando reactivación ${suspendedMembership.id}:`, error.message);
+      }
     }
 
     // Registrar en logs de ejecución del cronjob
     const executionTimeMs = Date.now() - startTime;
-    const totalProcessed = renewed + suspended;
+    const totalProcessed = renewed + suspended + notified + companions + reactivated;
     
     try {
       const log = this.cronExecutionLogRepository.create({
         cronName: 'auto-renew-expired-memberships',
-        description: `Renovadas: ${renewed}, Suspendidas: ${suspended}`,
+        description: `Renovadas: ${renewed}, Suspendidas: ${suspended}, Notificadas: ${notified}, Companions: ${companions}, Reactivadas: ${reactivated}`,
         status: 'success',
         executionTimeMs,
         itemsProcessed: totalProcessed,
@@ -631,13 +842,43 @@ export class MembershipsService {
       console.error(`[MembershipsService] Error al registrar log:`, error);
     }
 
-    console.log(`[MembershipsService] ✅ Auto-renovación completada en ${executionTimeMs}ms - Renovadas: ${renewed}, Suspendidas: ${suspended}`);
+    console.log(`[MembershipsService] ✅ Auto-renovación completada en ${executionTimeMs}ms - Renovadas: ${renewed}, Suspendidas: ${suspended}, Notificadas: ${notified}, Companions: ${companions}, Reactivadas: ${reactivated}`);
     
-    return { renewed, suspended };
+    return { renewed, suspended, notified, companions, reactivated };
+  }
+
+  /**
+   * Renovar membresía con pago pendiente automático
+   */
+  private async renewMembershipWithPendingPayment(currentMembership: MemberMembership): Promise<void> {
+    const newStartDate = currentMembership.endDate;
+    const newEndDate = new Date(newStartDate);
+    newEndDate.setMonth(newEndDate.getMonth() + currentMembership.membership.durationMonths);
+
+    // Crear nuevo Payment pendiente
+    const renewalPayment = new Payment();
+    renewalPayment.id = uuidv4();
+    renewalPayment.amount = parseFloat(currentMembership.membership.price as any) || 0;
+    renewalPayment.status = PaymentStatus.PENDING;
+    renewalPayment.paymentMethod = PaymentMethod.CASH;
+    renewalPayment.paymentType = PaymentType.MEMBERSHIP;
+    renewalPayment.dueDate = newEndDate;
+    renewalPayment.description = `Auto-renewal for membership: ${currentMembership.membership.name}`;
+    const savedPayment = await this.paymentRepository.save(renewalPayment);
+
+    // Actualizar membresía
+    currentMembership.startDate = newStartDate;
+    currentMembership.endDate = newEndDate;
+    currentMembership.isActive = true;
+    currentMembership.paymentId = savedPayment.id;
+    currentMembership.payAmount = renewalPayment.amount as any;
+    
+    await this.memberMembershipRepository.save(currentMembership);
   }
 
   /**
    * Registrar pago de membresía pendiente
+```
    */
   async recordPayment(
     membershipId: string,

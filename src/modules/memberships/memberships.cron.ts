@@ -13,16 +13,20 @@ export class MembershipsCronService {
   ) {}
 
   /**
-   * Ejecuta renovación automática de membresías cada 30 minutos
-   * - Renueva membresías con pago pendiente (menos de 15 días vencidas)
-   * - Suspende membresías con pago pendiente (más de 15 días vencidas)
+   * Ejecuta renovación automática de membresías cada 6 horas
+   * - Renueva membresías recurrentes con pago completado
+   * - Renueva membresías recurrentes con pago pendiente (< 15 días vencidas)
+   * - Suspende membresías recurrentes con pago pendiente (> 15 días vencidas)
+   * - Suspende membresías no recurrentes cuando vencen
+   * - Envía notificaciones 3 días antes de la suspensión
+   * - Crea automáticamente pagos pendientes para renovaciones
    */
-  @Cron(CronExpression.EVERY_30_MINUTES)
+  @Cron(CronExpression.EVERY_6_HOURS)
   async handleMembershipRenewal() {
     const startTime = Date.now();
     const logId = await this.cronLoggingService.logCronStart(
       'MembershipRenewalJob',
-      'Automatic membership renewal every day at 2 AM',
+      'Automatic membership renewal - processes recurring/non-recurring memberships, creates pending payments, and sends notifications',
     );
 
     try {
@@ -33,12 +37,12 @@ export class MembershipsCronService {
       const executionTimeMs = Date.now() - startTime;
       await this.cronLoggingService.logCronSuccess(
         logId,
-        result.renewed + result.suspended,
+        result.renewed + result.suspended + result.notified + result.companions + result.reactivated,
         executionTimeMs,
       );
 
       this.logger.log(
-        `Renovación completada: ${result.renewed} renovadas, ${result.suspended} suspendidas en ${executionTimeMs}ms`,
+        `Renovación completada: ${result.renewed} renovadas, ${result.suspended} suspendidas, ${result.notified} notificadas, ${result.companions} companions, ${result.reactivated} reactivadas en ${executionTimeMs}ms`,
       );
     } catch (error) {
       const executionTimeMs = Date.now() - startTime;
