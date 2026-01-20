@@ -4,10 +4,7 @@ import {
   PrimaryGeneratedColumn,
   CreateDateColumn,
   UpdateDateColumn,
-  ManyToOne,
-  JoinColumn,
 } from 'typeorm';
-import { Member } from './member.entity';
 
 export enum PaymentMethod {
   CASH = 'cash',
@@ -21,6 +18,7 @@ export enum PaymentStatus {
   COMPLETED = 'completed',
   FAILED = 'failed',
   REFUNDED = 'refunded',
+  CANCELLED = 'cancelled',
 }
 
 export enum PaymentType {
@@ -36,16 +34,6 @@ export enum PaymentType {
 export class Payment {
   @PrimaryGeneratedColumn('uuid')
   id: string;
-
-  @ManyToOne(() => Member, { eager: true, onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'memberId' })
-  member: Member;
-
-  @Column({ type: 'varchar' })
-  memberId: string;
-
-  @Column({ type: 'varchar', nullable: true })
-  memberMembershipId: string;
 
   @Column({ type: 'decimal', precision: 10, scale: 2 })
   amount: number;
@@ -83,7 +71,7 @@ export class Payment {
   @Column({ type: 'text', nullable: true })
   notes: string;
 
-  @Column({ type: 'date', nullable: true })
+  @Column({ type: 'datetime', nullable: true })
   paymentDate: Date | null;
 
   @Column({ type: 'date', nullable: true })
@@ -94,6 +82,12 @@ export class Payment {
 
   @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
   tax: number;
+
+  @Column({ type: 'varchar', nullable: true })
+  createdBy: string | null; // userId de quien creó la transacción (null si desconocido)
+
+  @Column({ type: 'varchar', nullable: true })
+  updatedBy: string | null; // userId de quien actualizó la transacción (null si desconocido)
 
   @CreateDateColumn()
   createdAt: Date;

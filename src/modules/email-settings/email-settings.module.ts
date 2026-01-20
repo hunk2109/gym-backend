@@ -7,6 +7,7 @@ import { BulkPromotion } from '../../entities/bulk-promotion.entity';
 import { Member } from '../../entities/member.entity';
 import { User } from '../../entities/user.entity';
 import { MemberMembership } from '../../entities/member-membership.entity';
+import { Payment } from '../../entities/payment.entity';
 import { GymSettings } from '../../entities/gym-settings.entity';
 import { Coupon } from '../../entities/coupon.entity';
 import { Promotion } from '../promotions/entities/promotion.entity';
@@ -35,6 +36,7 @@ import { CronLoggingService } from './cron-logging.service';
       Member,
       User,
       MemberMembership,
+      Payment,
       GymSettings,
       Coupon,
       Promotion,

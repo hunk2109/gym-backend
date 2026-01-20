@@ -31,18 +31,9 @@ export class MemberMembershipsService {
    * Calcular dinámicamente el estado de pago desde la tabla Payment
    */
   async getPaymentStatus(memberMembershipId: string): Promise<'pending' | 'paid' | 'suspended'> {
-    const payment = await this.paymentRepository.findOne({
-      where: {
-        memberMembershipId: memberMembershipId,
-        paymentType: PaymentType.MEMBERSHIP,
-      },
-    });
-
-    if (!payment) {
-      return 'pending'; // Si no hay pago registrado, es pendiente
-    }
-
-    return payment.status === PaymentStatus.COMPLETED ? 'paid' : 'pending';
+    // En la nueva arquitectura, el status de pago se verifica por memberId, no por memberMembershipId
+    // Este método puede quedar solo retornando 'pending' como fallback
+    return 'pending';
   }
 
   /**
@@ -99,10 +90,12 @@ export class MemberMembershipsService {
    * Asignar una membresía a un miembro
    */
   async assignMembership(
-    memberId: string,
     dto: CreateMemberMembershipDto,
+    userId?: string,
   ): Promise<MemberMembership> {
     try {
+      console.log(`[MEMBER_MEMBERSHIPS_SERVICE] assignMembership called with userId:`, userId);
+      const memberId = dto.memberId;
       console.log('');
       console.log('═══════════════════════════════════════════════════════════');
       console.log('[ASSIGN MEMBERSHIP] 🎯 INICIANDO ASIGNACIÓN DE MEMBRESÍA');
@@ -249,11 +242,6 @@ export class MemberMembershipsService {
     const finalAmount = membershipPrice - discountAmount;
     console.log(`[MemberMembershipsService] Cálculos finales - membershipPrice: ${membershipPrice}, discountAmount: ${discountAmount}, finalAmount: ${finalAmount}`);
     
-    // Determinar el monto pagado
-    const amountPaidValue = dto.amountPaid ? Number(dto.amountPaid) : 0;
-    memberMembership.amountPaid = amountPaidValue > 0 ? amountPaidValue : finalAmount;
-    memberMembership.paymentDate = (dto.paymentDate ?? null) as any;
-    // El paymentStatus se calcula dinámicamente desde la tabla Payment
     // Usar el valor de isRecurring de la membresía (por defecto true para compatibilidad)
     memberMembership.isRecurring = membership.isRecurring !== false;
     
@@ -263,13 +251,39 @@ export class MemberMembershipsService {
     memberMembership.discountPercentage = (finalDiscountPercentage as any);
     memberMembership.discountReason = dto.discountReason || null;
     
-    console.log(`[MemberMembershipsService] Guardando memberMembership - amountPaid: ${memberMembership.amountPaid}, discountAmount: ${memberMembership.discountAmount}, discountPercentage: ${memberMembership.discountPercentage}`);
+    console.log(`[MemberMembershipsService] Guardando memberMembership - discountAmount: ${memberMembership.discountAmount}, discountPercentage: ${memberMembership.discountPercentage}`);
 
-    // Actualizar el miembro para indicar que tiene membresía
-    await this.memberRepository.update(
-      { id: memberId },
-      { hasMembership: true } as any,
-    );
+    // 🆕 Crear Payment PRIMERO
+    const payment = new Payment();
+    payment.id = uuidv4();
+    payment.amount = finalAmount; // Monto con descuento aplicado
+    payment.dueDate = endDate;
+    
+    // Si el monto es $0, marcar automáticamente como completado
+    const isAutoCompleted = payment.amount === 0;
+    if (isAutoCompleted) {
+      payment.status = PaymentStatus.COMPLETED;
+      payment.paymentDate = new Date();
+      console.log(`[MemberMembershipsService] 💰 Payment AUTO-COMPLETED ($0) - paymentDate: ${payment.paymentDate}`);
+    } else {
+      // Si el monto es > 0, es pendiente (sin paymentDate hasta que se pague)
+      payment.status = PaymentStatus.PENDING;
+      payment.paymentDate = null;
+      console.log(`[MemberMembershipsService] 💳 Payment PENDING ($${payment.amount})`);
+    }
+    
+    payment.paymentMethod = PaymentMethod.CASH;
+    payment.paymentType = PaymentType.MEMBERSHIP;
+    payment.createdBy = userId || null;
+    payment.updatedBy = userId || null;
+
+    const savedPayment = await this.paymentRepository.save(payment);
+    console.log(`[MemberMembershipsService] ✓ Payment saved: ID=${savedPayment.id}, Amount=${savedPayment.amount}, Status=${savedPayment.status}, PaymentDate=${savedPayment.paymentDate}, IsAutoCompleted=${isAutoCompleted}`);
+
+    // Asignar paymentId a la memberMembership
+    memberMembership.paymentId = savedPayment.id;
+    // 🔑 IMPORTANTE: Guardar payAmount (costo de membresía, especialmente para membresías variables)
+    memberMembership.payAmount = finalAmount;
 
     const savedMemberMembership = await this.memberMembershipRepository.save(memberMembership);
 
@@ -339,6 +353,14 @@ export class MemberMembershipsService {
         );
         
         console.log(`[MemberMembershipsService] ✅ Grupo creado exitosamente: ${newGroup.id}`);
+        
+        // ✨ IMPORTANTE: Asignar el groupId a la membresía del responsable
+        console.log(`[MemberMembershipsService] 📝 Asignando groupId al responsable - groupId: ${newGroup.id}, memberMembershipId: ${savedMemberMembership.id}`);
+        await this.memberMembershipRepository.update(
+          { id: savedMemberMembership.id },
+          { groupId: newGroup.id },
+        );
+        console.log(`[MemberMembershipsService] ✅ groupId asignado exitosamente a la membresía del responsable`);
       } catch (error) {
         console.error(`[MemberMembershipsService] ❌ Error al crear grupo: ${error.message}`);
         // No lanzar error - la membresía ya fue creada, solo el grupo falló
@@ -359,27 +381,6 @@ export class MemberMembershipsService {
     } else {
       console.log(`[MemberMembershipsService] ⚠️  NO se incrementó contador - appliedPromotionCode está vacío`);
     }
-
-    // Crear registro en tabla Payment para el historial (con el monto CORRECTO incluyendo descuentos)
-    const payment = new Payment();
-    payment.id = uuidv4();
-    payment.memberId = memberId;
-    payment.memberMembershipId = savedMemberMembership.id;
-    payment.amount = memberMembership.amountPaid as any; // Usar amountPaid que ya tiene descuento aplicado
-    payment.paymentDate = memberMembership.paymentDate || new Date();
-    payment.dueDate = endDate;
-    // Si el monto es $0, marcar automáticamente como completado
-    if (payment.amount === 0) {
-      payment.status = PaymentStatus.COMPLETED;
-    } else {
-      // Si el monto es > 0 pero existe paymentDate, significa que ya se pagó
-      payment.status = (memberMembership.amountPaid && memberMembership.paymentDate) ? PaymentStatus.COMPLETED : PaymentStatus.PENDING;
-    }
-    payment.paymentMethod = PaymentMethod.CASH;
-    payment.paymentType = PaymentType.MEMBERSHIP;
-
-    await this.paymentRepository.save(payment);
-    console.log(`[MemberMembershipsService] ✓ Pago registrado: ${payment.id} - Monto: ${payment.amount} - Estado: ${payment.status}`);
 
     // Enviar email de confirmación de membresía al miembro
     try {
@@ -424,7 +425,7 @@ export class MemberMembershipsService {
               </tr>
               <tr>
                 <td style="padding: 10px; border: 1px solid #ddd;"><strong>Monto a Pagar</strong></td>
-                <td style="padding: 10px; border: 1px solid #ddd;">RD$ ${parseFloat(memberMembership.amountPaid as any).toFixed(2)}</td>
+                <td style="padding: 10px; border: 1px solid #ddd;">RD$ ${parseFloat(finalAmount as any).toFixed(2)}</td>
               </tr>
               ${discountText ? `<tr style="background-color: #f5f5f5;">
                 <td colspan="2" style="padding: 10px; border: 1px solid #ddd;">
@@ -513,7 +514,28 @@ export class MemberMembershipsService {
       );
     }
 
-    // PRIMERO: Eliminar al miembro de group_companions si es acompañante
+    // PRIMERO: Marcar todos los pagos pendientes como CANCELLED
+    console.log(`[REMOVE MEMBERSHIP] 📋 Marcando pagos pendientes como CANCELLED...`);
+    const pendingPayments = await this.paymentRepository
+      .createQueryBuilder('payment')
+      .innerJoin(MemberMembership, 'mm', 'mm.paymentId = payment.id')
+      .where('mm.memberId = :memberId', { memberId })
+      .andWhere('payment.status = :status', { status: PaymentStatus.PENDING })
+      .getMany();
+    
+    console.log(`[REMOVE MEMBERSHIP] Pagos pendientes encontrados: ${pendingPayments.length}`);
+    if (pendingPayments.length > 0) {
+      const paymentIds = pendingPayments.map(p => p.id);
+      await this.paymentRepository.update(
+        { id: paymentIds.length === 1 ? paymentIds[0] : undefined },
+        {
+          status: PaymentStatus.CANCELLED,
+        },
+      );
+      console.log(`[REMOVE MEMBERSHIP] ✓ ${pendingPayments.length} pago(s) marcado(s) como CANCELLED`);
+    }
+
+    // SEGUNDO: Eliminar al miembro de group_companions si es acompañante
     console.log(`[REMOVE MEMBERSHIP] 🗑️ Eliminando de group_companions si existe...`);
     
     // Si es acompañante, obtener el groupId ANTES de eliminarlo
@@ -557,7 +579,7 @@ export class MemberMembershipsService {
       { hasMembership: false } as any,
     );
     
-    console.log(`[REMOVE MEMBERSHIP] ✓ Miembro actualizado: ${memberId} - hasMembership=false\n`);
+    console.log(`[REMOVE MEMBERSHIP] ✓ Membresía removida para: ${memberId}\n`);
   }
 
   /**
@@ -570,23 +592,28 @@ export class MemberMembershipsService {
     limit: number = 10,
   ): Promise<{ data: any[]; pagination: any }> {
     const skip = (page - 1) * limit;
-
     // Obtener membresías pendientes de pago (desde Payment table)
-    const [membershipData, membershipTotal] = await this.memberMembershipRepository
-      .createQueryBuilder('mm')
-      .leftJoinAndSelect('mm.membership', 'membership')
+    // Incluir: individual, responsible, y companion (acompañantes)
+    const pendingMembershipPayments = await this.paymentRepository
+      .createQueryBuilder('payment')
+      .innerJoin(MemberMembership, 'mm', 'mm.paymentId = payment.id')
       .leftJoinAndSelect('mm.member', 'member')
       .leftJoinAndSelect('member.user', 'user')
-      .leftJoin('payments', 'p', 'p.memberMembershipId = mm.id AND p.paymentType = :paymentType', { paymentType: PaymentType.MEMBERSHIP })
-      .where('(p.id IS NULL OR p.status = :status)', { status: PaymentStatus.PENDING })
-      .andWhere('mm.membershipType IN (:...allowedTypes)', { allowedTypes: ['individual', 'responsible'] })
-      .orderBy('mm.createdAt', 'DESC')
+      .where('payment.paymentType = :paymentType', { paymentType: PaymentType.MEMBERSHIP })
+      .andWhere('payment.status = :status', { status: PaymentStatus.PENDING })
+      .orderBy('payment.createdAt', 'DESC')
       .getManyAndCount();
+
+    const membershipData = pendingMembershipPayments[0];
+    const membershipTotal = pendingMembershipPayments[1];
+
+    console.log('[getPendingPayments] membershipData:', JSON.stringify(membershipData, null, 2));
 
     // Obtener pagos de inscripción pendientes
     const registrationPayments = await this.paymentRepository
       .createQueryBuilder('payment')
-      .leftJoinAndSelect('payment.member', 'member')
+      .innerJoin(MemberMembership, 'mm', 'mm.paymentId = payment.id')
+      .leftJoinAndSelect('mm.member', 'member')
       .leftJoinAndSelect('member.user', 'user')
       .where('payment.paymentType = :type', { type: PaymentType.REGISTRATION })
       .andWhere('payment.status = :status', { status: PaymentStatus.PENDING })
@@ -594,21 +621,36 @@ export class MemberMembershipsService {
       .getMany();
 
     // Mapear datos de membresías
-    const mappedMemberships = membershipData.map((mm: any) => ({
-      ...mm,
-      membershipStatusLabel: mm.membershipType === 'responsible' ? 'Familiar' : 'Individual',
-      paymentType: 'membership',
-    }));
+    const mappedMemberships = membershipData.map((mm: any) => {
+      // Obtener el monto del payment si existe, sino usar el precio de la membresía
+      let amount = mm.membership?.price || 0;
+      
+      // Si es un acompañante, usar pricePerCompanion
+      if (mm.membershipType === 'companion') {
+        amount = mm.membership?.pricePerCompanion || 0;
+      }
+      
+      // Si existe un payment, usar el monto del payment (que ya tiene el cálculo correcto)
+      if (mm.payments && mm.payments.length > 0) {
+        amount = mm.payments[0].amount;
+      }
+      
+      return {
+        ...mm,
+        amount,
+        membershipStatusLabel: mm.membershipType === 'responsible' ? 'Familiar' : mm.membershipType === 'companion' ? 'Acompañante' : 'Individual',
+        paymentType: 'membership',
+      };
+    });
 
     // Mapear datos de pagos de inscripción
-    const mappedRegistration = registrationPayments.map((payment: any) => ({
-      id: payment.id,
-      memberId: payment.memberId,
-      member: payment.member,
-      amount: payment.amount,
+    const mappedRegistration = registrationPayments.map((mm: any) => ({
+      id: mm.id,
+      member: mm.member,
+      amount: mm.amount,
       paymentType: 'registration',
       membershipStatusLabel: 'Inscripción Pendiente',
-      createdAt: payment.createdAt,
+      createdAt: mm.createdAt,
     }));
 
     // Combinar y paginar
@@ -646,20 +688,19 @@ export class MemberMembershipsService {
       );
     }
 
-    memberMembership.amountPaid = amountPaid;
-    memberMembership.paymentDate = paymentDate;
-
     const saved = await this.memberMembershipRepository.save(memberMembership);
 
-    // Actualizar el Payment asociado en la tabla payments
-    await this.paymentRepository.update(
-      { memberMembershipId: memberMembershipId },
-      { 
-        status: PaymentStatus.COMPLETED,
-        paymentDate: paymentDate,
-      },
-    );
-    console.log(`[MemberMembershipsService] ✓ Payment actualizado a COMPLETED para memberMembershipId: ${memberMembershipId}`);
+    // Actualizar el Payment asociado en la tabla payments (por paymentId)
+    if (memberMembership.paymentId) {
+      await this.paymentRepository.update(
+        { id: memberMembership.paymentId },
+        { 
+          status: PaymentStatus.COMPLETED,
+          paymentDate: paymentDate,
+        },
+      );
+      console.log(`[MemberMembershipsService] ✓ Payment actualizado a COMPLETED para paymentId: ${memberMembership.paymentId}`);
+    }
 
     // Enviar email de confirmación de pago
     try {

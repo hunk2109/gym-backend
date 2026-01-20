@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, HttpCode, HttpStatus, Patch, Req } from '@nestjs/common';
 import { PaymentsService } from './payments.service';
 import { CreatePaymentDto, UpdatePaymentDto, PaymentResponseDto } from './dto/create-payment.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -15,8 +15,13 @@ export class PaymentsController {
   @Post()
   @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO)
   @HttpCode(HttpStatus.CREATED)
-  async create(@Body() createPaymentDto: CreatePaymentDto): Promise<PaymentResponseDto> {
-    return this.paymentsService.createPayment(createPaymentDto);
+  async create(@Body() createPaymentDto: CreatePaymentDto, @Req() req: any): Promise<PaymentResponseDto> {
+    const userId = req.user?.userId;
+    console.log(`[PAYMENTS_CONTROLLER] req.user:`, JSON.stringify(req.user, null, 2));
+    console.log(`[PAYMENTS_CONTROLLER] userId extraído:`, userId);
+    const result = await this.paymentsService.createPayment(createPaymentDto, userId);
+    console.log(`[PAYMENTS_CONTROLLER] Payment guardado con createdBy:`, result.createdBy);
+    return result;
   }
 
   @Get()
@@ -26,73 +31,6 @@ export class PaymentsController {
     @Query('limit') limit: string = '10',
   ): Promise<any> {
     return this.paymentsService.getAllPayments(parseInt(page), parseInt(limit));
-  }
-
-  @Get('statistics/overview')
-  @Roles(UserRole.ADMIN, UserRole.ENCARGADO)
-  async getStatistics(): Promise<any> {
-    return this.paymentsService.getPaymentStatistics();
-  }
-
-  @Get('by-status/:status')
-  @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO)
-  async getByStatus(
-    @Param('status') status: PaymentStatus,
-    @Query('page') page: string = '1',
-    @Query('limit') limit: string = '10',
-  ): Promise<any> {
-    return this.paymentsService.getPaymentsByStatus(status, parseInt(page), parseInt(limit));
-  }
-
-  @Get('pending-overdue')
-  @Roles(UserRole.ADMIN, UserRole.ENCARGADO)
-  async getPendingPayments(@Query('daysOverdue') daysOverdue: string = '0'): Promise<any> {
-    return this.paymentsService.getPendingPayments(parseInt(daysOverdue));
-  }
-
-  @Get('pending-all')
-  @Roles(UserRole.ADMIN, UserRole.ENCARGADO)
-  async getAllPendingPayments(@Query('daysOverdue') daysOverdue: string = '0'): Promise<any> {
-    const payments = await this.paymentsService.getAllPendingPayments(parseInt(daysOverdue));
-    return {
-      data: payments,
-      total: payments.length,
-      message: `${payments.length} pagos pendientes encontrados (pagos + membresías)`,
-    };
-  }
-
-  @Get('date-range')
-  @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO)
-  async getByDateRange(
-    @Query('startDate') startDate: string,
-    @Query('endDate') endDate: string,
-    @Query('page') page: string = '1',
-    @Query('limit') limit: string = '10',
-  ): Promise<any> {
-    const start = new Date(startDate);
-    const end = new Date(endDate);
-
-    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
-      throw new Error('Invalid date format. Use ISO 8601 format (YYYY-MM-DD)');
-    }
-
-    return this.paymentsService.getPaymentsByDateRange(start, end, parseInt(page), parseInt(limit));
-  }
-
-  @Get('member/:memberId/history')
-  @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO, UserRole.CLIENTE)
-  async getMemberHistory(@Param('memberId') memberId: string): Promise<any> {
-    return this.paymentsService.getMemberPaymentHistory(memberId);
-  }
-
-  @Get('member/:memberId')
-  @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO, UserRole.CLIENTE)
-  async getByMember(
-    @Param('memberId') memberId: string,
-    @Query('page') page: string = '1',
-    @Query('limit') limit: string = '10',
-  ): Promise<any> {
-    return this.paymentsService.getPaymentsByMember(memberId, parseInt(page), parseInt(limit));
   }
 
   @Get('all')
@@ -107,38 +45,55 @@ export class PaymentsController {
     };
   }
 
-  @Get(':id')
-  @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO, UserRole.CLIENTE)
-  async findOne(@Param('id') id: string): Promise<PaymentResponseDto> {
-    return this.paymentsService.getPaymentById(id);
-  }
-
-  @Put(':id')
-  @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO)
-  async update(
-    @Param('id') id: string,
-    @Body() updatePaymentDto: UpdatePaymentDto,
-  ): Promise<PaymentResponseDto> {
-    return this.paymentsService.updatePayment(id, updatePaymentDto);
-  }
-
-  @Post(':id/refund')
+  @Get('statistics/overview')
   @Roles(UserRole.ADMIN, UserRole.ENCARGADO)
-  async refund(
-    @Param('id') id: string,
-    @Body() body: { refundAmount?: number },
-  ): Promise<PaymentResponseDto> {
-    return this.paymentsService.recordRefund(id, body.refundAmount);
+  async getStatistics(): Promise<any> {
+    return this.paymentsService.getPaymentStatistics();
   }
 
-  @Post('registration/:memberId/complete')
+  @Get('diagnosis/completed-registrations')
+  @Roles(UserRole.ADMIN)
+  async diagnosisCompletedRegistrations(): Promise<any> {
+    return this.paymentsService.diagnosisGetCompletedRegistrationPayments();
+  }
+
+  @Get('pending-all')
+  @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO)
+  async getAllPendingPayments(): Promise<any> {
+    console.log('[PaymentsController] GET /pending-all - Obteniendo todos los pagos pendientes');
+    const payments = await this.paymentsService.getAllPendingPayments();
+    console.log(`[PaymentsController] Total de pagos pendientes: ${payments.length}`);
+    return {
+      data: payments,
+      total: payments.length,
+    };
+  }
+
+  @Post(':id/pay')
   @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO)
   @HttpCode(HttpStatus.OK)
-  async completeRegistrationPayment(
-    @Param('memberId') memberId: string,
+  async payPayment(
+    @Param('id') paymentId: string,
     @Body() body: { paymentMethod?: string },
+    @Req() req: any,
   ): Promise<any> {
-    return this.paymentsService.completeRegistrationPayment(memberId, body.paymentMethod || 'cash');
+    const userId = req.user?.userId;
+    console.log(`[PAYMENTS_CONTROLLER] POST /payments/:id/pay - paymentId: ${paymentId}, paymentMethod: ${body.paymentMethod || 'cash'}`);
+    return this.paymentsService.payPayment(paymentId, body.paymentMethod || 'cash', userId);
+  }
+
+  @Patch(':id/status')
+  @Roles(UserRole.ADMIN, UserRole.ENCARGADO)
+  async updatePaymentStatus(
+    @Param('id') id: string,
+    @Body() body: any,
+    @Req() req: any,
+  ): Promise<PaymentResponseDto> {
+    const userId = req.user?.userId;
+    console.log(`[PAYMENTS_CONTROLLER] PATCH /payments/:id/status - userId extraído:`, userId);
+    // Usar fecha actual si no se proporciona
+    const paymentDate = body.paymentDate ? new Date(body.paymentDate) : new Date();
+    return this.paymentsService.updatePaymentStatus(id, body.status, paymentDate, userId);
   }
 
   @Delete(':id')

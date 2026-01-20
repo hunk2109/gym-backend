@@ -54,10 +54,6 @@ export class CreateMemberDto {
   @IsOptional()
   joinDate?: string | Date;
 
-  @IsOptional()
-  @IsBoolean()
-  isPaid?: boolean;
-
   // Campos opcionales que Flutter envía
   @IsOptional()
   id?: string;
@@ -69,16 +65,12 @@ export class CreateMemberDto {
   lastVisit?: string | Date | null;
 
   @IsOptional()
-  @IsBoolean()
-  hasMembership?: boolean;
-
-  @IsOptional()
-  @IsBoolean()
-  hasPendingPayment?: boolean;
+  @IsString()
+  fingerprints?: string; // JSON con información de huellas dactilares
 
   @IsOptional()
   @IsString()
-  fingerprints?: string; // JSON con información de huellas dactilares
+  registrationPaymentId?: string; // ID del pago de inscripción
 
   @IsOptional()
   createdAt?: string | Date;
@@ -125,10 +117,6 @@ export class UpdateMemberDto {
   lastVisit?: Date;
 
   @IsOptional()
-  @IsBoolean()
-  isPaid?: boolean;
-
-  @IsOptional()
   @IsString()
   fingerprints?: string; // JSON con información de huellas dactilares
 }
@@ -153,7 +141,6 @@ export class MemberResponseDto {
   zipCode?: string;
   joinDate?: Date;
   lastVisit?: Date;
-  isPaid: boolean;
   fingerprints?: string;
   createdAt: Date;
   updatedAt: Date;

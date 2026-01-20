@@ -10,6 +10,7 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
+  Req,
 } from '@nestjs/common';
 import { MembershipsService } from './memberships.service';
 import { CreateMembershipDto, UpdateMembershipDto, AssignMembershipDto, RenewMembershipDto, sanitizeAssignMembershipDto } from './dto/create-membership.dto';
@@ -88,22 +89,13 @@ export class MembershipsController {
   @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO, UserRole.CLIENTE)
   @HttpCode(HttpStatus.OK)
   async getAllMemberships(@Query('page') page: string = '1', @Query('limit') limit: string = '10') {
-    try {
-      console.log('[MembershipsController] GET /memberships - page:', page, 'limit:', limit);
-      const result = await this.membershipsService.getAllMemberships(parseInt(page), parseInt(limit));
-      console.log('[MembershipsController] GET /memberships - result data count:', result.data?.length);
-      console.log('[MembershipsController] GET /memberships - first membership:', JSON.stringify(result.data?.[0], null, 2));
-      return {
-        statusCode: 200,
-        success: true,
-        message: 'Membresías obtenidas correctamente',
-        data: result,
-      };
-    } catch (error) {
-      console.error('[MembershipsController] ❌ Error al obtener membresías:', error.message);
-      console.error('[MembershipsController] Stack:', error.stack);
-      throw error;
-    }
+    const result = await this.membershipsService.getAllMemberships(parseInt(page), parseInt(limit));
+    return {
+      statusCode: 200,
+      success: true,
+      message: 'Membresías obtenidas correctamente',
+      data: result,
+    };
   }
 
   // Ver membresías activas
@@ -111,7 +103,11 @@ export class MembershipsController {
   @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO, UserRole.CLIENTE)
   @HttpCode(HttpStatus.OK)
   async getActiveMemberships() {
-    return this.membershipsService.getActiveMemberships();
+    const memberships = await this.membershipsService.getActiveMemberships();
+    return memberships.map((m: any) => ({
+      ...m,
+      priceType: m.priceType ? String(m.priceType) : 'fixed',
+    }));
   }
 
   // Ver membresía por ID
@@ -119,18 +115,25 @@ export class MembershipsController {
   @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO, UserRole.CLIENTE)
   @HttpCode(HttpStatus.OK)
   async getMembershipById(@Param('id') id: string) {
-    return this.membershipsService.getMembershipById(id);
+    const membership = await this.membershipsService.getMembershipById(id);
+    return {
+      ...membership,
+      priceType: membership.priceType ? String(membership.priceType) : 'fixed',
+    };
   }
 
   // Crear membresía
   @Post()
   @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO)
   @HttpCode(HttpStatus.CREATED)
-  async createMembership(@Body() createMembershipDto: CreateMembershipDto) {
-    console.log('[MembershipsController] POST /memberships - Raw body:', JSON.stringify(createMembershipDto));
-    console.log('[MembershipsController] type field value:', createMembershipDto.type);
-    console.log('[MembershipsController] type field type:', typeof createMembershipDto.type);
-    return this.membershipsService.createMembership(createMembershipDto);
+  async createMembership(@Body() createMembershipDto: CreateMembershipDto, @Req() req: any) {
+    console.log('[CONTROLLER_CREATE] Received body:', JSON.stringify(createMembershipDto, null, 2));
+    const membership = await this.membershipsService.createMembership(createMembershipDto, req.user?.userId);
+    console.log('[CONTROLLER_CREATE] Saved membership:', JSON.stringify(membership, null, 2));
+    return {
+      ...membership,
+      priceType: membership.priceType ? String(membership.priceType) : 'fixed',
+    };
   }
 
   // Editar membresía
@@ -141,10 +144,13 @@ export class MembershipsController {
     @Param('id') id: string,
     @Body() updateMembershipDto: UpdateMembershipDto,
   ) {
-    console.log('[MembershipsController] PUT /memberships/:id - id:', id);
-    console.log('[MembershipsController] PUT /memberships/:id - Raw body:', JSON.stringify(updateMembershipDto));
-    console.log('[MembershipsController] PUT /memberships/:id - accessSchedules:', updateMembershipDto.accessSchedules);
-    return this.membershipsService.updateMembership(id, updateMembershipDto);
+    console.log('[CONTROLLER_UPDATE] ID:', id, 'Body:', JSON.stringify(updateMembershipDto, null, 2));
+    const membership = await this.membershipsService.updateMembership(id, updateMembershipDto);
+    console.log('[CONTROLLER_UPDATE] Updated membership:', JSON.stringify(membership, null, 2));
+    return {
+      ...membership,
+      priceType: membership.priceType ? String(membership.priceType) : 'fixed',
+    };
   }
 
   // Eliminar membresía - Solo ADMIN
@@ -181,9 +187,7 @@ export class MemberMembershipsController {
   @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.CLIENTE)
   @HttpCode(HttpStatus.OK)
   async getPendingPayments(@Query('daysOverdue') daysOverdue?: string) {
-    console.log(`[MemberMembershipsController] GET /pending-payments - daysOverdue=${daysOverdue}`);
     const data = await this.membershipsService.getPendingPayments(daysOverdue ? parseInt(daysOverdue) : undefined);
-    console.log(`[MemberMembershipsController] Retornando ${data.length} pagos pendientes`);
     return { data };
   }
 
@@ -236,8 +240,9 @@ export class MemberMembershipsController {
   async renewMembership(
     @Param('id') id: string,
     @Body() renewMembershipDto: RenewMembershipDto,
+    @Req() req: any,
   ) {
-    return this.membershipsService.renewMembership(id, renewMembershipDto);
+    return this.membershipsService.renewMembership(id, renewMembershipDto, req.user?.userId);
   }
 
   // Registrar pago de membresía
@@ -247,8 +252,9 @@ export class MemberMembershipsController {
   async recordPayment(
     @Param('id') id: string,
     @Body() body: { amountPaid: number; paymentDate: Date },
+    @Req() req: any,
   ) {
-    return this.membershipsService.recordPayment(id, body.amountPaid, body.paymentDate);
+    return this.membershipsService.recordPayment(id, body.amountPaid, body.paymentDate, req.user?.userId);
   }
 
   // Remover membresía por ID

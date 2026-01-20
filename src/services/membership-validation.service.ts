@@ -102,19 +102,14 @@ export class MembershipValidationService {
     try {
       const membershipInfo = await this.getMembershipStatus(memberId);
 
-      const hasMembership = !membershipInfo.isExpired && membershipInfo.status === 'ACTIVE';
-
-      await this.memberRepository.update(
-        { id: memberId },
-        { hasMembership }
-      );
-
+      // El status de membresía se calcula dinámicamente desde member_memberships
+      // No es necesario actualizar nada en la tabla members
       this.logger.log(
-        `👤 Miembro ${memberId} actualizado - hasMembership: ${hasMembership}`
+        `👤 Estado de membresía calculado para ${memberId}: ${membershipInfo.status}`
       );
     } catch (error) {
       this.logger.error(
-        `Error al actualizar estado del miembro: ${error.message}`
+        `Error al obtener estado del miembro: ${error.message}`
       );
     }
   }

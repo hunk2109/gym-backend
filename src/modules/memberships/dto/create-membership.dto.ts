@@ -1,6 +1,6 @@
 import { IsString, IsOptional, IsNumber, IsBoolean, IsArray, IsDate, IsEnum } from 'class-validator';
 import { Transform } from 'class-transformer';
-import { MembershipType } from '../../../entities/membership.entity';
+import { MembershipType, PriceType } from '../../../entities/membership.entity';
 
 export class CreateMembershipDto {
   @IsString()
@@ -44,6 +44,21 @@ export class CreateMembershipDto {
   isRecurring?: boolean; // Si es true, genera renovaciones automáticas. Si es false, solo pago inicial al asignar
 
   @IsOptional()
+  @IsEnum(PriceType)
+  @Transform(({ value }) => {
+    // Convertir string a enum si es necesario
+    if (typeof value === 'string') {
+      return value.toLowerCase() as PriceType;
+    }
+    return PriceType.FIXED;
+  })
+  priceType?: PriceType; // 'fixed' o 'variable'
+
+  @IsOptional()
+  @IsNumber()
+  pricePerCompanion?: number; // Precio adicional por cada acompañante (solo para membresías grupales)
+
+  @IsOptional()
   @IsNumber()
   maxGroupCompanions?: number;
 
@@ -52,7 +67,9 @@ export class CreateMembershipDto {
   accessSchedules?: Array<{
     dayOfWeek: string;
     timeStart: string;
-    timeEnd: string;    isEnabled?: boolean;  }>;
+    timeEnd: string;
+    isEnabled?: boolean;
+  }>;
 }
 
 export class UpdateMembershipDto {
@@ -89,9 +106,23 @@ export class UpdateMembershipDto {
   isRecurring?: boolean; // Si es true, genera renovaciones automáticas. Si es false, solo pago inicial al asignar
 
   @IsOptional()
+  @IsEnum(PriceType)
+  @Transform(({ value }) => {
+    // Convertir string a enum si es necesario
+    if (typeof value === 'string') {
+      return value.toLowerCase() as PriceType;
+    }
+    return PriceType.FIXED;
+  })
+  priceType?: PriceType; // 'fixed' o 'variable'
+
+  @IsOptional()
+  @IsNumber()
+  pricePerCompanion?: number; // Precio adicional por cada acompañante (solo para membresías grupales)
+
+  @IsOptional()
   @IsNumber()
   maxGroupCompanions?: number;
-
 
   @IsOptional()
   @IsArray()
@@ -120,7 +151,7 @@ export class AssignMembershipDto {
 
   @IsOptional()
   @IsNumber()
-  amountPaid?: number;
+  payAmount?: number;
 
   @IsOptional()
   @IsString()
@@ -145,7 +176,7 @@ export class RenewMembershipDto {
 
   @IsOptional()
   @IsNumber()
-  amountPaid?: number;
+  payAmount?: number;
 
   @IsOptional()
   @IsDate()
@@ -165,13 +196,19 @@ export class RenewMembershipDto {
 }
 
 export class MembershipResponseDto {
-  id: number;
+  id: string;
   name: string;
   description?: string;
   price: number;
   durationMonths: number;
+  durationDays?: number;
   benefits?: string[];
+  type: string;
   isActive: boolean;
+  isRecurring: boolean;
+  priceType: string;
+  maxGroupCompanions?: number;
+  accessSchedules?: any[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -185,7 +222,7 @@ export class MemberMembershipResponseDto {
   startDate: Date;
   endDate: Date;
   isActive: boolean;
-  amountPaid?: number;
+  payAmount?: number;
   paymentDate?: Date;
   createdAt: Date;
   updatedAt: Date;

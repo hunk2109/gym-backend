@@ -67,23 +67,11 @@ export class Member {
   @Column({ type: 'date', nullable: true })
   lastVisit: Date;
 
-  @Column({ type: 'boolean', default: false })
-  isPaid: boolean;
-
-  @Column({ type: 'boolean', default: false })
-  hasMembership: boolean;
-
-  @Column({ type: 'boolean', default: false })
-  hasPendingPayment: boolean;
-
-  @Column({ type: 'boolean', default: false })
-  hasRegistrationPaymentPending: boolean;
-
-  @Column({ type: 'boolean', default: false })
-  hasMembershipPaymentPending: boolean;
-
   @Column({ type: 'longtext', nullable: true })
   fingerprints?: string; // JSON con información de huellas dactilares
+
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  registrationPaymentId?: string; // ID del pago de inscripción
 
   @OneToMany(() => MemberMembership, (membership) => membership.member)
   memberships: MemberMembership[];

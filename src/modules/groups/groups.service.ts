@@ -1,6 +1,6 @@
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, In } from 'typeorm';
 import { v4 as uuidv4 } from 'uuid';
 import { Group } from '../../entities/group.entity';
 import { GroupCompanion } from '../../entities/group-companion.entity';
@@ -8,7 +8,7 @@ import { Member } from '../../entities/member.entity';
 import { Membership } from '../../entities/membership.entity';
 import { MemberMembership } from '../../entities/member-membership.entity';
 import { User } from '../../entities/user.entity';
-import { Payment, PaymentStatus } from '../../entities/payment.entity';
+import { Payment, PaymentStatus, PaymentMethod, PaymentType } from '../../entities/payment.entity';
 import { EmailService } from '../email-settings/email.service';
 
 @Injectable()
@@ -345,14 +345,89 @@ export class GroupsService {
     console.log(`[addCompanionToGroup] ✅ GroupCompanion creado: ${newCompanion.id}`);
 
     // Crear la membresía para el acompañante
+    // IMPORTANTE: Obtener las fechas del responsable del grupo para que sean iguales
+    // Primero, obtener el memberId del responsable usando su userId
+    const responsibleMember = await this.memberRepository.findOne({
+      where: { userId: group.responsibleUserId },
+    });
+
+    if (!responsibleMember) {
+      throw new BadRequestException(
+        'No se encontró el miembro responsable del grupo',
+      );
+    }
+
+    const responsibleMembership = await this.memberMembershipRepository.findOne({
+      where: {
+        memberId: responsibleMember.id,
+        groupId: groupId,
+        membershipType: 'responsible',
+      },
+    });
+
+    if (!responsibleMembership) {
+      throw new BadRequestException(
+        'No se encontró la membresía del responsable del grupo',
+      );
+    }
+
+    console.log(`[addCompanionToGroup] 📅 Fechas del responsable - startDate: ${responsibleMembership.startDate}, endDate: ${responsibleMembership.endDate}`);
+
     const memberMembership = new MemberMembership();
     memberMembership.id = uuidv4();
     memberMembership.memberId = memberId;
     memberMembership.membershipId = group.membershipId;
     memberMembership.groupId = groupId;
     memberMembership.membershipType = 'companion';
-    memberMembership.startDate = new Date();
-    memberMembership.endDate = group.endDate;
+    memberMembership.startDate = responsibleMembership.startDate; // ✅ Usar fecha de inicio del responsable
+    memberMembership.endDate = responsibleMembership.endDate; // ✅ Usar fecha de fin del responsable
+    // ✅ Guardar el costo del acompañante en payAmount (para rastrear variable pricing)
+    const companionCost = group.membership.pricePerCompanion || 0;
+    memberMembership.payAmount = companionCost;
+
+    // 🔍 Verificar si el responsable tiene un Payment PENDIENTE
+    const responsiblePendingPayment = await this.paymentRepository
+      .createQueryBuilder('payment')
+      .innerJoin(MemberMembership, 'mm', 'mm.paymentId = payment.id')
+      .where('mm.memberId = :memberId', { memberId: responsibleMember.id })
+      .andWhere('payment.status = :status', { status: PaymentStatus.PENDING })
+      .andWhere('payment.paymentType = :paymentType', { paymentType: 'MEMBERSHIP' })
+      .orderBy('payment.createdAt', 'DESC')
+      .getOne();
+
+    console.log(`[addCompanionToGroup] 🔍 Responsable Payment PENDING: ${responsiblePendingPayment ? 'SÍ' : 'NO'}`);
+
+    if (responsiblePendingPayment) {
+      // ✅ CONSOLIDADO: El responsable tiene Payment PENDING
+      console.log(`[addCompanionToGroup] 💰 PAYMENTS CONSOLIDADOS - Acompañante se agregará al Payment existente del responsable`);
+      console.log(`[addCompanionToGroup]   - Payment ID: ${responsiblePendingPayment.id}`);
+      console.log(`[addCompanionToGroup]   - Amount actual: $${responsiblePendingPayment.amount}`);
+      console.log(`[addCompanionToGroup]   - Costo acompañante: $${companionCost}`);
+      
+      // Vincular memberMembership al Payment existente del responsable
+      memberMembership.paymentId = responsiblePendingPayment.id;
+    } else {
+      // ✅ SEPARADO: El responsable NO tiene Payment PENDING
+      // Crear Payment nuevo para el acompañante
+      console.log(`[addCompanionToGroup] 💰 PAYMENTS SEPARADOS - Crear Payment nuevo para el acompañante`);
+      
+      const companionPayment = new Payment();
+      companionPayment.id = uuidv4();
+      companionPayment.amount = companionCost as any;
+      companionPayment.paymentDate = null;
+      companionPayment.dueDate = responsibleMembership.endDate;
+      companionPayment.status = PaymentStatus.PENDING;
+      companionPayment.paymentMethod = PaymentMethod.CASH;
+      companionPayment.paymentType = PaymentType.MEMBERSHIP;
+      companionPayment.createdBy = null;
+      companionPayment.updatedBy = null;
+      
+      const savedPayment = await this.paymentRepository.save(companionPayment);
+      console.log(`[addCompanionToGroup] ✅ Payment creado para acompañante: ${savedPayment.id}`);
+      
+      // Vincular memberMembership al Payment nuevo
+      memberMembership.paymentId = savedPayment.id;
+    }
 
     await this.memberMembershipRepository.insert(memberMembership);
     console.log(`[addCompanionToGroup] ✅ MemberMembership creada: ${memberMembership.id}`);
@@ -366,9 +441,25 @@ export class GroupsService {
     console.log(`[addCompanionToGroup] ✅ Contador de acompañantes incrementado`);
 
     // Recalcular el pago del grupo basado en la nueva cantidad de miembros
+    // (solo actualiza el Payment del responsable, no el del acompañante)
     await this.recalculateGroupPayment(groupId);
 
-    // Enviar email de notificación al miembro agregado al grupo
+    // Enviar email de notificación al miembro agregado al grupo (sin esperar - fire and forget)
+    // Esto evita retrasar la respuesta de la API mientras se envía el email
+    this.sendAddCompanionEmail(memberId, relationship, group).catch((err) => {
+      console.error(`[addCompanionToGroup] ❌ Error al enviar email de bienvenida:`, err.message);
+    });
+
+    // Retornar el objeto directamente sin hacer query adicional
+    return newCompanion;
+  }
+
+  /// Método privado para enviar email de bienvenida del acompañante (fire-and-forget)
+  private async sendAddCompanionEmail(
+    memberId: string,
+    relationship: string,
+    group: Group,
+  ): Promise<void> {
     try {
       const companionWithUser = await this.memberRepository.findOne({
         where: { id: memberId },
@@ -424,15 +515,12 @@ export class GroupsService {
           htmlContent,
         });
 
-        console.log(`[addCompanionToGroup] ✅ Email de bienvenida enviado a: ${companionEmail}`);
+        console.log(`[sendAddCompanionEmail] ✅ Email de bienvenida enviado a: ${companionEmail}`);
       }
     } catch (emailError) {
-      console.error(`[addCompanionToGroup] ❌ Error al enviar email:`, emailError.message);
-      // No bloquear el flujo si hay error en el email
+      console.error(`[sendAddCompanionEmail] ❌ Error:`, emailError.message);
+      // No lanzar error, solo loguear
     }
-
-    // Retornar el objeto directamente sin hacer query adicional
-    return newCompanion;
   }
 
   async removeCompanionFromGroup(
@@ -490,7 +578,33 @@ export class GroupsService {
       },
     });
     console.log(`[removeCompanionFromGroup] 📋 Membresías existentes:`, existingMemberships);
+    console.log(`[removeCompanionFromGroup] 📋 Membresías IDs:`, existingMemberships.map(m => m.id));
+
+    // Manejar Payments del acompañante
+    console.log(`[removeCompanionFromGroup] 🗑️  Analizando pagos del acompañante`);
     
+    if (existingMemberships.length > 0) {
+      for (const membership of existingMemberships) {
+        // Obtener el payment vinculado a esta membresía
+        const payment = await this.paymentRepository.findOne({
+          where: { id: membership.paymentId },
+        });
+
+        if (payment) {
+          console.log(`[removeCompanionFromGroup] 💳 Payment encontrado: ${payment.id}, status: ${payment.status}`);
+          
+          // El payment es del acompañante
+          console.log(`[removeCompanionFromGroup] ✅ PAGO SEPARADO - Se eliminará el Payment del acompañante: ${payment.id}`);
+          
+          // Eliminar este payment
+          await this.paymentRepository.delete({ id: payment.id });
+          console.log(`[removeCompanionFromGroup] ✅ Payment eliminado: ${payment.id}`);
+        }
+      }
+    } else {
+      console.log(`[removeCompanionFromGroup] ⚠️  No hay membresías para este acompañante`);
+    }
+
     const membershipDeleteResult = await this.memberMembershipRepository.delete({
       memberId: companion.memberId,
       groupId: groupId,
@@ -531,10 +645,29 @@ export class GroupsService {
     // Recalcular el pago del grupo basado en la nueva cantidad de miembros
     await this.recalculateGroupPayment(groupId);
 
-    // Enviar email de notificación al miembro removido del grupo
+    // Enviar email de notificación al miembro removido del grupo (sin esperar - fire and forget)
+    // Esto evita retrasar la respuesta de la API mientras se envía el email
+    this.sendRemoveCompanionEmail(companion.memberId, group).catch((err) => {
+      console.error(`[removeCompanionFromGroup] ❌ Error al enviar email de notificación:`, err.message);
+    });
+
+    // Limpiar cache de TypeORM para forzar que recargue desde BD
+    await this.groupRepository.manager.connection.queryResultCache?.remove([groupId]);
+    
+    // Retornar grupo actualizado
+    const result = await this.getGroupById(groupId);
+    console.log(`[removeCompanionFromGroup] ✅ Grupo retornado`);
+    return result;
+  }
+
+  /// Método privado para enviar email de notificación al acompañante removido (fire-and-forget)
+  private async sendRemoveCompanionEmail(
+    memberId: string,
+    group: Group,
+  ): Promise<void> {
     try {
       const companionWithUser = await this.memberRepository.findOne({
-        where: { id: companion.memberId },
+        where: { id: memberId },
         relations: ['user'],
       });
 
@@ -582,20 +715,12 @@ export class GroupsService {
           htmlContent,
         });
 
-        console.log(`[removeCompanionFromGroup] ✅ Email de notificación enviado a: ${companionEmail}`);
+        console.log(`[sendRemoveCompanionEmail] ✅ Email de notificación enviado a: ${companionEmail}`);
       }
     } catch (emailError) {
-      console.error(`[removeCompanionFromGroup] ❌ Error al enviar email:`, emailError.message);
-      // No bloquear el flujo si hay error en el email
+      console.error(`[sendRemoveCompanionEmail] ❌ Error:`, emailError.message);
+      // No lanzar error, solo loguear
     }
-
-    // Limpiar cache de TypeORM para forzar que recargue desde BD
-    await this.groupRepository.manager.connection.queryResultCache?.remove([groupId]);
-    
-    // Retornar grupo actualizado
-    const result = await this.getGroupById(groupId);
-    console.log(`[removeCompanionFromGroup] ✅ Grupo retornado`);
-    return result;
   }
 
   async transferResponsibility(
@@ -969,12 +1094,29 @@ export class GroupsService {
       const totalMembers = 1 + activeCompanions; // 1 responsable + acompañantes
 
       const membershipPrice = parseFloat(group.membership.price as any) || 0;
-      const newAmount = membershipPrice * totalMembers;
-
-      console.log(`[recalculateGroupPayment] 📊 Cálculo:`);
-      console.log(`  - Precio membresía: $${membershipPrice}`);
-      console.log(`  - Miembros: 1 responsable + ${activeCompanions} acompañantes = ${totalMembers}`);
-      console.log(`  - Nuevo monto total: $${newAmount}`);
+      
+      // Calcular monto según el tipo de precio
+      let newAmount: number;
+      
+      if (group.membership.priceType === 'variable' && group.membership.pricePerCompanion) {
+        // Fórmula: basePrice + (activeCompanions × pricePerCompanion)
+        const pricePerCompanion = parseFloat(group.membership.pricePerCompanion as any) || 0;
+        newAmount = membershipPrice + (activeCompanions * pricePerCompanion);
+        
+        console.log(`[recalculateGroupPayment] 📊 Cálculo VARIABLE:`);
+        console.log(`  - Precio base membresía: $${membershipPrice}`);
+        console.log(`  - Precio por acompañante: $${pricePerCompanion}`);
+        console.log(`  - Acompañantes activos: ${activeCompanions}`);
+        console.log(`  - Nuevo monto total: $${newAmount} (${membershipPrice} + ${activeCompanions} × ${pricePerCompanion})`);
+      } else {
+        // Fórmula clásica: price × totalMembers
+        newAmount = membershipPrice * totalMembers;
+        
+        console.log(`[recalculateGroupPayment] 📊 Cálculo FIJO:`);
+        console.log(`  - Precio membresía: $${membershipPrice}`);
+        console.log(`  - Miembros: 1 responsable + ${activeCompanions} acompañantes = ${totalMembers}`);
+        console.log(`  - Nuevo monto total: $${newAmount}`);
+      }
 
       // Obtener el miembro responsable del grupo para encontrar su payment PENDING
       const responsibleMember = await this.memberRepository.findOne({
@@ -989,7 +1131,8 @@ export class GroupsService {
       // Buscar el payment PENDING más reciente del grupo (membresía grupal)
       const pendingPayment = await this.paymentRepository
         .createQueryBuilder('payment')
-        .where('payment.memberId = :memberId', { memberId: responsibleMember.id })
+        .innerJoin(MemberMembership, 'mm', 'mm.paymentId = payment.id')
+        .where('mm.memberId = :memberId', { memberId: responsibleMember.id })
         .andWhere('payment.status = :status', { status: PaymentStatus.PENDING })
         .andWhere('payment.paymentType = :paymentType', { paymentType: 'MEMBERSHIP' })
         .orderBy('payment.createdAt', 'DESC')
@@ -997,9 +1140,40 @@ export class GroupsService {
 
       if (pendingPayment) {
         // Actualizar el monto del payment
+        console.log(`[recalculateGroupPayment] 🔍 ANTES DE ACTUALIZAR - Payment ID: ${pendingPayment.id}, Amount actual: ${pendingPayment.amount}, Nuevo monto: ${newAmount}`);
+        
         pendingPayment.amount = newAmount;
-        await this.paymentRepository.save(pendingPayment);
-        console.log(`[recalculateGroupPayment] ✅ Pago actualizado: ${pendingPayment.id} - Nuevo monto: $${newAmount}`);
+        
+        console.log(`[recalculateGroupPayment] 📝 Objeto pendingPayment DESPUÉS de asignar:`, {
+          id: pendingPayment.id,
+          amount: pendingPayment.amount,
+          status: pendingPayment.status,
+        });
+        
+        const saveResult = await this.paymentRepository.save(pendingPayment);
+        
+        console.log(`[recalculateGroupPayment] ✅ Pago actualizado: ${saveResult.id} - Nuevo monto: ${saveResult.amount}`);
+        console.log(`[recalculateGroupPayment] 🔍 DESPUÉS DE SAVE - Verificando que se guardó:`, {
+          id: saveResult.id,
+          amount: saveResult.amount,
+          status: saveResult.status,
+        });
+        
+        // Verificación INMEDIATA - Leer de la BD para confirmar
+        const verifyPayment = await this.paymentRepository.findOne({
+          where: { id: pendingPayment.id },
+        });
+        
+        const bdAmount = parseFloat(String(verifyPayment?.amount)) || 0;
+        const expectedAmount = parseFloat(String(newAmount)) || 0;
+        
+        console.log(`[recalculateGroupPayment] 🔍 VERIFICACIÓN EN BD - Amount en BD: ${bdAmount}, Expected: ${expectedAmount}`);
+        
+        if (Math.abs(bdAmount - expectedAmount) > 0.01) {
+          console.error(`[recalculateGroupPayment] ❌ ERROR: El monto en BD (${bdAmount}) NO coincide con el nuevo monto (${expectedAmount})`);
+        } else {
+          console.log(`[recalculateGroupPayment] ✅ CONFIRMADO: Monto guardado correctamente en BD: $${bdAmount}`);
+        }
       } else {
         console.warn(`[recalculateGroupPayment] ⚠️ No se encontró pago PENDING para el responsable`);
       }

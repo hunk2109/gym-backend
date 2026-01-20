@@ -372,12 +372,10 @@ export class DashboardService {
   async getPendingPaymentsCount(): Promise<{ count: number; totalAmount: number }> {
     console.log('[Dashboard] Obteniendo pagos pendientes...');
 
-    // 1. Contar pagos pendientes de la tabla Payment que NO sean de membresías
-    // (Los pagos PENDING con memberMembershipId se cuentan desde MemberMembership para evitar duplicados)
+    // 1. Contar pagos pendientes de la tabla Payment
     const paymentCount = await this.paymentRepository.count({
       where: {
         status: PaymentStatus.PENDING,
-        memberMembershipId: IsNull(),
       },
     });
 
@@ -385,24 +383,24 @@ export class DashboardService {
       .createQueryBuilder('payment')
       .select('SUM(payment.amount)', 'total')
       .where('payment.status = :status', { status: PaymentStatus.PENDING })
-      .andWhere('payment.memberMembershipId IS NULL')
       .getRawOne();
 
     const paymentAmount = paymentAmountResult?.total ? parseFloat(paymentAmountResult.total) : 0;
 
     // Contar pagos de membresía con pago pendiente (consultando Payment table)
-    const membershipCount = await this.memberMembershipRepository
-      .createQueryBuilder('mm')
-      .leftJoin('payments', 'p', 'p.memberMembershipId = mm.id AND p.paymentType = :paymentType', { paymentType: PaymentType.MEMBERSHIP })
-      .where('(p.id IS NULL OR p.status = :status)', { status: PaymentStatus.PENDING })
-      .getCount();
+    const membershipCount = await this.paymentRepository.count({
+      where: {
+        paymentType: PaymentType.MEMBERSHIP,
+        status: PaymentStatus.PENDING,
+      },
+    });
 
     // Obtener membresías con pago PENDIENTE (consultando Payment table)
-    const membershipPaymentsResult = await this.memberMembershipRepository
-      .createQueryBuilder('mm')
-      .select('SUM(COALESCE(p.amount, 0))', 'total')
-      .leftJoin('payments', 'p', 'p.memberMembershipId = mm.id AND p.paymentType = :paymentType', { paymentType: PaymentType.MEMBERSHIP })
-      .where('(p.id IS NULL OR p.status = :status)', { status: PaymentStatus.PENDING })
+    const membershipPaymentsResult = await this.paymentRepository
+      .createQueryBuilder('payment')
+      .select('SUM(payment.amount)', 'total')
+      .where('payment.paymentType = :paymentType', { paymentType: PaymentType.MEMBERSHIP })
+      .andWhere('payment.status = :status', { status: PaymentStatus.PENDING })
       .getRawOne();
 
     const membershipAmount = membershipPaymentsResult?.total ? parseFloat(membershipPaymentsResult.total) : 0;

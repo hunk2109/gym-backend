@@ -13,14 +13,6 @@ export class CreateMemberMembershipDto {
   @IsDateString()
   endDate: string | Date;
 
-  @IsNumber()
-  @IsOptional()
-  amountPaid?: number;
-
-  @IsDateString()
-  @IsOptional()
-  paymentDate?: Date;
-
   @IsString()
   @IsOptional()
   promotionCode?: string; // Código de promoción/cupón para aplicar descuento

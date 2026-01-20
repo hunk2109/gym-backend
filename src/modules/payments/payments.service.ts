@@ -23,44 +23,57 @@ export class PaymentsService {
     private readonly emailService: EmailService,
   ) {}
 
-  async createPayment(createPaymentDto: CreatePaymentDto): Promise<Payment> {
-    // Verify member exists
-    const member = await this.memberRepository.findOne({
-      where: { id: createPaymentDto.memberId },
-    });
-
-    if (!member) {
-      throw new BadRequestException('Member not found');
-    }
-
+  async createPayment(createPaymentDto: CreatePaymentDto, userId?: string): Promise<Payment> {
+    console.log(`[PAYMENTS_SERVICE] createPayment called with userId:`, userId);
     const payment = this.paymentRepository.create(createPaymentDto);
+    console.log(`[PAYMENTS_SERVICE] Payment created (before userId assignment):`, { id: payment.id, createdBy: payment.createdBy, updatedBy: payment.updatedBy });
+    
+    // Asignar userId a createdBy y updatedBy - pero permitir pasar undefined
+    if (userId) {
+      payment.createdBy = userId;
+      payment.updatedBy = userId;
+      console.log(`[PAYMENTS_SERVICE] Assigned userId to payment:`, { createdBy: payment.createdBy, updatedBy: payment.updatedBy });
+    } else {
+      console.log(`[PAYMENTS_SERVICE] ⚠️ userId es undefined/null!`);
+    }
     
     // Si el monto es $0, marcar automáticamente como completado
     if (payment.amount === 0) {
       payment.status = PaymentStatus.COMPLETED;
-      this.logger.log(`[Payment] Auto-completing $0 payment for member ${createPaymentDto.memberId}`);
+      payment.paymentDate = new Date();
+      console.log(`[PAYMENTS_SERVICE] 💰 Auto-completing $0 payment with paymentDate: ${payment.paymentDate}`);
+      this.logger.log(`[Payment] Auto-completing $0 payment with paymentDate`);
     }
     
+    // Asignar paymentDate si no está ya asignada y está en COMPLETED
+    if (!payment.paymentDate && payment.status === PaymentStatus.COMPLETED) {
+      payment.paymentDate = new Date();
+      console.log(`[PAYMENTS_SERVICE] Setting paymentDate for COMPLETED status: ${payment.paymentDate}`);
+    }
+    
+    console.log(`[PAYMENTS_SERVICE] Before save - payment:`, { id: payment.id, createdBy: payment.createdBy, updatedBy: payment.updatedBy, amount: payment.amount, status: payment.status, paymentDate: payment.paymentDate });
     const savedPayment = await this.paymentRepository.save(payment);
+    console.log(`[PAYMENTS_SERVICE] After save - savedPayment:`, { id: savedPayment.id, createdBy: savedPayment.createdBy, updatedBy: savedPayment.updatedBy, status: savedPayment.status, paymentDate: savedPayment.paymentDate });
     
-    // paymentStatus se calcula dinámicamente desde la tabla Payment
-    // Ya no se actualiza member_membership.paymentStatus
-    
-    this.logger.log(`[Payment] Payment created. ID: ${savedPayment.id}, Amount: ${createPaymentDto.amount}, Member: ${createPaymentDto.memberId}`);
+    this.logger.log(`[Payment] Payment created. ID: ${savedPayment.id}, Amount: ${createPaymentDto.amount}, Status: ${savedPayment.status}, PaymentDate: ${savedPayment.paymentDate}, createdBy: ${savedPayment.createdBy}`);
     return savedPayment;
+  }
+
+  /**
+   * Asignar userId automáticamente si no está presente
+   */
+  private assignUserIdIfMissing(entity: any, userId?: string): void {
+    if (userId) {
+      if (!entity.createdBy) entity.createdBy = userId;
+      if (!entity.updatedBy) entity.updatedBy = userId;
+    }
   }
 
   async getAllPayments(page: number = 1, limit: number = 10): Promise<{ data: Payment[]; pagination: any }> {
     const skip = (page - 1) * limit;
 
-    // FILTRO: Excluir acompañantes (companion)
     const [data, total] = await this.paymentRepository
       .createQueryBuilder('payment')
-      .leftJoinAndSelect('payment.member', 'member')
-      .leftJoin(MemberMembership, 'mm', 'mm.id = payment.memberMembershipId')
-      .where('mm.membershipType IS NULL OR mm.membershipType IN (:...allowedTypes)', {
-        allowedTypes: ['individual', 'responsible'],
-      })
       .skip(skip)
       .take(limit)
       .orderBy('payment.paymentDate', 'DESC')
@@ -80,7 +93,6 @@ export class PaymentsService {
   async getPaymentById(id: string): Promise<Payment> {
     const payment = await this.paymentRepository.findOne({
       where: { id },
-      relations: ['member'],
     });
 
     if (!payment) {
@@ -108,6 +120,35 @@ export class PaymentsService {
     return savedPayment;
   }
 
+  async updatePaymentStatus(id: string, status: PaymentStatus, paymentDate?: Date, userId?: string): Promise<Payment> {
+    console.log(`[PAYMENTS_SERVICE] updatePaymentStatus called with userId:`, userId);
+    const payment = await this.getPaymentById(id);
+
+    payment.status = status;
+    
+    // Asignar userId a updatedBy
+    if (userId) {
+      payment.updatedBy = userId;
+      console.log(`[PAYMENTS_SERVICE] Assigned userId to updatedBy:`, userId);
+    }
+    
+    // Si se está marcando como completado, asignar paymentDate
+    if (status === PaymentStatus.COMPLETED) {
+      const dateToSet = paymentDate || new Date();
+      payment.paymentDate = dateToSet;
+      console.log(`[PAYMENTS_SERVICE] Payment marked as COMPLETED with paymentDate:`, dateToSet);
+      this.logger.log(`[Payment] Payment completed. ID: ${id}, Amount: ${payment.amount}, Payment Date: ${dateToSet}`);
+    } else {
+      this.logger.log(`[Payment] Payment status updated. ID: ${id}, Status: ${status}`);
+    }
+
+    console.log(`[PAYMENTS_SERVICE] Before save - payment:`, { id: payment.id, status: payment.status, paymentDate: payment.paymentDate, updatedBy: payment.updatedBy });
+    const savedPayment = await this.paymentRepository.save(payment);
+    console.log(`[PAYMENTS_SERVICE] After save - savedPayment:`, { id: savedPayment.id, status: savedPayment.status, paymentDate: savedPayment.paymentDate, updatedBy: savedPayment.updatedBy });
+
+    return savedPayment;
+  }
+
   async deletePayment(id: string): Promise<void> {
     const payment = await this.getPaymentById(id);
     await this.paymentRepository.remove(payment);
@@ -117,15 +158,10 @@ export class PaymentsService {
   async getPaymentsByMember(memberId: string, page: number = 1, limit: number = 10): Promise<{ data: Payment[]; pagination: any }> {
     const skip = (page - 1) * limit;
 
-    // FILTRO: Excluir acompañantes (companion)
     const [data, total] = await this.paymentRepository
       .createQueryBuilder('payment')
-      .leftJoinAndSelect('payment.member', 'member')
-      .leftJoin(MemberMembership, 'mm', 'mm.id = payment.memberMembershipId')
-      .where('payment.memberId = :memberId', { memberId })
-      .andWhere('mm.membershipType IS NULL OR mm.membershipType IN (:...allowedTypes)', {
-        allowedTypes: ['individual', 'responsible'],
-      })
+      .innerJoin(MemberMembership, 'mm', 'mm.paymentId = payment.id')
+      .where('mm.memberId = :memberId', { memberId })
       .skip(skip)
       .take(limit)
       .orderBy('payment.paymentDate', 'DESC')
@@ -145,15 +181,9 @@ export class PaymentsService {
   async getPaymentsByStatus(status: PaymentStatus, page: number = 1, limit: number = 10): Promise<{ data: Payment[]; pagination: any }> {
     const skip = (page - 1) * limit;
 
-    // FILTRO: Excluir acompañantes (companion)
     const [data, total] = await this.paymentRepository
       .createQueryBuilder('payment')
-      .leftJoinAndSelect('payment.member', 'member')
-      .leftJoin(MemberMembership, 'mm', 'mm.id = payment.memberMembershipId')
       .where('payment.status = :status', { status })
-      .andWhere('mm.membershipType IS NULL OR mm.membershipType IN (:...allowedTypes)', {
-        allowedTypes: ['individual', 'responsible'],
-      })
       .skip(skip)
       .take(limit)
       .orderBy('payment.paymentDate', 'DESC')
@@ -173,15 +203,9 @@ export class PaymentsService {
   async getPaymentsByDateRange(startDate: Date, endDate: Date, page: number = 1, limit: number = 10): Promise<{ data: Payment[]; pagination: any }> {
     const skip = (page - 1) * limit;
 
-    // FILTRO: Excluir acompañantes (companion)
     const [data, total] = await this.paymentRepository
       .createQueryBuilder('payment')
-      .leftJoinAndSelect('payment.member', 'member')
-      .leftJoin(MemberMembership, 'mm', 'mm.id = payment.memberMembershipId')
       .where('payment.paymentDate BETWEEN :startDate AND :endDate', { startDate, endDate })
-      .andWhere('mm.membershipType IS NULL OR mm.membershipType IN (:...allowedTypes)', {
-        allowedTypes: ['individual', 'responsible'],
-      })
       .skip(skip)
       .take(limit)
       .orderBy('payment.paymentDate', 'DESC')
@@ -199,85 +223,40 @@ export class PaymentsService {
   }
 
   async getPaymentStatistics(): Promise<any> {
-    // FILTRO: Excluir acompañantes (companion)
     const [totalPayments, completedPayments, pendingPayments, failedPayments] = await Promise.all([
-      this.paymentRepository
-        .createQueryBuilder('payment')
-        .leftJoin(MemberMembership, 'mm', 'mm.id = payment.memberMembershipId')
-        .where('mm.membershipType IS NULL OR mm.membershipType IN (:...allowedTypes)', {
-          allowedTypes: ['individual', 'responsible'],
-        })
-        .getCount(),
-      this.paymentRepository
-        .createQueryBuilder('payment')
-        .leftJoin(MemberMembership, 'mm', 'mm.id = payment.memberMembershipId')
-        .where('payment.status = :status', { status: PaymentStatus.COMPLETED })
-        .andWhere('mm.membershipType IS NULL OR mm.membershipType IN (:...allowedTypes)', {
-          allowedTypes: ['individual', 'responsible'],
-        })
-        .getCount(),
-      this.paymentRepository
-        .createQueryBuilder('payment')
-        .leftJoin(MemberMembership, 'mm', 'mm.id = payment.memberMembershipId')
-        .where('payment.status = :status', { status: PaymentStatus.PENDING })
-        .andWhere('payment.memberMembershipId IS NULL')
-        .andWhere('mm.membershipType IS NULL OR mm.membershipType IN (:...allowedTypes)', {
-          allowedTypes: ['individual', 'responsible'],
-        })
-        .getCount(),
-      this.paymentRepository
-        .createQueryBuilder('payment')
-        .leftJoin(MemberMembership, 'mm', 'mm.id = payment.memberMembershipId')
-        .where('payment.status = :status', { status: PaymentStatus.FAILED })
-        .andWhere('mm.membershipType IS NULL OR mm.membershipType IN (:...allowedTypes)', {
-          allowedTypes: ['individual', 'responsible'],
-        })
-        .getCount(),
+      this.paymentRepository.count(),
+      this.paymentRepository.count({ where: { status: PaymentStatus.COMPLETED } }),
+      this.paymentRepository.count({ where: { status: PaymentStatus.PENDING } }),
+      this.paymentRepository.count({ where: { status: PaymentStatus.FAILED } }),
     ]);
 
     const totalAmount = await this.paymentRepository
       .createQueryBuilder('payment')
-      .leftJoin(MemberMembership, 'mm', 'mm.id = payment.memberMembershipId')
       .select('SUM(payment.amount)', 'total')
       .where('payment.status = :status', { status: PaymentStatus.COMPLETED })
-      .andWhere('mm.membershipType IS NULL OR mm.membershipType IN (:...allowedTypes)', {
-        allowedTypes: ['individual', 'responsible'],
-      })
       .getRawOne();
 
     const averageAmount = await this.paymentRepository
       .createQueryBuilder('payment')
-      .leftJoin(MemberMembership, 'mm', 'mm.id = payment.memberMembershipId')
       .select('AVG(payment.amount)', 'average')
       .where('payment.status = :status', { status: PaymentStatus.COMPLETED })
-      .andWhere('mm.membershipType IS NULL OR mm.membershipType IN (:...allowedTypes)', {
-        allowedTypes: ['individual', 'responsible'],
-      })
       .getRawOne();
 
     const byPaymentMethod = await this.paymentRepository
       .createQueryBuilder('payment')
-      .leftJoin(MemberMembership, 'mm', 'mm.id = payment.memberMembershipId')
       .select('payment.paymentMethod', 'method')
       .addSelect('COUNT(payment.id)', 'count')
       .addSelect('SUM(payment.amount)', 'total')
       .where('payment.status = :status', { status: PaymentStatus.COMPLETED })
-      .andWhere('mm.membershipType IS NULL OR mm.membershipType IN (:...allowedTypes)', {
-        allowedTypes: ['individual', 'responsible'],
-      })
       .groupBy('payment.paymentMethod')
       .getRawMany();
 
     const byPaymentType = await this.paymentRepository
       .createQueryBuilder('payment')
-      .leftJoin(MemberMembership, 'mm', 'mm.id = payment.memberMembershipId')
       .select('payment.paymentType', 'type')
       .addSelect('COUNT(payment.id)', 'count')
       .addSelect('SUM(payment.amount)', 'total')
       .where('payment.status = :status', { status: PaymentStatus.COMPLETED })
-      .andWhere('mm.membershipType IS NULL OR mm.membershipType IN (:...allowedTypes)', {
-        allowedTypes: ['individual', 'responsible'],
-      })
       .groupBy('payment.paymentType')
       .getRawMany();
 
@@ -295,15 +274,10 @@ export class PaymentsService {
   }
 
   async getMemberPaymentHistory(memberId: string): Promise<any> {
-    // FILTRO: Excluir acompañantes (companion)
     const payments = await this.paymentRepository
       .createQueryBuilder('payment')
-      .leftJoinAndSelect('payment.member', 'member')
-      .leftJoin(MemberMembership, 'mm', 'mm.id = payment.memberMembershipId')
-      .where('payment.memberId = :memberId', { memberId })
-      .andWhere('mm.membershipType IS NULL OR mm.membershipType IN (:...allowedTypes)', {
-        allowedTypes: ['individual', 'responsible'],
-      })
+      .innerJoin(MemberMembership, 'mm', 'mm.paymentId = payment.id')
+      .where('mm.memberId = :memberId', { memberId })
       .orderBy('payment.paymentDate', 'DESC')
       .getMany();
 
@@ -345,116 +319,71 @@ export class PaymentsService {
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - daysOverdue);
 
-    // FILTRO: Excluir acompañantes (companion)
     return this.paymentRepository
       .createQueryBuilder('payment')
-      .leftJoin(MemberMembership, 'mm', 'mm.id = payment.memberMembershipId')
       .where('payment.status = :status', { status: PaymentStatus.PENDING })
-      .andWhere('payment.memberMembershipId IS NULL')
       .andWhere('payment.dueDate <= :cutoffDate', { cutoffDate })
-      .andWhere('mm.membershipType IS NULL OR mm.membershipType IN (:...allowedTypes)', {
-        allowedTypes: ['individual', 'responsible'],
-      })
       .orderBy('payment.dueDate', 'ASC')
       .getMany();
   }
 
   /**
-   * Obtener todos los pagos pendientes (tanto de tabla Payment como de membresías asignadas)
+   * Obtener TODOS los pagos pendientes de la tabla Payment (SIN agrupar por membresía)
+   * Los pagos ya están consolidados por la lógica en addCompanionToGroup/removeCompanionFromGroup
    */
   async getAllPendingPayments(daysOverdue: number = 0): Promise<any[]> {
-    this.logger.log(`[Payments] getAllPendingPayments - Obteniendo pagos pendientes...`);
+    this.logger.log(`[Payments] getAllPendingPayments - Obteniendo TODOS los pagos pendientes individuales...`);
 
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - daysOverdue);
-
-    // Obtener pagos pendientes de la tabla Payment (SIN los de membresías)
-    // Los pagos PENDING con memberMembershipId se cuentan desde MemberMembership para evitar duplicados
-    // FILTRO: Solo mostrar si membershipType != 'companion'
-    const paymentRecords = await this.paymentRepository
-      .createQueryBuilder('payment')
-      .leftJoinAndSelect('payment.member', 'member')
-      .leftJoinAndSelect('member.user', 'user')
-      .leftJoin(MemberMembership, 'mm', 'mm.id = payment.memberMembershipId')
-      .where('payment.status = :status', { status: PaymentStatus.PENDING })
-      .andWhere('payment.memberMembershipId IS NULL')
-      .andWhere('payment.dueDate <= :cutoffDate', { cutoffDate })
-      .andWhere('mm.membershipType IS NULL OR mm.membershipType IN (:...allowedTypes)', { 
-        allowedTypes: ['individual', 'responsible'] 
-      })
-      .orderBy('payment.dueDate', 'ASC')
-      .getMany();
-
-    // Obtener membresías con pago pendiente
-    // FILTRO: Solo mostrar si membershipType != 'companion'
-    // IMPORTANTE: Verificar que realmente hay un pago PENDING en la tabla Payment
-    const membershipRecords = await this.memberMembershipRepository
-      .createQueryBuilder('mm')
-      .leftJoinAndSelect('mm.member', 'member')
-      .leftJoinAndSelect('member.user', 'user')
-      .leftJoinAndSelect('mm.membership', 'membership')
-      .leftJoin(Payment, 'p', 'p.memberMembershipId = mm.id AND p.paymentType = :paymentType AND p.status = :status', 
-        { paymentType: PaymentType.MEMBERSHIP, status: PaymentStatus.PENDING }
-      )
-      .where('mm.endDate <= :cutoffDate', { cutoffDate })
-      .andWhere('mm.membershipType IS NULL OR mm.membershipType IN (:...allowedTypes)', { 
-        allowedTypes: ['individual', 'responsible'] 
-      })
-      .andWhere('p.id IS NOT NULL')
-      .orderBy('mm.endDate', 'ASC')
-      .getMany();
-
-    // Transformar membresías a formato similar a Payment
-    const membershipPayments = membershipRecords.map(mm => ({
-      id: mm.id,
-      memberId: mm.memberId,
-      member: mm.member,
-      amount: mm.membership?.price || 0,
-      paymentMethod: 'MEMBERSHIP',
-      status: 'pending',
-      paymentType: 'RECURRING',
-      paymentDate: mm.paymentDate,
-      dueDate: mm.endDate,
-      description: `Membership: ${mm.membership?.name}`,
-      transactionId: null,
-      reference: null,
-      notes: null,
-      discount: 0,
-      tax: 0,
-      createdAt: mm.createdAt,
-      updatedAt: mm.updatedAt,
-      type: 'MEMBERSHIP', // Marker para saber que es de MemberMembership
-      membershipRecordId: mm.id, // ID del registro de membresía
-      membership: mm.membership,
-      membershipType: mm.membershipType,
-      membershipStatusLabel: mm.membershipType === 'responsible' ? 'Responsable' : 'Individual',
-    }));
-
-    // Combinar y ordenar por fecha
-    const allPending = [...paymentRecords, ...membershipPayments].sort((a, b) => {
-      const dateA = new Date((a.dueDate || a.paymentDate) as Date).getTime();
-      const dateB = new Date((b.dueDate || b.paymentDate) as Date).getTime();
-      return dateA - dateB;
+    // QUERY SIMPLE - SIN JOINS QUE CAUSEN MULTIPLICIDAD
+    // Solo retornar pagos con status PENDING (sin filtro de fecha)
+    const pendingPayments = await this.paymentRepository.find({
+      where: {
+        status: PaymentStatus.PENDING,
+      },
+      order: {
+        dueDate: 'ASC',
+      },
     });
 
-    this.logger.log(
-      `[Payments] Encontrados ${paymentRecords.length} pagos + ${membershipRecords.length} membresías con pago pendiente = ${allPending.length} total`
-    );
+    this.logger.log(`[Payments] Encontrados ${pendingPayments.length} pagos pendientes`);
+    pendingPayments.forEach((p, idx) => {
+      this.logger.log(`[Payments]   ${idx + 1}. ID: ${p.id}, Monto: $${p.amount}`);
+    });
 
-    return allPending;
+    return pendingPayments;
   }
 
   /**
-   * Obtener TODOS los pagos sin paginación (para historial)
+   * Diagnóstico - Obtener pagos de inscripción completados recientemente
    */
+  async diagnosisGetCompletedRegistrationPayments(): Promise<any[]> {
+    try {
+      const payments = await this.paymentRepository
+        .createQueryBuilder('payment')
+        .where('payment.paymentType = :paymentType', { paymentType: PaymentType.REGISTRATION })
+        .andWhere('payment.status = :status', { status: PaymentStatus.COMPLETED })
+        .orderBy('payment.createdAt', 'DESC')
+        .limit(10)
+        .getMany();
+
+      console.log(`[DIAGNOSIS] Found ${payments.length} completed registration payments`);
+      payments.forEach((p) => {
+        console.log(`[DIAGNOSIS] Payment ID: ${p.id}, Amount: ${p.amount}, Status: ${p.status}, PaymentDate: ${p.paymentDate}, CreatedAt: ${p.createdAt}`);
+      });
+
+      return payments;
+    } catch (e) {
+      console.error(`[DIAGNOSIS] Error: ${e.message}`);
+      throw e;
+    }
+  }
+
   async getAllPaymentsWithoutPagination(): Promise<Payment[]> {
     try {
       this.logger.log(`[Payments] getAllPaymentsWithoutPagination - Obteniendo todos los pagos`);
 
       const payments = await this.paymentRepository
         .createQueryBuilder('payment')
-        .leftJoinAndSelect('payment.member', 'member')
-        .leftJoinAndSelect('member.user', 'user')
         .orderBy('COALESCE(payment.paymentDate, payment.createdAt)', 'DESC')
         .getMany();
 
@@ -469,55 +398,123 @@ export class PaymentsService {
   /**
    * Completar pago de inscripción de un miembro
    */
-  async completeRegistrationPayment(memberId: string, paymentMethod: string = 'cash'): Promise<any> {
-    // Buscar pago de inscripción pendiente
-    const registrationPayment = await this.paymentRepository.findOne({
-      where: {
-        memberId,
-        paymentType: PaymentType.REGISTRATION,
-        status: PaymentStatus.PENDING,
-      },
-      relations: ['member', 'member.user'],
+  /**
+   * Pagar un pago por su ID
+   * Verifica que esté PENDING y procesa según el tipo de pago
+   */
+  async payPayment(paymentId: string, paymentMethod: string = 'cash', userId?: string): Promise<any> {
+    console.log(`[PAYMENTS_SERVICE] payPayment called - paymentId: ${paymentId}, paymentMethod: ${paymentMethod}`);
+
+    // 1. Obtener el pago
+    const payment = await this.paymentRepository.findOne({
+      where: { id: paymentId },
     });
 
-    if (!registrationPayment) {
-      throw new NotFoundException(
-        `No hay pago de inscripción pendiente para el miembro ${memberId}`,
-      );
+    if (!payment) {
+      throw new NotFoundException(`Payment ${paymentId} not found`);
     }
+
+    // 2. Verificar que esté PENDING
+    if (payment.status !== PaymentStatus.PENDING) {
+      throw new BadRequestException(`Payment ${paymentId} is not pending. Current status: ${payment.status}`);
+    }
+
+    console.log(`[PAYMENTS_SERVICE] Payment found: Type=${payment.paymentType}, Amount=${payment.amount}`);
+
+    // 3. Procesar según el tipo de pago
+    let result: any;
+    switch (payment.paymentType) {
+      case PaymentType.REGISTRATION:
+        result = await this.payRegistrationPayment(payment, paymentMethod, userId);
+        break;
+      case PaymentType.MEMBERSHIP:
+        result = await this.payMembershipPayment(payment, paymentMethod, userId);
+        break;
+      default:
+        // Otros tipos de pago también se completan igual
+        result = await this.payOtherTypePayment(payment, paymentMethod, userId);
+    }
+
+    return result;
+  }
+
+  /**
+   * Procesar pago de inscripción
+   */
+  private async payRegistrationPayment(payment: Payment, paymentMethod: string, userId?: string): Promise<any> {
+    console.log(`[PAYMENTS_SERVICE] Processing REGISTRATION payment: ID=${payment.id}, Amount=${payment.amount}`);
 
     // Actualizar estado a COMPLETED
-    registrationPayment.status = PaymentStatus.COMPLETED;
-    registrationPayment.paymentMethod = paymentMethod as any;
-    registrationPayment.paymentDate = new Date();
-
-    const updatedPayment = await this.paymentRepository.save(registrationPayment);
-
-    this.logger.log(
-      `[Registration Payment] ✅ Payment completed for member ${memberId}. Amount: $${registrationPayment.amount}`,
-    );
-
-    // Enviar correo de confirmación
-    try {
-      const user = registrationPayment.member.user;
-      const emailContent = `Hola ${user.firstName} ${user.lastName},\n\nTu pago de inscripción de $${registrationPayment.amount} ha sido procesado exitosamente.\n\nAhora puedes asignar una membresía y comenzar a disfrutar del gimnasio.\n\nGracias por tu confianza.`;
-      
-      await this.emailService.sendEmailDirect({
-        to: user.email,
-        subject: 'Pago de Inscripción Completado',
-        text: emailContent,
-        html: `<p>${emailContent.replace(/\n/g, '<br>')}</p>`,
-      });
-      this.logger.log(`[Registration Payment] 📧 Confirmation email sent to ${user.email}`);
-    } catch (emailError) {
-      this.logger.error(`[Registration Payment] ⚠️ Failed to send confirmation email: ${emailError.message}`);
-      // No fallar si no se puede enviar el correo
+    payment.status = PaymentStatus.COMPLETED;
+    payment.paymentMethod = paymentMethod as any;
+    payment.paymentDate = new Date();
+    if (userId) {
+      payment.updatedBy = userId;
     }
+
+    const updatedPayment = await this.paymentRepository.save(payment);
+    console.log(`[PAYMENTS_SERVICE] ✅ Registration payment saved: ID=${updatedPayment.id}, Status=${updatedPayment.status}`);
+
+    this.logger.log(`[Registration Payment] ✅ Payment completed. Amount: $${payment.amount}`);
 
     return {
       statusCode: 200,
       success: true,
-      message: `✅ Pago de inscripción completado exitosamente para ${registrationPayment.member.user.firstName} ${registrationPayment.member.user.lastName}`,
+      message: `✅ Pago de inscripción completado exitosamente`,
+      data: updatedPayment,
+    };
+  }
+
+  /**
+   * Procesar pago de membresía
+   */
+  private async payMembershipPayment(payment: Payment, paymentMethod: string, userId?: string): Promise<any> {
+    console.log(`[PAYMENTS_SERVICE] Processing MEMBERSHIP payment: ID=${payment.id}, Amount=${payment.amount}`);
+
+    // Actualizar estado a COMPLETED
+    payment.status = PaymentStatus.COMPLETED;
+    payment.paymentMethod = paymentMethod as any;
+    payment.paymentDate = new Date();
+    if (userId) {
+      payment.updatedBy = userId;
+    }
+
+    const updatedPayment = await this.paymentRepository.save(payment);
+    console.log(`[PAYMENTS_SERVICE] ✅ Membership payment saved: ID=${updatedPayment.id}, Status=${updatedPayment.status}`);
+
+    this.logger.log(`[Membership Payment] ✅ Payment completed. Amount: $${payment.amount}`);
+
+    return {
+      statusCode: 200,
+      success: true,
+      message: `✅ Pago de membresía completado exitosamente`,
+      data: updatedPayment,
+    };
+  }
+
+  /**
+   * Procesar otros tipos de pago (CLASS, PRODUCT, SERVICE, OTHER)
+   */
+  private async payOtherTypePayment(payment: Payment, paymentMethod: string, userId?: string): Promise<any> {
+    console.log(`[PAYMENTS_SERVICE] Processing ${payment.paymentType} payment: ID=${payment.id}, Amount=${payment.amount}`);
+
+    // Actualizar estado a COMPLETED
+    payment.status = PaymentStatus.COMPLETED;
+    payment.paymentMethod = paymentMethod as any;
+    payment.paymentDate = new Date();
+    if (userId) {
+      payment.updatedBy = userId;
+    }
+
+    const updatedPayment = await this.paymentRepository.save(payment);
+    console.log(`[PAYMENTS_SERVICE] ✅ Payment saved: ID=${updatedPayment.id}, Status=${updatedPayment.status}`);
+
+    this.logger.log(`[Payment] ✅ Payment completed. Type: ${payment.paymentType}, Amount: $${payment.amount}`);
+
+    return {
+      statusCode: 200,
+      success: true,
+      message: `✅ Pago completado exitosamente`,
       data: updatedPayment,
     };
   }

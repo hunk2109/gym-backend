@@ -66,7 +66,6 @@ export class AuthService {
         country: '',
         emergencyContact: '',
         emergencyPhone: '',
-        hasMembership: false,
       });
       await memberRepository.save(member);
       console.log(`[AuthService] ✅ Member creado automáticamente para userId: ${user.id}`);

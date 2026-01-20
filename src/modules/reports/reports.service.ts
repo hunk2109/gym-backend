@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Between, MoreThan, LessThan } from 'typeorm';
+import { Repository, Between, MoreThan, LessThan, In } from 'typeorm';
 import { Sale, SaleStatus } from '../../entities/sale.entity';
 import { Payment, PaymentStatus } from '../../entities/payment.entity';
 import { Member } from '../../entities/member.entity';
@@ -590,7 +590,14 @@ export class ReportsService {
         };
       }
 
-      const members = new Set(overduePayments.map((p) => p.memberId).filter((m) => m !== null && m !== undefined));
+      // Get unique members through member_membership relation
+      const memberMemberships = await this.memberMembershipRepository.find({
+        where: {
+          paymentId: In(overduePayments.map(p => p.id)),
+        },
+      });
+
+      const members = new Set(memberMemberships.map(mm => mm.memberId).filter((m) => m !== null && m !== undefined));
       const totalAmount = overduePayments.reduce((sum, p) => sum + parseFloat(p.amount.toString()), 0);
 
       return {

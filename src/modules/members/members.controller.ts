@@ -11,6 +11,7 @@ import {
   HttpCode,
   HttpStatus,
   Logger,
+  Req,
 } from '@nestjs/common';
 import { MembersService } from './members.service';
 import { CreateMemberDto, UpdateMemberDto } from './dto/create-member.dto';
@@ -32,22 +33,8 @@ export class MembersController {
   async findAll(@Query('page') page: string = '1', @Query('limit') limit: string = '10') {
     const result = await this.membersService.findAll(parseInt(page), parseInt(limit));
     
-    // Asegurar que cada miembro tiene hasMembership y hasPendingPayment en la respuesta
-    const enrichedData = result.data.map(member => {
-      const plainMember = { ...member };
-      // Asegurar que los campos booleanos están presentes
-      if (!('hasMembership' in plainMember)) {
-        plainMember.hasMembership = false;
-      }
-      if (!('hasPendingPayment' in plainMember)) {
-        plainMember.hasPendingPayment = false;
-      }
-      console.log(`[MembersController] Miembro ${plainMember.id}: hasMembership=${plainMember.hasMembership}, hasPendingPayment=${plainMember.hasPendingPayment}`);
-      return plainMember;
-    });
-    
     return {
-      data: enrichedData,
+      data: result.data,
       pagination: result.pagination,
     };
   }
@@ -60,18 +47,6 @@ export class MembersController {
     @Query('limit') limit: string = '10',
   ) {
     return this.membersService.search(query, parseInt(page), parseInt(limit));
-  }
-
-  @Get('paid')
-  @HttpCode(HttpStatus.OK)
-  async getPaidMembers(@Query('page') page: string = '1', @Query('limit') limit: string = '10') {
-    return this.membersService.getPaidMembers(parseInt(page), parseInt(limit));
-  }
-
-  @Get('unpaid')
-  @HttpCode(HttpStatus.OK)
-  async getUnpaidMembers(@Query('page') page: string = '1', @Query('limit') limit: string = '10') {
-    return this.membersService.getUnpaidMembers(parseInt(page), parseInt(limit));
   }
 
   @Get('recent')
@@ -115,6 +90,37 @@ export class MembersController {
     };
   }
 
+  /**
+   * Obtiene el estado del pago de inscripción de un miembro
+   * GET /members/:id/registration-payment-status
+   */
+  @Get(':id/registration-payment-status')
+  @HttpCode(HttpStatus.OK)
+  async getRegistrationPaymentStatus(@Param('id') memberId: string) {
+    const status = await this.membersService.getRegistrationPaymentStatus(memberId);
+    return { statusCode: 200, data: status };
+  }
+
+  /**
+   * Obtiene si hay pago de membresía pendiente para un miembro
+   * GET /members/:id/membership-payment-status
+   */
+  @Get(':id/membership-payment-status')
+  @HttpCode(HttpStatus.OK)
+  async hasMembershipPaymentPending(@Param('id') memberId: string) {
+    const status = await this.membersService.hasMembershipPaymentPending(memberId);
+    return { statusCode: 200, data: status };
+  }
+
+  @Get(':id/debug-payment-status')
+  @HttpCode(HttpStatus.OK)
+  async debugPaymentStatus(@Param('id') memberId: string) {
+    // Endpoint de DEBUG para diagnosticar el problema de pagos de membresía
+    console.log(`[MembersController] 🔍 DEBUG: Obteniendo estado de pago de miembro: ${memberId}`);
+    const result = await this.membersService.debugPaymentStatus(memberId);
+    return { statusCode: 200, data: result };
+  }
+
   @Get(':id')
   @HttpCode(HttpStatus.OK)
   async findById(@Param('id') id: string) {
@@ -123,8 +129,10 @@ export class MembersController {
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  async create(@Body() createMemberDto: CreateMemberDto) {
-    return this.membersService.create(createMemberDto);
+  @UseGuards(JwtAuthGuard)
+  async create(@Body() createMemberDto: CreateMemberDto, @Req() req: any) {
+    const userId = req.user?.userId;
+    return this.membersService.create(createMemberDto, userId);
   }
 
   @Put(':id')

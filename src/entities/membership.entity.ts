@@ -15,6 +15,11 @@ export enum MembershipType {
   GROUP = 'group',
 }
 
+export enum PriceType {
+  FIXED = 'fixed',
+  VARIABLE = 'variable',
+}
+
 @Entity('memberships')
 export class Membership {
   @PrimaryGeneratedColumn('uuid')
@@ -78,6 +83,26 @@ export class Membership {
 
   @Column({ type: 'boolean', default: true })
   isRecurring: boolean; // Si es true, genera renovaciones automáticas. Si es false, solo pago inicial al asignar
+
+  @Column({
+    type: 'enum',
+    enum: PriceType,
+    default: PriceType.FIXED,
+  })
+  priceType: PriceType;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true, transformer: {
+    to: (value: number) => {
+      if (value === null || value === undefined) return null;
+      return value;
+    },
+    from: (value: string | number) => {
+      if (value === null || value === undefined) return null;
+      const parsed = parseFloat(String(value));
+      return Math.round(parsed * 100) / 100;
+    },
+  }})
+  pricePerCompanion?: number; // Precio adicional por cada acompañante (solo para membresías grupales con priceType variable)
 
   @Column({ type: 'int', nullable: true })
   maxGroupCompanions?: number; // Máximo de acompañantes si es membresía grupal

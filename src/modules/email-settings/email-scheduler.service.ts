@@ -4,6 +4,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Between, LessThanOrEqual } from 'typeorm';
 import { Member } from '../../entities/member.entity';
 import { MemberMembership } from '../../entities/member-membership.entity';
+import { Payment } from '../../entities/payment.entity';
 import { User } from '../../entities/user.entity';
 import { EmailService } from './email.service';
 import { EmailTemplate, EmailTriggerType } from './entities';
@@ -20,6 +21,8 @@ export class EmailSchedulerService {
     private memberRepository: Repository<Member>,
     @InjectRepository(MemberMembership)
     private memberMembershipRepository: Repository<MemberMembership>,
+    @InjectRepository(Payment)
+    private paymentRepository: Repository<Payment>,
     @InjectRepository(User)
     private userRepository: Repository<User>,
     @InjectRepository(EmailTemplate)
@@ -167,17 +170,17 @@ export class EmailSchedulerService {
       }
 
       let emailsSent = 0;
-      for (const membership of anniversaries) {
+      for (const anniversary of anniversaries) {
         try {
-          const member = membership.member;
+          const member = anniversary.member;
           const user = member.user;
-          const yearsOfMembership = new Date().getFullYear() - new Date(membership.createdAt).getFullYear();
+          const yearsOfMembership = new Date().getFullYear() - new Date(anniversary.paymentDate || new Date()).getFullYear();
 
           const variables = {
             firstName: user.firstName,
             lastName: user.lastName,
             email: user.email,
-            membershipType: membership.membership.name,
+            membershipType: 'Membresía', // Payment no tiene relación con Membership entity
             years: yearsOfMembership.toString(),
             gymName: gymName,
           };
@@ -199,7 +202,7 @@ export class EmailSchedulerService {
           this.logger.log(`Anniversary email sent to ${user.email}`);
           emailsSent++;
         } catch (error) {
-          this.logger.error(`Failed to send anniversary email to member ${membership.member.id}`, error);
+          this.logger.error(`Failed to send anniversary email to member ${anniversary.member.id}`, error);
         }
       }
 
@@ -241,22 +244,30 @@ export class EmailSchedulerService {
   /**
    * Obtiene todos los aniversarios de membresía para hoy
    */
-  private async getAnniversariesToday(): Promise<MemberMembership[]> {
+  private async getAnniversariesToday(): Promise<Array<{ membershipId: string; paymentId: string | undefined; paymentDate: Date; member: Member }>> {
     const today = new Date();
     const month = String(today.getMonth() + 1).padStart(2, '0');
     const day = String(today.getDate()).padStart(2, '0');
 
-    return this.memberMembershipRepository
-      .createQueryBuilder('membership')
-      .leftJoinAndSelect('membership.member', 'member')
+    const memberMemberships = await this.memberMembershipRepository
+      .createQueryBuilder('mm')
+      .innerJoin('mm.payment', 'payment', 'payment.id = mm.paymentId')
+      .leftJoinAndSelect('mm.member', 'member')
       .leftJoinAndSelect('member.user', 'user')
-      .leftJoinAndSelect('membership.membership', 'membershipType')
-      .leftJoin('payments', 'p', 'p.memberMembershipId = membership.id AND p.paymentType = :paymentType', { paymentType: 'MEMBERSHIP' })
-      .where(`DATE_FORMAT(membership.createdAt, '%m-%d') = :monthDay`, {
+      .where(`DATE_FORMAT(payment.paymentDate, '%m-%d') = :monthDay`, {
         monthDay: `${month}-${day}`,
       })
-      .andWhere('p.status = :paymentStatus', { paymentStatus: 'COMPLETED' })
+      .andWhere('payment.paymentType = :paymentType', { paymentType: 'MEMBERSHIP' })
+      .andWhere('payment.status = :paymentStatus', { paymentStatus: 'COMPLETED' })
       .getMany();
+
+    // Mapear a la estructura esperada
+    return memberMemberships.map(mm => ({
+      membershipId: mm.id,
+      paymentId: mm.paymentId,
+      paymentDate: mm.createdAt,
+      member: mm.member,
+    }));
   }
 
   /**

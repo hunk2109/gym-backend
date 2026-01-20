@@ -7,6 +7,7 @@ import { PaymentsService } from './payments.service';
 import { PaymentsController } from './payments.controller';
 import { AuthModule } from '../auth/auth.module';
 import { EmailSettingsModule } from '../email-settings/email-settings.module';
+import { PaymentSubscriber } from '../../entities/payment.subscriber';
 
 @Module({
   imports: [
@@ -14,7 +15,7 @@ import { EmailSettingsModule } from '../email-settings/email-settings.module';
     AuthModule,
     EmailSettingsModule,
   ],
-  providers: [PaymentsService],
+  providers: [PaymentsService, PaymentSubscriber],
   controllers: [PaymentsController],
   exports: [PaymentsService],
 })

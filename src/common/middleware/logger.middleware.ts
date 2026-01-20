@@ -6,17 +6,15 @@ export class LoggerMiddleware implements NestMiddleware {
   private logger = new Logger('HTTP');
 
   use(req: Request, res: Response, next: NextFunction): void {
-    const { method, originalUrl, ip } = req;
-    const userAgent = req.get('user-agent');
-
+    const { method, originalUrl } = req;
     const start = Date.now();
 
     res.on('finish', () => {
       const { statusCode } = res;
-      const contentLength = res.get('content-length');
       const duration = Date.now() - start;
 
-      const logMessage = `${method} ${originalUrl} ${statusCode} - ${duration}ms - ${contentLength || 0}b - ${ip} - ${userAgent}`;
+      // Formato simplificado: [HTTP] GET 200 /api/ruta (5ms)
+      const logMessage = `[${method}] ${statusCode} ${originalUrl} (${duration}ms)`;
 
       if (statusCode >= 500) {
         this.logger.error(logMessage);

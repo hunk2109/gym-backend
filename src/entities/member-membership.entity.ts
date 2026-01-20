@@ -10,6 +10,7 @@ import {
 import { Member } from './member.entity';
 import { Membership } from './membership.entity';
 import { Group } from './group.entity';
+import { Payment } from './payment.entity';
 
 @Entity('member_memberships')
 export class MemberMembership {
@@ -43,10 +44,14 @@ export class MemberMembership {
   classesUsed: number;
 
   @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
-  amountPaid: number;
+  payAmount: number; // Costo de la membresía (importante para membresías variables con acompañantes)
 
-  @Column({ type: 'date', nullable: true })
-  paymentDate: Date;
+  @ManyToOne(() => Payment, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'paymentId' })
+  payment?: Payment;
+
+  @Column({ type: 'varchar', nullable: true })
+  paymentId?: string;
 
   @Column({ type: 'boolean', default: false })
   isRecurring: boolean;

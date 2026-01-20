@@ -86,6 +86,12 @@ export class GymSettings {
   @Column({ type: 'varchar', nullable: true })
   mb360Timezone: string; // Zona horaria del dispositivo
 
+  @Column({ type: 'varchar', default: 'unknown', nullable: true })
+  mb360ConnectionStatus: 'online' | 'offline' | 'error' | 'unknown'; // Estado de conexión
+
+  @Column({ type: 'datetime', nullable: true })
+  mb360LastHeartbeat: Date; // Última conexión exitosa
+
   @CreateDateColumn()
   createdAt: Date;
 

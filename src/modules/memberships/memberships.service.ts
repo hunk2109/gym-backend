@@ -2,7 +2,7 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { v4 as uuidv4 } from 'uuid';
-import { Membership, MembershipType } from '../../entities/membership.entity';
+import { Membership, MembershipType, PriceType } from '../../entities/membership.entity';
 import { MemberMembership } from '../../entities/member-membership.entity';
 import { Member } from '../../entities/member.entity';
 import { Payment, PaymentStatus, PaymentMethod, PaymentType } from '../../entities/payment.entity';
@@ -34,8 +34,9 @@ export class MembershipsService {
   ) {}
 
   // Membership CRUD
-  async createMembership(createMembershipDto: CreateMembershipDto): Promise<Membership> {
-    console.log('[MembershipsService] createMembership received:', createMembershipDto);
+  async createMembership(createMembershipDto: CreateMembershipDto, userId?: string): Promise<Membership> {
+    console.log('[MEMBERSHIPS_SERVICE] createMembership called with userId:', userId);
+    console.log('[DEBUG_CREATE] Received DTO:', JSON.stringify(createMembershipDto, null, 2));
     
     // Determinar el tipo: si viene un string, convertirlo a enum; si no, usar INDIVIDUAL
     let membershipType = MembershipType.INDIVIDUAL;
@@ -48,7 +49,16 @@ export class MembershipsService {
       }
     }
     
-    console.log('[MembershipsService] Determined type:', membershipType);
+    // Determinar el priceType: si viene un string, convertirlo a enum; si no, usar FIXED
+    let priceType: PriceType = PriceType.FIXED;
+    if (createMembershipDto.priceType) {
+      const priceTypeValue = String(createMembershipDto.priceType).toLowerCase();
+      if (priceTypeValue === 'variable' || priceTypeValue === PriceType.VARIABLE) {
+        priceType = PriceType.VARIABLE;
+      } else if (priceTypeValue === 'fixed' || priceTypeValue === PriceType.FIXED) {
+        priceType = PriceType.FIXED;
+      }
+    }
     
     // Crear membership sin incluir id ni timestamps (TypeORM los generará)
     const membership = this.membershipRepository.create({
@@ -61,15 +71,17 @@ export class MembershipsService {
       type: membershipType,
       isActive: createMembershipDto.isActive !== undefined ? createMembershipDto.isActive : true,
       isRecurring: createMembershipDto.isRecurring !== undefined ? createMembershipDto.isRecurring : true,
+      priceType: priceType,
+      pricePerCompanion: createMembershipDto.pricePerCompanion,
       maxGroupCompanions: createMembershipDto.maxGroupCompanions,
     });
+    console.log('[DEBUG_BEFORE_SAVE] Membership object:', JSON.stringify(membership, null, 2));
     
-    console.log('[MembershipsService] Creating membership with type:', membership.type, 'maxGroupCompanions:', membership.maxGroupCompanions);
     const savedMembership = await this.membershipRepository.save(membership);
+    console.log('[DEBUG_AFTER_SAVE] Saved membership:', JSON.stringify(savedMembership, null, 2));
 
     // Guardar horarios de acceso si se proporcionan
     if (createMembershipDto.accessSchedules && createMembershipDto.accessSchedules.length > 0) {
-      console.log('[MembershipsService] Saving access schedules:', createMembershipDto.accessSchedules);
       
       const schedules = createMembershipDto.accessSchedules.map(schedule => 
         this.accessScheduleRepository.create({
@@ -83,7 +95,6 @@ export class MembershipsService {
       );
 
       await this.accessScheduleRepository.save(schedules);
-      console.log('[MembershipsService] Access schedules saved successfully');
       
       // Cargar la membresía con los horarios recién guardados
       const membershipWithSchedules = await this.membershipRepository.findOne({
@@ -136,29 +147,27 @@ export class MembershipsService {
 
   async updateMembership(id: string, updateMembershipDto: UpdateMembershipDto): Promise<Membership> {
     const membership = await this.getMembershipById(id);
-
-    console.log('[MembershipsService] Updating membership:', id, 'with:', updateMembershipDto);
-    console.log('[MembershipsService] accessSchedules received:', updateMembershipDto.accessSchedules);
     
     // Extraer accessSchedules antes de hacer assign
     const { accessSchedules, ...updateData } = updateMembershipDto as any;
     
-    console.log('[MembershipsService] updateData (without schedules):', updateData);
-    console.log('[MembershipsService] accessSchedules extracted:', accessSchedules);
+    // Convertir priceType a enum si está presente
+    if (updateData.priceType) {
+      const priceTypeValue = String(updateData.priceType).toLowerCase();
+      if (priceTypeValue === 'variable' || priceTypeValue === PriceType.VARIABLE) {
+        updateData.priceType = PriceType.VARIABLE;
+      } else if (priceTypeValue === 'fixed' || priceTypeValue === PriceType.FIXED) {
+        updateData.priceType = PriceType.FIXED;
+      }
+    }
     
     Object.assign(membership, updateData);
-    console.log('[MembershipsService] Membership after assign:', membership);
-
     const updatedMembership = await this.membershipRepository.save(membership);
-    console.log('[MembershipsService] Membership saved');
 
     // Si hay nuevos horarios, eliminar los antiguos y guardar los nuevos
     if (accessSchedules && accessSchedules.length > 0) {
-      console.log('[MembershipsService] Updating access schedules:', accessSchedules);
-      
       // Eliminar horarios antiguos
       await this.accessScheduleRepository.delete({ membershipId: id });
-      console.log('[MembershipsService] Old schedules deleted');
       
       // Crear nuevos horarios
       const schedules = accessSchedules.map(schedule => 
@@ -172,8 +181,7 @@ export class MembershipsService {
         })
       );
 
-      const saved = await this.accessScheduleRepository.save(schedules);
-      console.log('[MembershipsService] Access schedules saved:', saved);
+      await this.accessScheduleRepository.save(schedules);
       
       // Retornar membresía con horarios actualizados
       const membershipWithSchedules = await this.membershipRepository.findOne({
@@ -181,8 +189,6 @@ export class MembershipsService {
         relations: ['accessSchedules'],
       });
       return membershipWithSchedules || updatedMembership;
-    } else {
-      console.log('[MembershipsService] No access schedules to update');
     }
 
     return updatedMembership;
@@ -202,8 +208,8 @@ export class MembershipsService {
   }
 
   // Member Membership Operations
-  async assignMembership(assignMembershipDto: AssignMembershipDto): Promise<MemberMembership> {
-    let { memberId, membershipId, startDate, endDate, amountPaid, paymentDate } = assignMembershipDto;
+  async assignMembership(assignMembershipDto: AssignMembershipDto, userId?: string): Promise<MemberMembership> {
+    let { memberId, membershipId, startDate, endDate, payAmount, paymentDate } = assignMembershipDto;
 
     // Sanitizar memberId por si acaso viene como objeto
     if (typeof memberId === 'object' && memberId !== null) {
@@ -286,39 +292,42 @@ export class MembershipsService {
 
     const parsedPaymentDate = paymentDate ? new Date(paymentDate) : undefined;
 
-    console.log(`[MembershipsService] Creando membresía: memberId=${member.id}, membershipId=${membershipId}, amountPaid=${amountPaid}`);
+    console.log(`[MembershipsService] Creando membresía: memberId=${member.id}, membershipId=${membershipId}`);
 
-    // Crear y guardar directamente (sin paymentStatus - se calcula dinámicamente desde Payment)
-    const newMemberMembership = this.memberMembershipRepository.create({
-      id: uuidv4(),
-      memberId: member.id,
-      membershipId: membershipId as any,
-      startDate: start,
-      endDate: end,
-      amountPaid: (amountPaid as any) || null,
-      paymentDate: (parsedPaymentDate as any) || null,
-      isRecurring: updatedMembership.isRecurring !== false ? true : false,
-      isActive: true,
-    });
+    // 🆕 Crear Payment PRIMERO
+    const payment = new Payment();
+    payment.id = uuidv4();
+    payment.amount = (payAmount || updatedMembership.price) as any;
+    payment.dueDate = end;
+    if (payAmount && parsedPaymentDate) {
+      payment.status = PaymentStatus.COMPLETED;
+      payment.paymentDate = parsedPaymentDate;
+    } else {
+      payment.status = PaymentStatus.PENDING;
+      payment.paymentDate = null;
+    }
+    payment.paymentMethod = PaymentMethod.CASH;
+    payment.paymentType = PaymentType.MEMBERSHIP;
+    payment.createdBy = userId || null;
+    payment.updatedBy = userId || null;
+    
+    const savedPayment = await this.paymentRepository.save(payment);
+    console.log(`[MembershipsService] Pago registrado: ${savedPayment.id} - Estado: ${payment.status}`);
+
+    // Crear y guardar memberMembership con paymentId
+    const newMemberMembership = new MemberMembership();
+    newMemberMembership.id = uuidv4();
+    newMemberMembership.memberId = member.id;
+    newMemberMembership.membershipId = membershipId as any;
+    newMemberMembership.startDate = start;
+    newMemberMembership.endDate = end;
+    newMemberMembership.isRecurring = updatedMembership.isRecurring !== false ? true : false;
+    newMemberMembership.isActive = true;
+    newMemberMembership.paymentId = savedPayment.id;
+    newMemberMembership.payAmount = (payAmount || updatedMembership.price) as any; // Costo de la membresía
 
     const result = await this.memberMembershipRepository.save(newMemberMembership);
     console.log(`[MembershipsService] Membresía insertada con ID: ${result.id}`);
-
-    // Crear registro en tabla payments (completado o pendiente) - para historial
-    const payment = new Payment();
-    payment.id = uuidv4();
-    payment.memberId = member.id;
-    payment.memberMembershipId = result.id;
-    payment.amount = (amountPaid || updatedMembership.price) as any;
-    payment.paymentDate = parsedPaymentDate || new Date();
-    payment.dueDate = end;
-    payment.status = amountPaid && parsedPaymentDate ? PaymentStatus.COMPLETED : PaymentStatus.PENDING;
-    payment.paymentMethod = PaymentMethod.CASH;
-    payment.paymentType = PaymentType.MEMBERSHIP;
-    
-    await this.paymentRepository.save(payment);
-    console.log(`[MembershipsService] Pago registrado: ${payment.id} - Estado: ${payment.status}`);
-    
 
     // Recuperar el registro con relaciones para retornar
     const saved = await this.memberMembershipRepository.findOne({
@@ -342,7 +351,8 @@ export class MembershipsService {
     return memberMembership;
   }
 
-  async renewMembership(membershipId: string, renewMembershipDto: RenewMembershipDto): Promise<MemberMembership> {
+  async renewMembership(membershipId: string, renewMembershipDto: RenewMembershipDto, userId?: string): Promise<MemberMembership> {
+    console.log(`[MEMBERSHIPS_SERVICE] renewMembership called with userId:`, userId);
     const currentMembership = await this.memberMembershipRepository.findOne({
       where: { id: membershipId, isActive: true },
       relations: ['membership'],
@@ -410,22 +420,41 @@ export class MembershipsService {
     }
 
     const finalAmount = membershipPrice - discountAmount;
-    const finalAmountPaid = renewMembershipDto.amountPaid ?? finalAmount;
+    const finalAmountPaid = renewMembershipDto.payAmount ?? finalAmount;
 
-    const newMembership = this.memberMembershipRepository.create({
-      id: uuidv4(),
-      memberId: currentMembership.memberId,
-      membershipId: currentMembership.membershipId,
-      startDate: newStartDate,
-      endDate: newEndDate,
-      amountPaid: finalAmountPaid as any,
-      paymentDate: renewMembershipDto.paymentDate as any,
-      isActive: true,
-      appliedPromotionCode: appliedPromotionCode,
-      discountAmount: discountAmount as any,
-      discountPercentage: appliedDiscountPercentage as any,
-      discountReason: renewMembershipDto.discountReason || null,
-    }) as MemberMembership;
+    // 🆕 Crear Payment PRIMERO
+    const renewalPayment = new Payment();
+    renewalPayment.id = uuidv4();
+    renewalPayment.amount = finalAmountPaid as any;
+    renewalPayment.dueDate = newEndDate;
+    if (renewMembershipDto.paymentDate) {
+      renewalPayment.status = PaymentStatus.COMPLETED;
+      renewalPayment.paymentDate = renewMembershipDto.paymentDate;
+    } else {
+      renewalPayment.status = PaymentStatus.PENDING;
+      renewalPayment.paymentDate = null;
+    }
+    renewalPayment.paymentMethod = PaymentMethod.CASH;
+    renewalPayment.paymentType = PaymentType.MEMBERSHIP;
+    renewalPayment.createdBy = userId || null;
+    renewalPayment.updatedBy = userId || null;
+
+    const savedRenewalPayment = await this.paymentRepository.save(renewalPayment);
+
+    // Crear nueva membresía con paymentId
+    const newMembership = new MemberMembership();
+    newMembership.id = uuidv4();
+    newMembership.memberId = currentMembership.memberId;
+    newMembership.membershipId = currentMembership.membershipId;
+    newMembership.startDate = newStartDate;
+    newMembership.endDate = newEndDate;
+    newMembership.isActive = true;
+    newMembership.paymentId = savedRenewalPayment.id;
+    newMembership.payAmount = finalAmountPaid as any; // Costo de la membresía renovada
+    newMembership.appliedPromotionCode = appliedPromotionCode;
+    newMembership.discountAmount = discountAmount as any;
+    newMembership.discountPercentage = appliedDiscountPercentage as any;
+    newMembership.discountReason = renewMembershipDto.discountReason || null;
 
     const savedNewMembership = await this.memberMembershipRepository.save(newMembership);
 
@@ -521,15 +550,15 @@ export class MembershipsService {
     let suspended = 0;
 
     for (const currentMembership of expiredRecurring) {
-      // Verificar si el pago anterior está pendiente (consultando la tabla Payment)
-      const membershipPayment = await this.paymentRepository.findOne({
-        where: {
-          memberMembershipId: currentMembership.id,
-          paymentType: PaymentType.MEMBERSHIP,
-        },
-      });
+      // Verificar si el pago anterior está pendiente (consultando por paymentId)
+      let membershipPayment: Payment | null = null;
+      if (currentMembership.paymentId) {
+        membershipPayment = await this.paymentRepository.findOne({
+          where: { id: currentMembership.paymentId },
+        });
+      }
       
-      const isPending = !membershipPayment || membershipPayment.status === PaymentStatus.PENDING;
+      const isPending = !membershipPayment || (membershipPayment && membershipPayment.status === PaymentStatus.PENDING);
 
       if (isPending) {
         // Calcular días sin pagar
@@ -611,13 +640,15 @@ export class MembershipsService {
    * Registrar pago de membresía pendiente
    */
   async recordPayment(
-    memberMembershipId: string,
+    membershipId: string,
     amountPaid: number,
     paymentDate: Date,
+    userId?: string,
   ): Promise<MemberMembership> {
+    console.log(`[MEMBERSHIPS_SERVICE] recordPayment called with userId:`, userId);
     const membership = await this.memberMembershipRepository.findOne({
-      where: { id: memberMembershipId },
-      relations: ['member', 'membership'],
+      where: { id: membershipId },
+      relations: ['member', 'membership', 'payment'],
     });
 
     if (!membership) {
@@ -630,33 +661,34 @@ export class MembershipsService {
       parsedPaymentDate = new Date(paymentDate);
     }
 
-    membership.amountPaid = amountPaid;
-    membership.paymentDate = parsedPaymentDate;
+    // Actualizar el registro en la tabla payments (cambiar de PENDING a COMPLETED)
+    if (membership.paymentId) {
+      const existingPayment = await this.paymentRepository.findOne({
+        where: { id: membership.paymentId },
+      });
 
-    // Actualizar el registro existente en la tabla payments (cambiar de PENDING a COMPLETED)
-    const existingPayment = await this.paymentRepository.findOne({
-      where: { memberMembershipId: memberMembershipId },
-    });
-
-    if (existingPayment) {
-      console.log(`[MembershipsService] Actualizando pago existente: ${existingPayment.id}`);
-      existingPayment.amount = amountPaid as any;
-      existingPayment.paymentDate = parsedPaymentDate;
-      existingPayment.status = PaymentStatus.COMPLETED;
-      await this.paymentRepository.save(existingPayment);
-      console.log(`[MembershipsService] Pago actualizado a COMPLETED`);
+      if (existingPayment) {
+        console.log(`[MembershipsService] Actualizando pago existente: ${existingPayment.id}`);
+        existingPayment.amount = amountPaid as any;
+        existingPayment.paymentDate = parsedPaymentDate;
+        existingPayment.status = PaymentStatus.COMPLETED;
+        await this.paymentRepository.save(existingPayment);
+        console.log(`[MembershipsService] Pago actualizado a COMPLETED`);
+      }
     } else {
-      console.log(`[MembershipsService] No se encontró pago previo, creando uno nuevo`);
+      console.log(`[MembershipsService] No se encontró paymentId, creando pago nuevo`);
       const payment = new Payment();
       payment.id = uuidv4();
-      payment.memberId = membership.memberId;
-      payment.memberMembershipId = memberMembershipId;
       payment.amount = amountPaid as any;
       payment.paymentDate = parsedPaymentDate;
       payment.status = PaymentStatus.COMPLETED;
       payment.paymentMethod = PaymentMethod.CASH;
       payment.paymentType = PaymentType.MEMBERSHIP;
-      await this.paymentRepository.save(payment);
+      payment.createdBy = userId || null;
+      payment.updatedBy = userId || null;
+      const savedPayment = await this.paymentRepository.save(payment);
+      // Asignar paymentId a la membresía
+      membership.paymentId = savedPayment.id;
     }
 
     const savedMembership = await this.memberMembershipRepository.save(membership);
@@ -738,9 +770,7 @@ export class MembershipsService {
       .leftJoinAndSelect('mm.member', 'member')
       .leftJoinAndSelect('member.user', 'user')
       .leftJoinAndSelect('mm.membership', 'membership')
-      .leftJoin('payments', 'p', 'p.memberMembershipId = mm.id AND p.paymentType = :paymentType', { paymentType: PaymentType.MEMBERSHIP })
-      .where('(p.id IS NULL OR p.status = :pendingStatus)', { pendingStatus: PaymentStatus.PENDING })
-      .andWhere('mm.membershipType IN (:...allowedTypes)', { allowedTypes: ['individual', 'responsible'] });
+      .where('mm.membershipType IN (:...allowedTypes)', { allowedTypes: ['individual', 'responsible'] });
 
     if (daysOverdue) {
       const cutoffDate = new Date();
@@ -772,9 +802,9 @@ export class MembershipsService {
   /**
    * Remover membresía de un miembro (busca la más reciente, activa o no)
    */
-  async removeMembership(memberMembershipId: string): Promise<void> {
+  async removeMembership(membershipId: string): Promise<void> {
     const membership = await this.memberMembershipRepository.findOne({
-      where: { id: memberMembershipId },
+      where: { id: membershipId },
     });
 
     if (!membership) {

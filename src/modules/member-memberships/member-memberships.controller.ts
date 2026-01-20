@@ -9,6 +9,7 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
+  Req,
 } from '@nestjs/common';
 import { MemberMembershipsService } from './member-memberships.service';
 import { CreateMemberMembershipDto } from './dto/create-member-membership.dto';
@@ -95,6 +96,7 @@ export class MemberMembershipsController {
   @HttpCode(HttpStatus.CREATED)
   async assignMembership(
     @Body() dto: CreateMemberMembershipDto,
+    @Req() req: any,
   ) {
     console.log('[MemberMembershipsController] Raw body recibido en assignMembership');
     console.log('[MemberMembershipsController] DTO:', JSON.stringify(dto, null, 2));
@@ -102,15 +104,7 @@ export class MemberMembershipsController {
     console.log('[MemberMembershipsController] memberId:', dto.memberId);
     console.log('[MemberMembershipsController] membershipId:', dto.membershipId);
     console.log('[MemberMembershipsController] startDate:', dto.startDate);
-    console.log('[MemberMembershipsController] endDate:', dto.endDate);
-    
-    const memberMembership =
-      await this.memberMembershipsService.assignMembership(dto.memberId, dto);
-
-    return {
-      data: memberMembership,
-      message: 'Membresía asignada exitosamente',
-    };
+    return this.memberMembershipsService.assignMembership(dto, req.user?.userId);
   }
 
   /**

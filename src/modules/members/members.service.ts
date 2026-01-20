@@ -29,7 +29,182 @@ export class MembersService {
     private gymSettingsService: GymSettingsService,
   ) {}
 
-  async create(createMemberDto: CreateMemberDto): Promise<Member> {
+  /**
+   * Calcula si un miembro tiene membresía activa consultando la tabla member_memberships
+   */
+  async calculateHasMembership(memberId: string): Promise<boolean> {
+    const activeMembership = await this.memberMembershipRepository.findOne({
+      where: {
+        memberId,
+        isActive: true,
+      },
+    });
+    return !!activeMembership;
+  }
+
+  /**
+   * Obtiene el estado del pago de inscripción de un miembro
+   * @param memberId - ID del miembro
+   * @returns Estado del pago y si está pendiente
+   */
+  async getRegistrationPaymentStatus(memberId: string): Promise<{ status: string; hasPendingRegistrationPayment: boolean }> {
+    const member = await this.memberRepository.findOne({ where: { id: memberId } });
+
+    if (!member) {
+      throw new NotFoundException(`Member ${memberId} not found`);
+    }
+
+    if (!member.registrationPaymentId) {
+      return { status: 'NO_PAYMENT', hasPendingRegistrationPayment: false };
+    }
+
+    const payment = await this.paymentRepository.findOne({
+      where: { id: member.registrationPaymentId },
+    });
+
+    if (!payment) {
+      return { status: 'PAYMENT_NOT_FOUND', hasPendingRegistrationPayment: false };
+    }
+    console.log(`[MembersService] Member ${memberId} registration payment status: ${payment.status}`);
+    return {
+      status: payment.status, 
+      hasPendingRegistrationPayment: payment.status === PaymentStatus.PENDING 
+    };
+  }
+
+  /**
+   * Obtiene si un miembro tiene cuota de membresía pendiente
+   * @param memberId - ID del miembro
+   * @returns Si hay pago de membresía pendiente
+   */
+  async hasMembershipPaymentPending(memberId: string): Promise<{ hasPendingMembershipPayment: boolean }> {
+    const member = await this.memberRepository.findOne({ where: { id: memberId } });
+
+    if (!member) {
+      throw new NotFoundException(`Member ${memberId} not found`);
+    }
+
+    const pendingPayment = await this.paymentRepository
+      .createQueryBuilder('payment')
+      .innerJoin('member_memberships', 'mm', 'mm.paymentId = payment.id')
+      .where('mm.memberId = :memberId', { memberId })
+      .andWhere('payment.paymentType = :paymentType', { paymentType: PaymentType.MEMBERSHIP })
+      .andWhere('payment.status = :status', { status: PaymentStatus.PENDING })
+      .getOne();
+
+    return { hasPendingMembershipPayment: !!pendingPayment };
+  }
+
+  /**
+   * DEBUG ENDPOINT: Obtiene información detallada sobre pagos de un miembro
+   * Útil para diagnosticar problemas con pagos que no se completan
+   * @param memberId - ID del miembro
+   */
+  async debugPaymentStatus(memberId: string) {
+    console.log(`\n[MembersService DEBUG] ==================== DIAGNOSTIC FOR MEMBER ${memberId} ====================`);
+    
+    try {
+      const member = await this.memberRepository.findOne({ where: { id: memberId }, relations: ['user'] });
+      if (!member) {
+        console.log(`[MembersService DEBUG] ❌ Member not found`);
+        return { error: 'Member not found' };
+      }
+
+      console.log(`[MembersService DEBUG] ✓ Member found: ${member.user?.email || 'N/A'}`);
+      console.log(`[MembersService DEBUG] ✓ Registration Payment ID: ${member.registrationPaymentId}`);
+
+      // 1. Check registration payment
+      console.log(`[MembersService DEBUG] \n--- REGISTRATION PAYMENT ---`);
+      if (member.registrationPaymentId) {
+        const regPayment = await this.paymentRepository.findOne({
+          where: { id: member.registrationPaymentId },
+        });
+        if (regPayment) {
+          console.log(`[MembersService DEBUG] ✓ Registration Payment:
+          - ID: ${regPayment.id}
+          - Amount: $${regPayment.amount}
+          - Status: ${regPayment.status}
+          - PaymentDate: ${regPayment.paymentDate}
+          - PaymentType: ${regPayment.paymentType}`);
+        } else {
+          console.log(`[MembersService DEBUG] ❌ Registration payment not found in database`);
+        }
+      } else {
+        console.log(`[MembersService DEBUG] ⚠️  No registration payment ID linked to member`);
+      }
+
+      // 2. Check membership payments
+      console.log(`[MembersService DEBUG] \n--- MEMBERSHIP PAYMENTS ---`);
+      const membershipPayments = await this.paymentRepository
+        .createQueryBuilder('payment')
+        .innerJoin('member_memberships', 'mm', 'mm.paymentId = payment.id')
+        .where('mm.memberId = :memberId', { memberId })
+        .andWhere('payment.paymentType = :paymentType', { paymentType: PaymentType.MEMBERSHIP })
+        .orderBy('payment.createdAt', 'DESC')
+        .getMany();
+
+      if (membershipPayments.length === 0) {
+        console.log(`[MembersService DEBUG] ⚠️  No membership payments found`);
+      } else {
+        console.log(`[MembersService DEBUG] ✓ Found ${membershipPayments.length} membership payment(s):`);
+        membershipPayments.forEach((payment, index) => {
+          console.log(`
+          Payment ${index + 1}:
+          - ID: ${payment.id}
+          - Amount: $${payment.amount}
+          - Status: ${payment.status}
+          - PaymentDate: ${payment.paymentDate}
+          - DueDate: ${payment.dueDate}
+          - CreatedAt: ${payment.createdAt}`);
+        });
+      }
+
+      // 3. Check active membership
+      console.log(`[MembersService DEBUG] \n--- ACTIVE MEMBERSHIP ---`);
+      const memberWithMemberships = await this.memberRepository.findOne({
+        where: { id: memberId },
+        relations: ['memberships'],
+      });
+
+      const activeMemberships = memberWithMemberships?.memberships?.filter(mm => !mm.endDate) || [];
+      if (activeMemberships.length > 0) {
+        activeMemberships.forEach((mm, index) => {
+          console.log(`
+          Active Membership ${index + 1}:
+          - ID: ${mm.id}
+          - PaymentID: ${mm.paymentId}
+          - Amount: $${mm.payAmount}
+          - StartDate: ${mm.startDate}
+          - EndDate: ${mm.endDate}`);
+        });
+      } else {
+        console.log(`[MembersService DEBUG] ⚠️  No active membership found`);
+      }
+
+      console.log(`[MembersService DEBUG] ==================== END DIAGNOSTIC ====================\n`);
+
+      return {
+        memberId,
+        memberEmail: member.user?.email || 'N/A',
+        registrationPayment: member.registrationPaymentId ? {
+          exists: true,
+          id: member.registrationPaymentId,
+        } : { exists: false },
+        membershipPaymentsCount: membershipPayments.length,
+        membershipPayments: membershipPayments.map(p => ({
+          id: p.id,
+          amount: p.amount,
+          status: p.status,
+          paymentDate: p.paymentDate,
+        })),
+      };
+    } catch (error) {
+      console.log(`[MembersService DEBUG] ❌ Error during diagnostic: ${error.message}`);
+      return { error: error.message };
+    }
+  }
+
+  async create(createMemberDto: CreateMemberDto, userId?: string): Promise<Member> {
     // Verify user exists
     const user = await this.userRepository.findOne({
       where: { id: createMemberDto.userId },
@@ -78,9 +253,6 @@ export class MembersService {
       city: createMemberDto.city,
       zipCode: createMemberDto.zipCode,
       joinDate: createMemberDto.joinDate ? new Date(createMemberDto.joinDate) : new Date(),
-      isPaid: createMemberDto.isPaid ?? false,
-      hasMembership: createMemberDto.hasMembership ?? false,
-      hasPendingPayment: createMemberDto.hasPendingPayment ?? false,
     };
 
     // lastVisit solo si está presente
@@ -98,21 +270,30 @@ export class MembersService {
 
       console.log(`[MembersService] 🏋️ Creating registration payment with price: $${registrationPrice}`);
 
+      // Si el precio es 0, el pago es COMPLETED inmediatamente
+      const isAutoCompleted = registrationPrice === 0;
       const registrationPayment = this.paymentRepository.create({
         id: uuidv4(),
-        memberId: savedMember.id,
-        member: savedMember,
         amount: registrationPrice,
         paymentType: PaymentType.REGISTRATION,
-        status: registrationPrice === 0 ? PaymentStatus.COMPLETED : PaymentStatus.PENDING,
+        status: isAutoCompleted ? PaymentStatus.COMPLETED : PaymentStatus.PENDING,
         description: 'Pago de inscripción',
         paymentMethod: PaymentMethod.CASH,
-        paymentDate: registrationPrice === 0 ? new Date() : null,
+        paymentDate: isAutoCompleted ? new Date() : null,
+        createdBy: userId || null,
+        updatedBy: userId || null,
       });
 
       const createdPayment = await this.paymentRepository.save(registrationPayment);
-      console.log(`[MembersService] 💳 Registration payment created: ID=${createdPayment.id}, Amount=$${registrationPrice}, Status=${createdPayment.status}`);
-      this.logger.log(`Registration payment created for member ${savedMember.id}: $${registrationPrice}`);
+      console.log(`[MembersService] 💳 Registration payment created: ID=${createdPayment.id}, Amount=$${registrationPrice}, Status=${createdPayment.status}, PaymentDate=${createdPayment.paymentDate}, IsAutoCompleted=${isAutoCompleted}`);
+      
+      // Actualizar el miembro con el registrationPaymentId
+      await this.memberRepository.update(
+        { id: savedMember.id },
+        { registrationPaymentId: createdPayment.id }
+      );
+      
+      this.logger.log(`Registration payment created for member ${savedMember.id}: $${registrationPrice}, Status: ${createdPayment.status}, AutoCompleted: ${isAutoCompleted}`);
     } catch (paymentError) {
       console.error(`[MembersService] ❌ Failed to create registration payment: ${paymentError.message}`);
       this.logger.error(`Failed to create registration payment for member ${savedMember.id}`, paymentError);
@@ -246,7 +427,7 @@ export class MembersService {
         'member.zipCode',
         'member.joinDate',
         'member.lastVisit',
-        'member.isPaid',
+        'member.registrationPaymentId',
         'member.createdAt',
         'member.updatedAt',
         'user',
@@ -273,24 +454,24 @@ export class MembersService {
         const memberships = member.memberships || [];
         
         if (memberships.length === 0) {
-          console.log(`[MembersService] Miembro ${member.id}: SIN MEMBRESÍAS → hasMembership=false`);
+          console.log(`[MembersService] Miembro ${member.id}: SIN MEMBRESÍAS`);
+          
+          // Calcular dinámicamente si tiene membresía activa
+          const hasMembership = await this.calculateHasMembership(member.id);
           
           // Verificar si hay pago de inscripción pendiente
-          const pendingRegistrationPayment = await this.paymentRepository.findOne({
-            where: {
-              memberId: member.id,
-              paymentType: PaymentType.REGISTRATION,
-              status: PaymentStatus.PENDING,
-            },
-          });
+          const pendingRegistrationPayment = await this.paymentRepository
+            .createQueryBuilder('payment')
+            .innerJoin(MemberMembership, 'mm', 'mm.paymentId = payment.id')
+            .where('mm.memberId = :memberId', { memberId: member.id })
+            .andWhere('payment.paymentType = :paymentType', { paymentType: PaymentType.REGISTRATION })
+            .andWhere('payment.status = :status', { status: PaymentStatus.PENDING })
+            .getOne();
           
           const mapped = {
             ...member,
             currentMembership: null,
-            hasMembership: false,
-            hasPendingPayment: !!pendingRegistrationPayment,
-            hasRegistrationPaymentPending: !!pendingRegistrationPayment,
-            hasMembershipPaymentPending: false,
+            hasMembership,
             isMembershipSuspended: false,
           };
           return mapped;
@@ -305,14 +486,15 @@ export class MembersService {
         
         // Calcular si el pago está pendiente verificando directamente en la tabla Payment
         let isPending = true;
-        const membershipPayment = await this.paymentRepository.findOne({
-          where: {
-            memberMembershipId: mostRecent.id,
-            paymentType: PaymentType.MEMBERSHIP,
-          },
-        });
+        const membershipPayment = await this.paymentRepository
+          .createQueryBuilder('payment')
+          .innerJoin(MemberMembership, 'mm', 'mm.paymentId = payment.id')
+          .where('mm.memberId = :memberId', { memberId: member.id })
+          .andWhere('payment.paymentType = :paymentType', { paymentType: PaymentType.MEMBERSHIP })
+          .andWhere('payment.status = :status', { status: PaymentStatus.PENDING })
+          .getOne();
         
-        if (membershipPayment && membershipPayment.status === PaymentStatus.COMPLETED) {
+        if (!membershipPayment) {
           isPending = false;
         }
         
@@ -349,13 +531,14 @@ export class MembersService {
           }
           
           if (responsibleMembership) {
-            const responsiblePayment = await this.paymentRepository.findOne({
-              where: {
-                memberMembershipId: responsibleMembership.id,
-                paymentType: PaymentType.MEMBERSHIP,
-              },
-            });
-            if (responsiblePayment && responsiblePayment.status === PaymentStatus.COMPLETED) {
+            const responsiblePayment = await this.paymentRepository
+              .createQueryBuilder('payment')
+              .innerJoin(MemberMembership, 'mm', 'mm.paymentId = payment.id')
+              .where('mm.memberId = :memberId', { memberId: responsibleMembership.memberId })
+              .andWhere('payment.paymentType = :paymentType', { paymentType: PaymentType.MEMBERSHIP })
+              .andWhere('payment.status = :status', { status: PaymentStatus.PENDING })
+              .getOne();
+            if (!responsiblePayment) {
               isPending = false;
             }
           }
@@ -392,45 +575,41 @@ export class MembersService {
 
         // Verificar si la membresía está suspendida por falta de pago
         // Usar directamente el Payment para determinar suspensión
-        const missedPaymentsCount = await this.paymentRepository.count({
-          where: {
-            memberMembershipId: mostRecent.id,
-            status: PaymentStatus.PENDING,
-            paymentType: PaymentType.MEMBERSHIP,
-          },
-        });
+        const missedPaymentsCount = await this.paymentRepository
+          .createQueryBuilder('payment')
+          .innerJoin(MemberMembership, 'mm', 'mm.paymentId = payment.id')
+          .where('mm.memberId = :memberId', { memberId: member.id })
+          .andWhere('payment.status = :status', { status: PaymentStatus.PENDING })
+          .andWhere('payment.paymentType = :paymentType', { paymentType: PaymentType.MEMBERSHIP })
+          .getCount();
         
-        const isMembershipSuspended = 
+        const isMembershipSuspended =
           missedPaymentsCount > 0 && 
           mostRecent.suspensionDate !== null;
 
         // Verificar si hay pago de inscripción pendiente (además del pago de membresía)
-        const pendingRegistrationPayment = await this.paymentRepository.findOne({
-          where: {
-            memberId: member.id,
-            paymentType: PaymentType.REGISTRATION,
-            status: PaymentStatus.PENDING,
-          },
-        });
+        const pendingRegistrationPayment = await this.paymentRepository
+          .createQueryBuilder('payment')
+          .innerJoin(MemberMembership, 'mm', 'mm.paymentId = payment.id')
+          .where('mm.memberId = :memberId', { memberId: member.id })
+          .andWhere('payment.paymentType = :paymentType', { paymentType: PaymentType.REGISTRATION })
+          .andWhere('payment.status = :status', { status: PaymentStatus.PENDING })
+          .getOne();
 
         // Verificar si hay pago de membresía pendiente (basándose en la tabla Payment, no en MemberMembership)
-        const pendingMembershipPayment = await this.paymentRepository.findOne({
-          where: {
-            memberId: member.id,
-            memberMembershipId: mostRecent.id,
-            paymentType: PaymentType.MEMBERSHIP,
-            status: PaymentStatus.PENDING,
-          },
-        });
+        const pendingMembershipPayment = await this.paymentRepository
+          .createQueryBuilder('payment')
+          .innerJoin(MemberMembership, 'mm', 'mm.paymentId = payment.id')
+          .where('mm.memberId = :memberId', { memberId: member.id })
+          .andWhere('payment.paymentType = :paymentType', { paymentType: PaymentType.MEMBERSHIP })
+          .andWhere('payment.status = :status', { status: PaymentStatus.PENDING })
+          .getOne();
 
         const mapped = {
           ...member,
           memberships: sortedMemberships,
           currentMembership: mostRecent,
-          hasMembership: true,
-          hasPendingPayment: isPending,
-          hasRegistrationPaymentPending: !!pendingRegistrationPayment,
-          hasMembershipPaymentPending: !!pendingMembershipPayment,
+          hasMembership: mostRecent.isActive,
           membershipType: mostRecent.membershipType,
           membershipStatusLabel,
           isMembershipSuspended,
@@ -463,38 +642,16 @@ export class MembersService {
     }
 
     // Calcular hasRegistrationPaymentPending y hasMembershipPaymentPending
-    const pendingRegistrationPayment = await this.paymentRepository.findOne({
-      where: {
-        memberId: id,
-        paymentType: PaymentType.REGISTRATION,
-        status: PaymentStatus.PENDING,
-      },
-    });
-
-    let hasMembershipPaymentPending = false;
-    const memberships = member.memberships || [];
-    
-    if (memberships.length > 0) {
-      const mostRecent = memberships.sort(
-        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-      )[0];
-      // Verificar directamente en Payment si hay pago pendiente
-      const pendingMembershipPayment = await this.paymentRepository.findOne({
-        where: {
-          memberId: id,
-          memberMembershipId: mostRecent.id,
-          paymentType: PaymentType.MEMBERSHIP,
-          status: PaymentStatus.PENDING,
-        },
-      });
-      hasMembershipPaymentPending = !!pendingMembershipPayment;
-    }
+    const pendingRegistrationPayment = await this.paymentRepository
+      .createQueryBuilder('payment')
+      .innerJoin(MemberMembership, 'mm', 'mm.paymentId = payment.id')
+      .where('mm.memberId = :memberId', { memberId: id })
+      .andWhere('payment.paymentType = :paymentType', { paymentType: PaymentType.REGISTRATION })
+      .andWhere('payment.status = :status', { status: PaymentStatus.PENDING })
+      .getOne();
 
     const result = {
       ...member,
-      hasRegistrationPaymentPending: !!pendingRegistrationPayment,
-      hasMembershipPaymentPending,
-      hasPendingPayment: !!pendingRegistrationPayment || hasMembershipPaymentPending,
     };
 
     return result as unknown as Member;
@@ -522,15 +679,53 @@ export class MembersService {
   }
 
   async removeMemberships(id: string): Promise<{ message: string }> {
-    // 1. Eliminar el acompañante del grupo (group_companions table)
-    await this.memberRepository.manager.connection
+    // 1. Marcar todos los pagos pendientes como CANCELLED
+    const pendingPayments = await this.paymentRepository
+      .createQueryBuilder('payment')
+      .innerJoin(MemberMembership, 'mm', 'mm.paymentId = payment.id')
+      .where('mm.memberId = :memberId', { memberId: id })
+      .andWhere('payment.status = :status', { status: PaymentStatus.PENDING })
+      .getMany();
+    
+    if (pendingPayments.length > 0) {
+      const paymentIds = pendingPayments.map(p => p.id);
+      await this.paymentRepository.update(
+        { id: paymentIds.length === 1 ? paymentIds[0] : undefined },
+        {
+          status: PaymentStatus.CANCELLED,
+        },
+      );
+    }
+
+    // 2. Obtener los grupos donde este miembro es acompañante para decrementar el contador
+    const companions = await this.memberRepository.manager.connection
+      .createQueryBuilder()
+      .select('group_companions.groupId', 'groupId')
+      .from('group_companions', 'group_companions')
+      .where('group_companions.memberId = :memberId', { memberId: id })
+      .getRawMany();
+
+    // 3. Eliminar el acompañante del grupo (group_companions table)
+    const deleteResult = await this.memberRepository.manager.connection
       .createQueryBuilder()
       .delete()
       .from('group_companions')
       .where('memberId = :memberId', { memberId: id })
       .execute();
+
+    // 4. Decrementar el contador de acompañantes en cada grupo
+    if (companions && companions.length > 0) {
+      for (const companion of companions) {
+        await this.memberRepository.manager.connection
+          .createQueryBuilder()
+          .update('groups')
+          .set({ companionCount: () => 'companionCount - 1' })
+          .where('id = :groupId', { groupId: companion.groupId })
+          .execute();
+      }
+    }
     
-    // 2. Eliminar todas las membresías del miembro (pero mantener el miembro mismo)
+    // 5. Eliminar todas las membresías del miembro (pero mantener el miembro mismo)
     await this.memberMembershipRepository.delete({ memberId: id });
     
     return { message: 'Memberships and companions removed successfully' };
@@ -569,50 +764,6 @@ export class MembersService {
       .take(limit)
       .orderBy('member.createdAt', 'DESC')
       .getManyAndCount();
-
-    return {
-      data,
-      pagination: {
-        page,
-        limit,
-        total,
-        pages: Math.ceil(total / limit),
-      },
-    };
-  }
-
-  async getPaidMembers(page: number = 1, limit: number = 10): Promise<{ data: Member[]; pagination: any }> {
-    const skip = (page - 1) * limit;
-
-    const [data, total] = await this.memberRepository.findAndCount({
-      where: { isPaid: true },
-      relations: ['user'],
-      skip,
-      take: limit,
-      order: { createdAt: 'DESC' },
-    });
-
-    return {
-      data,
-      pagination: {
-        page,
-        limit,
-        total,
-        pages: Math.ceil(total / limit),
-      },
-    };
-  }
-
-  async getUnpaidMembers(page: number = 1, limit: number = 10): Promise<{ data: Member[]; pagination: any }> {
-    const skip = (page - 1) * limit;
-
-    const [data, total] = await this.memberRepository.findAndCount({
-      where: { isPaid: false },
-      relations: ['user'],
-      skip,
-      take: limit,
-      order: { createdAt: 'DESC' },
-    });
 
     return {
       data,

@@ -1,10 +1,8 @@
 import { IsString, IsOptional, IsNumber, IsEnum, IsDate } from 'class-validator';
+import { Type } from 'class-transformer';
 import { PaymentMethod, PaymentStatus, PaymentType } from '../../../entities/payment.entity';
 
 export class CreatePaymentDto {
-  @IsString()
-  memberId: string;
-
   @IsNumber()
   amount: number;
 
@@ -99,8 +97,6 @@ export class UpdatePaymentDto {
 
 export class PaymentResponseDto {
   id: string;
-  member: any;
-  memberId: string;
   amount: number;
   paymentMethod: PaymentMethod;
   status: PaymentStatus;
@@ -113,6 +109,17 @@ export class PaymentResponseDto {
   dueDate?: Date | null;
   discount: number;
   tax?: number;
+  createdBy?: string | null;
+  updatedBy?: string | null;
   createdAt: Date;
   updatedAt: Date;
+}
+
+export class UpdatePaymentStatusDto {
+  @IsEnum(PaymentStatus)
+  status: PaymentStatus;
+
+  @IsOptional()
+  @IsString()
+  paymentDate?: string; // Recibir como ISO8601 string y convertir a Date
 }
