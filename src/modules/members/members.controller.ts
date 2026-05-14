@@ -30,7 +30,7 @@ export class MembersController {
   @Get()
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
-  async findAll(@Query('page') page: string = '1', @Query('limit') limit: string = '10') {
+  async findAll(@Query('page') page: string = '1', @Query('limit') limit: string = '20') {
     const result = await this.membersService.findAll(parseInt(page), parseInt(limit));
     
     return {
@@ -44,7 +44,7 @@ export class MembersController {
   async search(
     @Query('q') query: string,
     @Query('page') page: string = '1',
-    @Query('limit') limit: string = '10',
+    @Query('limit') limit: string = '500',
   ) {
     return this.membersService.search(query, parseInt(page), parseInt(limit));
   }

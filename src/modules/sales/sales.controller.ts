@@ -99,7 +99,7 @@ export class SalesController {
   }
 
   @Get('date-range/:startDate/:endDate')
-  @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO)
+  @Public()
   async getSalesByDateRange(
     @Param('startDate') startDate: string,
     @Param('endDate') endDate: string,

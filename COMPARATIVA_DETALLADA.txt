@@ -1,0 +1,9 @@
+COMPARATIVA: ACCESS vs MYSQL
+================================================================================================================================================================
+
+Usuarios:       Access 562 vs MySQL 0
+Asistencia:     Access 4,231 vs MySQL 0
+Facturas:       Access 3,822 vs MySQL 0
+Productos:      Access 43 vs MySQL 0
+
+Estado: MySQL ESTÁ COMPLETAMENTE VACÍO

@@ -35,6 +35,7 @@ import { CronExecutionLog } from './modules/email-settings/entities/cron-executi
 import { Table } from './entities/table.entity';
 import { TableAccount } from './entities/table-account.entity';
 import { TableAccountItem } from './entities/table-account-item.entity';
+import { AppConfig } from './entities/app-config.entity';
 
 import { AuthModule } from './modules/auth/auth.module';
 import { EmailSettingsModule } from './modules/email-settings/email-settings.module';
@@ -62,6 +63,7 @@ import { CouponsModule } from './modules/coupons/coupons.module';
 import { GroupsModule } from './modules/groups/groups.module';
 import { AttendancesModule } from './modules/attendances/attendances.module';
 import { TablesModule } from './modules/tables/tables.module';
+import { SyncModule } from './modules/sync/sync.module';
 
 import { ErrorHandlingInterceptor, ResponseInterceptor } from './common/interceptors';
 import { ResponseFilterInterceptor } from './modules/auth/interceptors/response-filter.interceptor';
@@ -104,7 +106,7 @@ import { LoggerMiddleware } from './common/middleware';
           username,
           password,
           database,
-          entities: [User, Product, Equipment, Sale, SaleItem, GymSettings, Employee, Member, Membership, MembershipAccessSchedule, MemberMembership, Group, GroupCompanion, GymClass, ClassEnrollment, Payment, Payroll, AuditLog, ModuleSettings, CashRegister, Coupon, Promotion, EmailConfig, EmailTemplate, EmailLog, PaymentReminder, CronExecutionLog, Attendance, Table, TableAccount, TableAccountItem],
+          entities: [User, Product, Equipment, Sale, SaleItem, GymSettings, Employee, Member, Membership, MembershipAccessSchedule, MemberMembership, Group, GroupCompanion, GymClass, ClassEnrollment, Payment, Payroll, AuditLog, ModuleSettings, CashRegister, Coupon, Promotion, EmailConfig, EmailTemplate, EmailLog, PaymentReminder, CronExecutionLog, Attendance, Table, TableAccount, TableAccountItem, AppConfig],
           synchronize: true,
           logging: false,
         };
@@ -141,6 +143,7 @@ import { LoggerMiddleware } from './common/middleware';
     GroupsModule,
     AttendancesModule,
     TablesModule,
+    SyncModule,
   ],
   controllers: [],
   providers: [

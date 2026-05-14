@@ -1,0 +1,2 @@
+DEPTID,DEPTNAME,SUPDEPTID,InheritParentSch,InheritDeptSch,InheritDeptSchClass,AutoSchPlan,InLate,OutEarly,InheritDeptRule,MinAutoSchInterval,RegisterOT,DefaultSchId,ATT,Holiday,OverTime,change_operator,change_time,create_operator,create_time,delete_operator,delete_time,status,code,type,invalidate
+1,Company Name,0,,,,,,,,,,,,,,,,,,,,,1,,
