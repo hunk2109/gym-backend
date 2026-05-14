@@ -1,9 +1,10 @@
 import { Module, NestModule, MiddlewareConsumer, RequestMethod } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { APP_INTERCEPTOR } from '@nestjs/core';
+import * as mysql from 'mysql2/promise';
 
 import { User } from './entities/user.entity';
 import { Product } from './entities/product.entity';
@@ -72,16 +73,42 @@ import { LoggerMiddleware } from './common/middleware';
       isGlobal: true,
       envFilePath: '.env',
     }),
-    TypeOrmModule.forRoot({
-      type: 'mysql',
-      host: process.env.DB_HOST || 'localhost',
-      port: parseInt(process.env.DB_PORT || '3306'),
-      username: process.env.DB_USERNAME || 'root',
-      password: process.env.DB_PASSWORD || 'password',
-      database: process.env.DB_NAME || 'gym_manager',
-      entities: [User, Product, Equipment, Sale, SaleItem, GymSettings, Employee, Member, Membership, MembershipAccessSchedule, MemberMembership, Group, GroupCompanion, GymClass, ClassEnrollment, Payment, Payroll, AuditLog, ModuleSettings, CashRegister, Coupon, Promotion, EmailConfig, EmailTemplate, EmailLog, PaymentReminder, CronExecutionLog, Attendance, Table, TableAccount, TableAccountItem],
-      synchronize: true,
-      logging: false,
+    TypeOrmModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: async (configService: ConfigService) => {
+        const host = configService.get('DB_HOST') || 'localhost';
+        const port = parseInt(configService.get('DB_PORT') || '3306');
+        const username = configService.get('DB_USERNAME') || 'root';
+        const password = configService.get('DB_PASSWORD') || 'password';
+        const database = configService.get('DB_NAME') || 'gym_manager';
+
+        try {
+          const connection = await mysql.createConnection({
+            host,
+            port,
+            user: username,
+            password,
+          });
+
+          await connection.query(`CREATE DATABASE IF NOT EXISTS \`${database}\``);
+          await connection.end();
+        } catch (error) {
+          console.error('Error creating database:', error);
+        }
+
+        return {
+          type: 'mysql',
+          host,
+          port,
+          username,
+          password,
+          database,
+          entities: [User, Product, Equipment, Sale, SaleItem, GymSettings, Employee, Member, Membership, MembershipAccessSchedule, MemberMembership, Group, GroupCompanion, GymClass, ClassEnrollment, Payment, Payroll, AuditLog, ModuleSettings, CashRegister, Coupon, Promotion, EmailConfig, EmailTemplate, EmailLog, PaymentReminder, CronExecutionLog, Attendance, Table, TableAccount, TableAccountItem],
+          synchronize: true,
+          logging: false,
+        };
+      },
     }),
     PassportModule,
     JwtModule.register({
