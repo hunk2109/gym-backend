@@ -8,6 +8,8 @@ import { v4 as uuidv4 } from 'uuid';
 import { User, UserRole } from '../../entities/user.entity';
 import { Product } from '../../entities/product.entity';
 import { Member, MemberGender } from '../../entities/member.entity';
+import { Membership, MembershipType } from '../../entities/membership.entity';
+import { MemberMembership } from '../../entities/member-membership.entity';
 import { Payment, PaymentMethod, PaymentStatus, PaymentType } from '../../entities/payment.entity';
 import { Attendance, AttendanceStatus } from '../../entities/attendance.entity';
 import { ConfigService } from './config.service';
@@ -29,6 +31,10 @@ export class AccessService {
     private productRepository: Repository<Product>,
     @InjectRepository(Member)
     private memberRepository: Repository<Member>,
+    @InjectRepository(Membership)
+    private membershipRepository: Repository<Membership>,
+    @InjectRepository(MemberMembership)
+    private memberMembershipRepository: Repository<MemberMembership>,
     @InjectRepository(Payment)
     private paymentRepository: Repository<Payment>,
     @InjectRepository(Attendance)
@@ -405,6 +411,130 @@ export class AccessService {
   }
 
   /**
+   * Sincroniza membresías de Access a MySQL
+   */
+  async syncMemberships(): Promise<{ inserted: number; updated: number }> {
+    await this.validateAccessDbPath();
+    this.logger.log('Iniciando sincronización de membresías...');
+
+    const query = `
+      SELECT 
+        Num_factura,
+        Fecha_factura,
+        Plan,
+        Dias,
+        Monto,
+        Total_factura,
+        Id_empleado,
+        Id_cliente
+      FROM factura
+      ORDER BY Num_factura
+    `;
+
+    try {
+      const invoices = await this.executeAccessQuery(query);
+      let inserted = 0;
+      let updated = 0;
+
+      // Primero, crear membresías únicas por tipo (Plan)
+      const planesSeen = new Set<string>();
+      const membershipMap = new Map<string, string>(); // Plan -> membershipId
+
+      for (const invoice of invoices) {
+        const plan = invoice.Plan || 'Sin Plan';
+        
+        if (!planesSeen.has(plan)) {
+          planesSeen.add(plan);
+          
+          // Buscar o crear membresía
+          let membership = await this.membershipRepository.findOne({
+            where: { name: plan },
+          });
+
+          if (!membership) {
+            membership = await this.membershipRepository.save({
+              id: uuidv4(),
+              name: plan,
+              description: `Membresía ${plan} importada desde Access`,
+              price: 0, // Se actualiza con cada asignación
+              durationMonths: invoice.Dias ? Math.ceil(invoice.Dias / 30) : 1,
+              durationDays: invoice.Dias || null,
+              benefits: [],
+              type: MembershipType.INDIVIDUAL,
+            });
+            inserted++;
+          }
+          
+          membershipMap.set(plan, membership.id);
+        }
+      }
+
+      // Luego, crear member_memberships (asignaciones)
+      for (const invoice of invoices) {
+        const memberId = `member_${invoice.Id_cliente}`;
+        const membershipId = membershipMap.get(invoice.Plan || 'Sin Plan');
+
+        // Verificar que el miembro exista
+        const member = await this.memberRepository.findOne({
+          where: { id: memberId },
+        });
+
+        if (!member) {
+          this.logger.warn(`Miembro ${memberId} no encontrado, saltando factura ${invoice.Num_factura}`);
+          continue;
+        }
+
+        // Calcular fechas
+        const startDate = new Date(invoice.Fecha_factura);
+        const endDate = new Date(startDate);
+        if (invoice.Dias && invoice.Dias > 0) {
+          endDate.setDate(endDate.getDate() + invoice.Dias);
+        } else {
+          endDate.setMonth(endDate.getMonth() + 1);
+        }
+
+        // Crear o actualizar member_membership
+        const memberMembership = await this.memberMembershipRepository.findOne({
+          where: {
+            memberId,
+            membershipId,
+            startDate,
+          },
+        });
+
+        if (!memberMembership) {
+          await this.memberMembershipRepository.save({
+            id: `${memberId}_${membershipId}_${invoice.Num_factura}`,
+            memberId,
+            membershipId,
+            startDate,
+            endDate,
+            isActive: true,
+            classesUsed: 0,
+            payAmount: invoice.Monto ? parseFloat(String(invoice.Monto)) : 0,
+          });
+          inserted++;
+        } else {
+          await this.memberMembershipRepository.update(
+            { id: memberMembership.id },
+            {
+              endDate,
+              payAmount: invoice.Monto ? parseFloat(String(invoice.Monto)) : 0,
+            }
+          );
+          updated++;
+        }
+      }
+
+      this.logger.log(`Membresías sincronizadas. Insertadas: ${inserted}, Actualizadas: ${updated}`);
+      return { inserted, updated };
+    } catch (error) {
+      this.logger.error(`Error sincronizando membresías: ${error}`);
+      throw error;
+    }
+  }
+
+  /**
    * Ejecuta sincronización completa
    */
   async syncAll() {
@@ -415,6 +545,7 @@ export class AccessService {
       users: await this.syncUsers(),
       products: await this.syncProducts(),
       members: await this.syncMembers(),
+      memberships: await this.syncMemberships(),
       payments: await this.syncPayments(),
       attendances: await this.syncAttendances(),
       timestamp: new Date(),
