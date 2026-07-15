@@ -259,15 +259,12 @@ export class DashboardService {
       const result = await this.paymentRepository.query(`
         SELECT 
           COALESCE(m.name, 'Sin especificar') as name,
-          COUNT(p.id) as count,
-          SUM(p.amount) as revenue
-        FROM payments p
-        LEFT JOIN members mb ON p.memberId = mb.id
-        LEFT JOIN member_memberships mm ON mm.memberId = mb.id AND mm.isActive = true
+          COUNT(mm.id) as count,
+          SUM(mm.payAmount) as revenue
+        FROM member_memberships mm
         LEFT JOIN memberships m ON m.id = mm.membershipId
-        WHERE p.paymentType = 'MEMBERSHIP' AND p.status = 'COMPLETED'
+        WHERE mm.payAmount > 0
         GROUP BY m.id, m.name
-        HAVING SUM(p.amount) > 0
         ORDER BY revenue DESC
       `);
 

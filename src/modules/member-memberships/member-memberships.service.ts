@@ -10,6 +10,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { PromotionsService } from '../promotions/promotions.service';
 import { EmailService } from '../email-settings/email.service';
 import { GroupsService } from '../groups/groups.service';
+import { AccessService } from '../sync/access.service';
 
 @Injectable()
 export class MemberMembershipsService {
@@ -25,6 +26,7 @@ export class MemberMembershipsService {
     private readonly promotionsService: PromotionsService,
     private readonly emailService: EmailService,
     private readonly groupsService: GroupsService,
+    private readonly accessService: AccessService,
   ) {}
 
   /**
@@ -469,6 +471,25 @@ export class MemberMembershipsService {
     // La creación del grupo ya se hace arriba en línea ~249
     // No duplicar aquí
 
+    // SINCRONIZAR A ZKACCESS: Actualizar endDate
+    try {
+      console.log(`[MemberMembershipsService] 🔄 Sincronizando nueva fecha de membresía a ZKAccess...`);
+      // Obtener el memberCode
+      const memberDetails = await this.memberRepository.findOne({ where: { id: memberId }, relations: ['user'] });
+      if (memberDetails && memberDetails.user) {
+        await this.accessService.pushMemberToAccess({
+          Badgenumber: memberDetails.memberCode.replace(/[^0-9]/g, ''),
+          name: memberDetails.user.firstName,
+          lastname: memberDetails.user.lastName,
+          email: memberDetails.user.email,
+          acc_enddate: endDate.toISOString().split('T')[0] // Enviar la fecha calculada
+        });
+        console.log(`[MemberMembershipsService] ✅ Sincronización a ZKAccess exitosa.`);
+      }
+    } catch (accessError) {
+      console.error(`[MemberMembershipsService] ❌ Error sincronizando a ZKAccess:`, accessError.message);
+    }
+
     return savedMemberMembership;
     } catch (error) {
       console.error('[ASSIGN MEMBERSHIP] ❌ ERROR COMPLETO:', error);
@@ -579,6 +600,24 @@ export class MemberMembershipsService {
       { hasMembership: false } as any,
     );
     
+    // SINCRONIZAR A ZKACCESS: Remover fecha de vencimiento
+    try {
+      console.log(`[MemberMembershipsService] 🔄 Removiendo fecha de membresía en ZKAccess...`);
+      const memberDetails = await this.memberRepository.findOne({ where: { id: memberId }, relations: ['user'] });
+      if (memberDetails && memberDetails.user) {
+        await this.accessService.pushMemberToAccess({
+          Badgenumber: memberDetails.memberCode.replace(/[^0-9]/g, ''),
+          name: memberDetails.user.firstName,
+          lastname: memberDetails.user.lastName,
+          email: memberDetails.user.email,
+          acc_enddate: null // Sin suscripción -> null
+        });
+        console.log(`[MemberMembershipsService] ✅ Remoción en ZKAccess exitosa.`);
+      }
+    } catch (accessError) {
+      console.error(`[MemberMembershipsService] ❌ Error sincronizando a ZKAccess:`, accessError.message);
+    }
+
     console.log(`[REMOVE MEMBERSHIP] ✓ Membresía removida para: ${memberId}\n`);
   }
 

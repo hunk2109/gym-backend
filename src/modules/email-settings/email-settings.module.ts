@@ -24,6 +24,7 @@ import { GymSettingsModule } from '../gym-settings/gym-settings.module';
 import { CouponsModule } from '../coupons/coupons.module';
 import { CronLoggingModule } from './cron-logging.module';
 import { CronLoggingService } from './cron-logging.service';
+import { WhatsappSettingsModule } from '../whatsapp-settings/whatsapp-settings.module';
 
 @Module({
   imports: [
@@ -46,6 +47,7 @@ import { CronLoggingService } from './cron-logging.service';
     GymSettingsModule,
     CouponsModule,
     CronLoggingModule,
+    WhatsappSettingsModule,
   ],
   controllers: [EmailSettingsController],
   providers: [

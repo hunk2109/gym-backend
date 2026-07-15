@@ -64,6 +64,8 @@ import { GroupsModule } from './modules/groups/groups.module';
 import { AttendancesModule } from './modules/attendances/attendances.module';
 import { TablesModule } from './modules/tables/tables.module';
 import { SyncModule } from './modules/sync/sync.module';
+import { WhatsappSettingsModule } from './modules/whatsapp-settings/whatsapp-settings.module';
+import { EventEmitterModule } from '@nestjs/event-emitter';
 
 import { ErrorHandlingInterceptor, ResponseInterceptor } from './common/interceptors';
 import { ResponseFilterInterceptor } from './modules/auth/interceptors/response-filter.interceptor';
@@ -71,6 +73,7 @@ import { LoggerMiddleware } from './common/middleware';
 
 @Module({
   imports: [
+    EventEmitterModule.forRoot(),
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: '.env',
@@ -144,6 +147,7 @@ import { LoggerMiddleware } from './common/middleware';
     AttendancesModule,
     TablesModule,
     SyncModule,
+    WhatsappSettingsModule,
   ],
   controllers: [],
   providers: [

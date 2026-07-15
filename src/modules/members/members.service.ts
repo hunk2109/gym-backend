@@ -10,6 +10,7 @@ import { CreateMemberDto, UpdateMemberDto } from './dto/create-member.dto';
 import { EmailService } from '../email-settings/email.service';
 import { ModulesManagementService } from '../modules-management/modules-management.service';
 import { GymSettingsService } from '../gym-settings/gym-settings.service';
+import { AccessService } from '../sync/access.service';
 
 @Injectable()
 export class MembersService {
@@ -27,6 +28,7 @@ export class MembersService {
     private emailService: EmailService,
     private modulesManagementService: ModulesManagementService,
     private gymSettingsService: GymSettingsService,
+    private accessService: AccessService,
   ) {}
 
   /**
@@ -338,6 +340,20 @@ export class MembersService {
       console.error(`[MembersService] ❌ Failed to send welcome email to ${user.email}: ${emailError.message}`);
       this.logger.error(`Failed to send welcome email to ${user.email}`, emailError);
       // No fallar la operación si el email no se envía
+    }
+
+    // SINCRONIZAR A ZKACCESS
+    try {
+      this.logger.log(`[MembersService] 🔄 Empujando socio a ZKAccess (USERINFO)...`);
+      await this.accessService.pushMemberToAccess({
+        Badgenumber: savedMember.memberCode.replace(/[^0-9]/g, ''), // Obtener números del CLI_00000X o YYYY-XXXX
+        name: user.firstName,
+        lastname: user.lastName,
+        email: user.email,
+        acc_enddate: null // Nuevo socio sin suscripción empieza bloqueado o sin fecha
+      });
+    } catch (accessError) {
+      this.logger.error(`[MembersService] ❌ Falló la sincronización a Access del socio ${savedMember.id}`, accessError);
     }
 
     return savedMember;

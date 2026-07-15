@@ -133,6 +133,50 @@ export class AccessService {
   }
 
   /**
+   * Ejecuta un script Python para escribir datos en Access
+   */
+  private async executeAccessWrite(userData: any): Promise<any> {
+    const scriptPath = join(process.cwd(), 'src', 'modules', 'sync', 'scripts', 'access-write.py');
+    const dbPath = await this.getAccessDbPath();
+    
+    this.logger.debug(`Ejecutando script de escritura: ${scriptPath}`);
+    
+    try {
+      const dataStr = encodeURIComponent(JSON.stringify(userData));
+      const { stdout, stderr } = await execPromise(
+        `python "${scriptPath}" "${dbPath}" "${dataStr}"`,
+        { cwd: process.cwd() }
+      );
+
+      if (stderr && stderr.trim()) {
+        this.logger.warn(`Stderr del script (write): ${stderr}`);
+      }
+
+      return JSON.parse(stdout);
+    } catch (error) {
+      this.logger.error(`Error escribiendo en Access: ${error.message}`);
+      if (error.stderr) {
+        this.logger.error(`Stderr: ${error.stderr}`);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Envía un miembro a ZKAccess
+   */
+  async pushMemberToAccess(userData: { Badgenumber: string, name: string, lastname: string, email: string, acc_enddate: string | null }): Promise<void> {
+    await this.validateAccessDbPath();
+    try {
+      await this.executeAccessWrite(userData);
+      this.logger.log(`Socio ${userData.Badgenumber} empujado a ZKAccess correctamente.`);
+    } catch (error) {
+      this.logger.error(`Error empujando socio ${userData.Badgenumber} a ZKAccess: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
    * Sincroniza empleados de Access a MySQL
    */
   async syncUsers(): Promise<{ inserted: number; updated: number }> {

@@ -125,6 +125,16 @@ export class MembershipValidationService {
         .createQueryBuilder('mm')
         .leftJoinAndSelect('mm.member', 'member')
         .leftJoinAndSelect('member.user', 'user')
+        .innerJoin(
+          (qb) =>
+            qb
+              .select('mms.memberId', 'memberId')
+              .addSelect('MAX(mms.endDate)', 'maxEndDate')
+              .from('member_memberships', 'mms')
+              .groupBy('mms.memberId'),
+          'latest',
+          'latest.memberId = mm.memberId AND latest.maxEndDate = mm.endDate'
+        )
         .where('DATE(mm.endDate) < CURDATE()')
         .orderBy('mm.endDate', 'ASC')
         .getMany();
@@ -159,6 +169,16 @@ export class MembershipValidationService {
         .createQueryBuilder('mm')
         .leftJoinAndSelect('mm.member', 'member')
         .leftJoinAndSelect('member.user', 'user')
+        .innerJoin(
+          (qb) =>
+            qb
+              .select('mms.memberId', 'memberId')
+              .addSelect('MAX(mms.endDate)', 'maxEndDate')
+              .from('member_memberships', 'mms')
+              .groupBy('mms.memberId'),
+          'latest',
+          'latest.memberId = mm.memberId AND latest.maxEndDate = mm.endDate'
+        )
         .where('mm.endDate > NOW()')
         .andWhere('mm.endDate <= :futureDate', { futureDate })
         .orderBy('mm.endDate', 'ASC')

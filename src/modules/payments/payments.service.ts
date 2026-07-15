@@ -319,12 +319,32 @@ export class PaymentsService {
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - daysOverdue);
 
-    return this.paymentRepository
+    const pendingPayments = await this.paymentRepository
       .createQueryBuilder('payment')
       .where('payment.status = :status', { status: PaymentStatus.PENDING })
       .andWhere('payment.dueDate <= :cutoffDate', { cutoffDate })
       .orderBy('payment.dueDate', 'ASC')
       .getMany();
+
+    return Promise.all(
+      pendingPayments.map(async (payment) => {
+        let member: any = null;
+        if (payment.paymentType === PaymentType.MEMBERSHIP) {
+          const mm = await this.memberMembershipRepository.findOne({
+            where: { paymentId: payment.id },
+            relations: ['member', 'member.user'],
+          });
+          if (mm) member = mm.member;
+        } else if (payment.paymentType === PaymentType.REGISTRATION) {
+          const m = await this.memberRepository.findOne({
+            where: { registrationPaymentId: payment.id },
+            relations: ['user'],
+          });
+          if (m) member = m;
+        }
+        return Object.assign(payment, { member });
+      })
+    );
   }
 
   /**
@@ -345,12 +365,36 @@ export class PaymentsService {
       },
     });
 
-    this.logger.log(`[Payments] Encontrados ${pendingPayments.length} pagos pendientes`);
-    pendingPayments.forEach((p, idx) => {
+    const enrichedPayments = await Promise.all(
+      pendingPayments.map(async (payment) => {
+        let member: any = null;
+        if (payment.paymentType === PaymentType.MEMBERSHIP) {
+          const mm = await this.memberMembershipRepository.findOne({
+            where: { paymentId: payment.id },
+            relations: ['member', 'member.user'],
+          });
+          if (mm) member = mm.member;
+        } else if (payment.paymentType === PaymentType.REGISTRATION) {
+          const m = await this.memberRepository.findOne({
+            where: { registrationPaymentId: payment.id },
+            relations: ['user'],
+          });
+          if (m) member = m;
+        }
+
+        return {
+          ...payment,
+          member,
+        };
+      })
+    );
+
+    this.logger.log(`[Payments] Encontrados ${enrichedPayments.length} pagos pendientes`);
+    enrichedPayments.forEach((p, idx) => {
       this.logger.log(`[Payments]   ${idx + 1}. ID: ${p.id}, Monto: $${p.amount}`);
     });
 
-    return pendingPayments;
+    return enrichedPayments;
   }
 
   /**

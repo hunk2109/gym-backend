@@ -1,7 +1,9 @@
-import { Controller, Post, Get, Put, Body, Logger, HttpCode } from '@nestjs/common';
+import { Controller, Post, Get, Put, Body, Logger, HttpCode, Query } from '@nestjs/common';
 import { Public } from '../auth/decorators/public.decorator';
 import { SyncService } from './sync.service';
 import { ConfigService } from './config.service';
+import * as fs from 'fs';
+import * as path from 'path';
 
 @Controller('sync')
 export class SyncController {
@@ -111,6 +113,79 @@ export class SyncController {
       return {
         success: false,
         error: error.message || 'Error obteniendo la ruta',
+      };
+    }
+  }
+
+  /**
+   * GET /api/sync/explore
+   * Explora el disco del servidor para seleccionar base de datos Access
+   */
+  @Get('explore')
+  @Public()
+  async exploreFiles(@Query('dir') dir?: string) {
+    try {
+      // Si no hay directorio, mostrar unidades en Windows
+      if (!dir || dir === '') {
+        const isWin = process.platform === 'win32';
+        if (isWin) {
+          // En Node no hay forma nativa sencilla de listar discos sin wmic/fs, usamos algunos comunes o C:\
+          return {
+            success: true,
+            currentPath: '',
+            items: [
+              { name: 'C:\\', path: 'C:\\', isDirectory: true },
+              { name: 'D:\\', path: 'D:\\', isDirectory: true }
+            ]
+          };
+        }
+        dir = '/';
+      }
+
+      // Normalizar la ruta
+      const targetDir = path.normalize(dir);
+      
+      if (!fs.existsSync(targetDir)) {
+        return { success: false, error: 'Directorio no encontrado' };
+      }
+
+      const files = fs.readdirSync(targetDir, { withFileTypes: true });
+      const items = files
+        .map(dirent => {
+          try {
+            return {
+              name: dirent.name,
+              path: path.join(targetDir, dirent.name),
+              isDirectory: dirent.isDirectory(),
+            };
+          } catch (e) {
+            return null; // Skip if permission denied or other error
+          }
+        })
+        .filter(item => item !== null)
+        .filter(item => {
+          // Filtrar: solo mostrar carpetas y archivos .mdb / .accdb / .txt
+          if (item!.isDirectory) return true;
+          const ext = path.extname(item!.name).toLowerCase();
+          return ext === '.mdb' || ext === '.accdb';
+        })
+        .sort((a, b) => {
+          // Carpetas primero
+          if (a!.isDirectory && !b!.isDirectory) return -1;
+          if (!a!.isDirectory && b!.isDirectory) return 1;
+          return a!.name.localeCompare(b!.name);
+        });
+
+      return {
+        success: true,
+        currentPath: targetDir,
+        parentPath: path.dirname(targetDir) !== targetDir ? path.dirname(targetDir) : '',
+        items,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error.message || 'Error leyendo el directorio',
       };
     }
   }

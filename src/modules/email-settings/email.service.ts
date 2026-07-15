@@ -12,6 +12,9 @@ import {
 import { SendEmailDto } from './dto';
 import { EmailTemplateBuilder } from './email-template.builder';
 
+import { User } from '../../entities/user.entity';
+import { WhatsappService } from '../whatsapp-settings/whatsapp.service';
+
 @Injectable()
 export class EmailService {
   private readonly logger = new Logger(EmailService.name);
@@ -24,6 +27,9 @@ export class EmailService {
     private emailTemplateRepository: Repository<EmailTemplate>,
     @InjectRepository(EmailLog)
     private emailLogRepository: Repository<EmailLog>,
+    @InjectRepository(User)
+    private userRepository: Repository<User>,
+    private whatsappService: WhatsappService,
   ) {
     this.initializeTransporter();
   }
@@ -146,6 +152,48 @@ export class EmailService {
       };
 
       const info = await this.transporter.sendMail(mailOptions);
+
+      // Attempt to send via WhatsApp if possible
+      try {
+        let phoneNumber: string | undefined;
+
+        // Try to get phone from Member ID if provided
+        if (dto.memberId) {
+          const userWithPhone = await this.userRepository.createQueryBuilder('u')
+            .innerJoin('u.member', 'm')
+            .where('m.id = :memberId', { memberId: dto.memberId })
+            .select(['u.phone'])
+            .getOne();
+          if (userWithPhone?.phone) {
+            phoneNumber = userWithPhone.phone;
+          }
+        } 
+        
+        // If no memberId or no phone found, try by email
+        if (!phoneNumber && dto.recipientEmail) {
+          const userWithPhone = await this.userRepository.findOne({
+            where: { email: dto.recipientEmail },
+            select: ['phone'],
+          });
+          if (userWithPhone?.phone) {
+            phoneNumber = userWithPhone.phone;
+          }
+        }
+
+        if (phoneNumber) {
+          // Si el WhatsApp está conectado, enviar el PDF
+          const statusInfo = this.whatsappService.getStatus();
+          if (statusInfo.status === 'CONNECTED') {
+            const fallbackText = `¡Hola! Te hemos enviado una notificación importante de Gym Manager. Adjuntamos el documento detallado.\n\nAsunto: ${subject}`;
+            await this.whatsappService.sendHtmlAsPdf(phoneNumber, htmlContent, fallbackText);
+          } else {
+            this.logger.warn(`WhatsApp no está conectado. No se pudo enviar el PDF a ${phoneNumber}`);
+          }
+        }
+      } catch (waError) {
+        this.logger.error(`Error sending WhatsApp notification along with email to ${dto.recipientEmail}: ${waError.message}`);
+        // No lanzamos error para no interrumpir el flujo de correo
+      }
 
       // Registrar envío exitoso
       const emailLog = this.emailLogRepository.create({
@@ -296,6 +344,27 @@ export class EmailService {
       });
 
       this.logger.log(`Email sent to ${options.to}`);
+
+      // Intentar enviar también por WhatsApp
+      try {
+        const userWithPhone = await this.userRepository.findOne({
+          where: { email: options.to },
+          select: ['phone'],
+        });
+
+        if (userWithPhone?.phone) {
+          const statusInfo = this.whatsappService.getStatus();
+          if (statusInfo.status === 'CONNECTED') {
+            const fallbackText = `¡Hola! Te hemos enviado una notificación importante de Gym Manager. Adjuntamos el documento detallado.\n\nAsunto: ${options.subject}`;
+            await this.whatsappService.sendHtmlAsPdf(userWithPhone.phone, options.html, fallbackText);
+          } else {
+            this.logger.warn(`WhatsApp no está conectado. No se pudo enviar el PDF a ${userWithPhone.phone}`);
+          }
+        }
+      } catch (waError) {
+        this.logger.error(`Error sending WhatsApp direct message to ${options.to}: ${waError.message}`);
+      }
+
     } catch (error) {
       this.logger.error(`Failed to send email to ${options.to}:`, error);
       throw new InternalServerErrorException(`Failed to send email: ${error.message}`);
