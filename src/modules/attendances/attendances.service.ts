@@ -21,6 +21,10 @@ export class AttendancesService {
     nutritionist: 'Nutricionista',
     supervisor: 'Supervisor',
     cashier: 'Cajero',
+    admin: 'Administrador',
+    encargado: 'Encargado',
+    empleado_cajero: 'Cajero',
+    empleado_entrenador: 'Entrenador',
   };
 
   constructor(
@@ -144,7 +148,7 @@ export class AttendancesService {
         ? (attendance.member?.user?.lastName || '')
         : (attendance.employee?.lastName || ''),
       employeeRole: attendance.attendanceType === 'employee'
-        ? this.translateRole(attendance.employee?.role || 'Empleado')
+        ? this.translateRole(attendance.employee?.role || attendance.member?.user?.role || 'Empleado')
         : null,
     }));
 

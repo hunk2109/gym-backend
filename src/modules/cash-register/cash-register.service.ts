@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Between } from 'typeorm';
 import { CashRegister } from '../../entities/cash-register.entity';
 import { Sale } from '../../entities/sale.entity';
+import { Payment } from '../../entities/payment.entity';
 import { AuditLog } from '../../entities/audit-log.entity';
 import { OpenCashRegisterDto, CloseCashRegisterDto } from './dto/cash-register.dto';
 import { AuditLogService } from '../audit-logs/audit-log.service';
@@ -14,6 +15,8 @@ export class CashRegisterService {
     private cashRegisterRepository: Repository<CashRegister>,
     @InjectRepository(Sale)
     private saleRepository: Repository<Sale>,
+    @InjectRepository(Payment)
+    private paymentRepository: Repository<Payment>,
     @InjectRepository(AuditLog)
     private auditLogRepository: Repository<AuditLog>,
     private auditLogService: AuditLogService,
@@ -128,9 +131,19 @@ export class CashRegisterService {
       const totalSales = Number(salesQuery[0]?.total || 0);
       console.log('[CashRegisterService] Total sales for the day:', totalSales);
 
-      // Calcular lo que debería haber: Apertura + Ventas
-      const expectedClosure = Number(cashRegister.openingAmount) + totalSales;
-      console.log('[CashRegisterService] Opening amount:', cashRegister.openingAmount, '+ Sales:', totalSales, '= Expected:', expectedClosure);
+      // Obtener total de pagos (inscripciones, membresias) del día
+      const paymentsQuery = await this.paymentRepository.query(
+        `SELECT COALESCE(SUM(amount), 0) as total FROM payments
+         WHERE createdAt >= ? AND createdAt <= ? AND status = 'completed' AND (createdBy = ? OR createdBy IS NULL)`,
+        [startOfDay, endOfDay, userId]
+      );
+      
+      const totalPayments = Number(paymentsQuery[0]?.total || 0);
+      console.log('[CashRegisterService] Total payments for the day:', totalPayments);
+
+      // Calcular lo que debería haber: Apertura + Ventas + Pagos
+      const expectedClosure = Number(cashRegister.openingAmount) + totalSales + totalPayments;
+      console.log('[CashRegisterService] Opening amount:', cashRegister.openingAmount, '+ Sales:', totalSales, '+ Payments:', totalPayments, '= Expected:', expectedClosure);
 
       // Calcular diferencia
       const difference = Number(dto.closingAmount) - expectedClosure;

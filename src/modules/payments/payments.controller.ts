@@ -45,6 +45,21 @@ export class PaymentsController {
     };
   }
 
+  @Get('date-range')
+  @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO)
+  async getPaymentsByDateRange(
+    @Query('startDate') startDateStr: string,
+    @Query('endDate') endDateStr: string,
+  ): Promise<any> {
+    if (!startDateStr || !endDateStr) {
+      return { data: [] };
+    }
+    const startDate = new Date(startDateStr);
+    const endDate = new Date(endDateStr);
+    const payments = await this.paymentsService.getPaymentsForCashRegister(startDate, endDate);
+    return { data: payments };
+  }
+
   @Get('statistics/overview')
   @Roles(UserRole.ADMIN, UserRole.ENCARGADO)
   async getStatistics(): Promise<any> {

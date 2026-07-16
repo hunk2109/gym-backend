@@ -11,7 +11,7 @@ import {
 import { Type } from 'class-transformer';
 
 export class CreateSaleItemDto {
-  @IsUUID()
+  @IsString()
   @IsNotEmpty()
   productId: string;
 
@@ -25,7 +25,7 @@ export class CreateSaleItemDto {
 }
 
 export class CreateSaleDto {
-  @IsUUID()
+  @IsString()
   @IsOptional()
   memberId?: string;
 

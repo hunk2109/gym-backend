@@ -11,13 +11,13 @@ export class WhatsappSettingsController {
   constructor(private readonly whatsappService: WhatsappService) {}
 
   @Get('status')
-  @Roles(UserRole.ADMIN, UserRole.ENCARGADO)
+  @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO)
   getStatus() {
     return this.whatsappService.getStatus();
   }
 
   @Post('logout')
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO)
   @HttpCode(HttpStatus.OK)
   async logout() {
     await this.whatsappService.logout();
@@ -28,7 +28,7 @@ export class WhatsappSettingsController {
   }
   
   @Post('restart')
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO)
   @HttpCode(HttpStatus.OK)
   async restart() {
     await this.whatsappService.restartClient();
@@ -39,7 +39,7 @@ export class WhatsappSettingsController {
   }
 
   @Post('test-message')
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO)
   @HttpCode(HttpStatus.OK)
   async sendTestMessage(@Body() body: { phoneNumber: string; message?: string }) {
     if (!body.phoneNumber) {

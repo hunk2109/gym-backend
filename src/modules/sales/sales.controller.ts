@@ -98,11 +98,11 @@ export class SalesController {
     return this.salesService.getDailyRevenue(startDate, endDate);
   }
 
-  @Get('date-range/:startDate/:endDate')
+  @Get('date-range')
   @Public()
   async getSalesByDateRange(
-    @Param('startDate') startDate: string,
-    @Param('endDate') endDate: string,
+    @Query('startDate') startDate: string,
+    @Query('endDate') endDate: string,
     @Query('cashRegisterId') cashRegisterId?: string,
   ) {
     console.log('[SalesController] getSalesByDateRange - Raw startDate:', startDate);

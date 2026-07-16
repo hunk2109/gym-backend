@@ -90,6 +90,18 @@ export class PaymentsService {
     };
   }
 
+  async getPaymentsForCashRegister(startDate: Date, endDate: Date): Promise<Payment[]> {
+    return this.paymentRepository.find({
+      where: {
+        createdAt: Between(startDate, endDate),
+        status: PaymentStatus.COMPLETED
+      },
+      order: {
+        createdAt: 'DESC'
+      }
+    });
+  }
+
   async getPaymentById(id: string): Promise<Payment> {
     const payment = await this.paymentRepository.findOne({
       where: { id },

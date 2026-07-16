@@ -442,16 +442,25 @@ export class AccessService {
 
         if (!existingAttendance) {
           let member: Member | null = null;
+          let isEmployee = false;
+          
           if (pin) {
             const cleanPin = String(pin).trim();
             const formattedPin = `MEM_${cleanPin.padStart(6, '0')}`;
-            member = await this.memberRepository.findOne({ where: { memberCode: formattedPin } });
+            member = await this.memberRepository.findOne({ 
+              where: { memberCode: formattedPin },
+              relations: ['user']
+            });
+            
+            if (member && member.user && member.user.role !== 'cliente') {
+              isEmployee = true;
+            }
           }
 
           await this.attendanceRepository.save({
             id: uuidv4(),
             memberId: member?.id,
-            attendanceType: 'member',
+            attendanceType: isEmployee ? 'employee' : 'member',
             visitDate: time || new Date(),
             status: AttendanceStatus.ACCEPTED,
           });
