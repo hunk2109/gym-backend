@@ -13,6 +13,7 @@ import { CreateMembershipDto, UpdateMembershipDto, AssignMembershipDto, RenewMem
 import { PromotionsService } from '../promotions/promotions.service';
 import { EmailService } from '../email-settings/email.service';
 import { GymSettingsService } from '../gym-settings/gym-settings.service';
+import { AccessService } from '../sync/access.service';
 
 @Injectable()
 export class MembershipsService {
@@ -32,6 +33,7 @@ export class MembershipsService {
     private promotionsService: PromotionsService,
     private emailService: EmailService,
     private gymSettingsService: GymSettingsService,
+    private accessService: AccessService,
   ) {}
 
   // Membership CRUD
@@ -538,6 +540,7 @@ export class MembershipsService {
         .createQueryBuilder('mm')
         .leftJoinAndSelect('mm.membership', 'membership')
         .leftJoinAndSelect('mm.member', 'member')
+        .leftJoinAndSelect('member.user', 'user')
         .where('mm.endDate <= :today', { today })
         .andWhere('mm.isActive = true')
         .andWhere('mm.isRecurring = true')
@@ -567,6 +570,7 @@ export class MembershipsService {
         .createQueryBuilder('mm')
         .leftJoinAndSelect('mm.membership', 'membership')
         .leftJoinAndSelect('mm.member', 'member')
+        .leftJoinAndSelect('member.user', 'user')
         .where('mm.endDate <= :today', { today })
         .andWhere('mm.isActive = true')
         .andWhere('mm.isRecurring = false')
@@ -595,6 +599,7 @@ export class MembershipsService {
         .createQueryBuilder('mm')
         .leftJoinAndSelect('mm.membership', 'membership')
         .leftJoinAndSelect('mm.member', 'member')
+        .leftJoinAndSelect('member.user', 'user')
         .leftJoinAndSelect('mm.group', 'group')
         .where('mm.endDate <= :today', { today })
         .andWhere('mm.isActive = true')
@@ -624,6 +629,7 @@ export class MembershipsService {
         .createQueryBuilder('mm')
         .leftJoinAndSelect('mm.membership', 'membership')
         .leftJoinAndSelect('mm.member', 'member')
+        .leftJoinAndSelect('member.user', 'user')
         .where('mm.isActive = false')
         .andWhere('mm.suspensionDate IS NOT NULL')
         .orderBy('mm.suspensionDate', 'DESC')
@@ -694,11 +700,44 @@ export class MembershipsService {
             currentMembership.isActive = false;
             currentMembership.suspensionDate = today;
             await this.memberMembershipRepository.save(currentMembership);
+            
+            // Sincronizar ZKAccess para bloquear
+            try {
+              if (currentMembership.member?.user) {
+                await this.accessService.pushMemberToAccess({
+                  Badgenumber: currentMembership.member.memberCode.replace(/[^0-9]/g, ''),
+                  name: currentMembership.member.user.firstName,
+                  lastname: currentMembership.member.user.lastName,
+                  email: currentMembership.member.user.email,
+                  acc_enddate: null, // Bloquear
+                });
+              }
+            } catch(e) {}
+            
             console.log(`[MembershipsService] ⛔ Membresía suspendida - Miembro: ${currentMembership.memberId}, Días vencido: ${daysSinceDue}`);
             suspended++;
           } else {
             // Renovar con pago pendiente y crear nuevo Payment
             await this.renewMembershipWithPendingPayment(currentMembership);
+            
+            // Sincronizar ZKAccess con días de gracia sumados
+            try {
+              const accEndDate = new Date(currentMembership.endDate);
+              accEndDate.setDate(accEndDate.getDate() + suspensionDays);
+              
+              if (currentMembership.member?.user) {
+                await this.accessService.pushMemberToAccess({
+                  Badgenumber: currentMembership.member.memberCode.replace(/[^0-9]/g, ''),
+                  name: currentMembership.member.user.firstName,
+                  lastname: currentMembership.member.user.lastName,
+                  email: currentMembership.member.user.email,
+                  acc_enddate: accEndDate.toISOString().split('T')[0],
+                });
+              }
+            } catch(e) {
+              console.error(`[MembershipsService] Error sync ZKAccess:`, e);
+            }
+            
             console.log(`[MembershipsService] ✅ Membresía renovada con pago pendiente - Miembro: ${currentMembership.memberId}`);
             renewed++;
           }
@@ -727,6 +766,25 @@ export class MembershipsService {
           currentMembership.payAmount = renewalPayment.amount as any;
           
           await this.memberMembershipRepository.save(currentMembership);
+          
+          // Sincronizar ZKAccess con días de gracia sumados
+          try {
+            const accEndDate = new Date(newEndDate);
+            accEndDate.setDate(accEndDate.getDate() + suspensionDays);
+            
+            if (currentMembership.member?.user) {
+              await this.accessService.pushMemberToAccess({
+                Badgenumber: currentMembership.member.memberCode.replace(/[^0-9]/g, ''),
+                name: currentMembership.member.user.firstName,
+                lastname: currentMembership.member.user.lastName,
+                email: currentMembership.member.user.email,
+                acc_enddate: accEndDate.toISOString().split('T')[0],
+              });
+            }
+          } catch(e) {
+            console.error(`[MembershipsService] Error sync ZKAccess:`, e);
+          }
+          
           console.log(`[MembershipsService] ✅ Membresía renovada automáticamente (pago completado) - Miembro: ${currentMembership.memberId}`);
           renewed++;
         }
@@ -747,6 +805,20 @@ export class MembershipsService {
         currentMembership.isActive = false;
         currentMembership.suspensionDate = today;
         await this.memberMembershipRepository.save(currentMembership);
+        
+        // Sincronizar ZKAccess para bloquear
+        try {
+          if (currentMembership.member?.user) {
+            await this.accessService.pushMemberToAccess({
+              Badgenumber: currentMembership.member.memberCode.replace(/[^0-9]/g, ''),
+              name: currentMembership.member.user.firstName,
+              lastname: currentMembership.member.user.lastName,
+              email: currentMembership.member.user.email,
+              acc_enddate: null, // Bloquear
+            });
+          }
+        } catch(e) {}
+        
         console.log(`[MembershipsService] ⛔ Membresía NO RECURRENTE suspendida - Miembro: ${currentMembership.memberId}, Membresía: ${currentMembership.membership.name}`);
         suspended++;
       } catch (error) {
@@ -933,6 +1005,38 @@ export class MembershipsService {
     }
 
     const savedMembership = await this.memberMembershipRepository.save(membership);
+
+    // Sincronizar ZKAccess y reactivar si estaba suspendida
+    try {
+      const settings = await this.gymSettingsService.getSettings();
+      const graceDays = settings?.membershipSuspensionDays || 0;
+      const accEndDate = new Date(membership.endDate);
+      accEndDate.setDate(accEndDate.getDate() + graceDays);
+
+      const memberWithUserSync = await this.memberRepository.findOne({
+        where: { id: membership.memberId },
+        relations: ['user'],
+      });
+
+      if (memberWithUserSync && memberWithUserSync.user) {
+        if (!membership.isActive) {
+          membership.isActive = true;
+          membership.suspensionDate = null;
+          await this.memberMembershipRepository.save(membership);
+        }
+
+        await this.accessService.pushMemberToAccess({
+          Badgenumber: memberWithUserSync.memberCode.replace(/[^0-9]/g, ''),
+          name: memberWithUserSync.user.firstName,
+          lastname: memberWithUserSync.user.lastName,
+          email: memberWithUserSync.user.email,
+          acc_enddate: accEndDate.toISOString().split('T')[0],
+        });
+        console.log(`[MembershipsService] ✅ Acceso ZKAccess restaurado por pago completado.`);
+      }
+    } catch(e) {
+      console.error(`[MembershipsService] Error sync ZKAccess en recordPayment:`, e);
+    }
 
     // Enviar email de confirmación de pago
     try {

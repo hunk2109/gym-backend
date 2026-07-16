@@ -11,6 +11,7 @@ import { EmailSettingsModule } from '../email-settings/email-settings.module';
 import { GroupsModule } from '../groups/groups.module';
 import { SyncModule } from '../sync/sync.module';
 import { WhatsappSettingsModule } from '../whatsapp-settings/whatsapp-settings.module';
+import { GymSettingsModule } from '../gym-settings/gym-settings.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { WhatsappSettingsModule } from '../whatsapp-settings/whatsapp-settings.m
     GroupsModule,
     SyncModule,
     WhatsappSettingsModule,
+    GymSettingsModule,
   ],
   controllers: [MemberMembershipsController],
   providers: [MemberMembershipsService],

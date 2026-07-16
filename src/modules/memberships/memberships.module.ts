@@ -15,6 +15,7 @@ import { MembershipAccessSchedule } from '../../entities/membership-access-sched
 import { PromotionsModule } from '../promotions/promotions.module';
 import { EmailSettingsModule } from '../email-settings/email-settings.module';
 import { GymSettingsModule } from '../gym-settings/gym-settings.module';
+import { SyncModule } from '../sync/sync.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { GymSettingsModule } from '../gym-settings/gym-settings.module';
     PromotionsModule,
     EmailSettingsModule,
     GymSettingsModule,
+    SyncModule,
   ],
   controllers: [MembershipsController, MembershipAccessScheduleController],
   providers: [

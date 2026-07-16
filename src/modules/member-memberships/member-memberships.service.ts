@@ -12,6 +12,7 @@ import { EmailService } from '../email-settings/email.service';
 import { GroupsService } from '../groups/groups.service';
 import { AccessService } from '../sync/access.service';
 import { WhatsappService } from '../whatsapp-settings/whatsapp.service';
+import { GymSettingsService } from '../gym-settings/gym-settings.service';
 
 @Injectable()
 export class MemberMembershipsService {
@@ -29,6 +30,7 @@ export class MemberMembershipsService {
     private readonly groupsService: GroupsService,
     private readonly accessService: AccessService,
     private readonly whatsappService: WhatsappService,
+    private readonly gymSettingsService: GymSettingsService,
   ) {}
 
   /**
@@ -495,13 +497,28 @@ export class MemberMembershipsService {
       console.log(`[MemberMembershipsService] 🔄 Sincronizando nueva fecha de membresía a ZKAccess...`);
       // Obtener el memberCode
       const memberDetails = await this.memberRepository.findOne({ where: { id: memberId }, relations: ['user'] });
+      
+      // Calcular grace period
+      let graceDays = 0;
+      try {
+        const settings = await this.gymSettingsService.getSettings();
+        if (settings && settings.membershipSuspensionDays) {
+          graceDays = settings.membershipSuspensionDays;
+        }
+      } catch (e) {
+        console.warn(`[MemberMembershipsService] No se pudo obtener settings, usando graceDays = 0`, e);
+      }
+      
+      const accEndDate = new Date(endDate);
+      accEndDate.setDate(accEndDate.getDate() + graceDays);
+
       if (memberDetails && memberDetails.user) {
         await this.accessService.pushMemberToAccess({
           Badgenumber: memberDetails.memberCode.replace(/[^0-9]/g, ''),
           name: memberDetails.user.firstName,
           lastname: memberDetails.user.lastName,
           email: memberDetails.user.email,
-          acc_enddate: endDate.toISOString().split('T')[0] // Enviar la fecha calculada
+          acc_enddate: accEndDate.toISOString().split('T')[0] // Enviar la fecha calculada + gracia
         });
         console.log(`[MemberMembershipsService] ✅ Sincronización a ZKAccess exitosa.`);
       }
