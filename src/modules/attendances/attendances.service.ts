@@ -137,10 +137,10 @@ export class AttendancesService {
     const enrichedData = data.map(attendance => ({
       ...attendance,
       memberCode: attendance.member?.memberCode || null,
-      memberName: attendance.attendanceType === 'member' 
+      memberName: attendance.member 
         ? (attendance.member?.user?.firstName || 'Desconocido')
         : (attendance.employee?.firstName || 'Desconocido'),
-      memberLastName: attendance.attendanceType === 'member'
+      memberLastName: attendance.member
         ? (attendance.member?.user?.lastName || '')
         : (attendance.employee?.lastName || ''),
       employeeRole: attendance.attendanceType === 'employee'

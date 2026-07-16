@@ -290,14 +290,20 @@ export class AccessService {
         // Usar USERID como identificador único
         const memberCode = `MEM_${String(memberId).padStart(6, '0')}`;
         const userId = `member_${memberId}`;
+        const targetEmail = email || `member${memberId}@gym.local`;
 
         // Crear o actualizar usuario para el miembro
         let user = await this.userRepository.findOne({ where: { id: userId } });
 
+        // Si no se encontró por ID, intentar buscar por email para evitar duplicados
+        if (!user) {
+          user = await this.userRepository.findOne({ where: { email: targetEmail } });
+        }
+
         if (!user) {
           user = await this.userRepository.save({
             id: userId,
-            email: email || `member${memberId}@gym.local`,
+            email: targetEmail,
             firstName: firstName || `Member${memberId}`,
             lastName: lastName || '',
             phone: phone || '',
@@ -306,11 +312,10 @@ export class AccessService {
             passwordHash: '$2b$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcg7Ec6FQZeugP/Fxz1z8PYK9Ze', // password: 123456
           });
         } else {
-          await this.userRepository.update(userId, {
-            email: email || `member${memberId}@gym.local`,
-            firstName: firstName || `Member${memberId}`,
-            lastName: lastName || '',
-            phone: phone || '',
+          await this.userRepository.update(user.id, {
+            firstName: firstName || user.firstName,
+            lastName: lastName || user.lastName,
+            phone: phone || user.phone,
             role: UserRole.CLIENTE, // Actualizar rol a CLIENTE
           });
         }
@@ -436,8 +441,16 @@ export class AccessService {
         });
 
         if (!existingAttendance) {
+          let member: Member | null = null;
+          if (pin) {
+            const cleanPin = String(pin).trim();
+            const formattedPin = `MEM_${cleanPin.padStart(6, '0')}`;
+            member = await this.memberRepository.findOne({ where: { memberCode: formattedPin } });
+          }
+
           await this.attendanceRepository.save({
             id: uuidv4(),
+            memberId: member?.id,
             attendanceType: 'member',
             visitDate: time || new Date(),
             status: AttendanceStatus.ACCEPTED,

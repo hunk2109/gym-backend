@@ -120,7 +120,7 @@ export class AutoEmailService {
       }
 
       for (const member of members) {
-        if (!member.user?.email) continue;
+        if (!member.user?.email || member.user.email.endsWith('.local') || member.user.email.endsWith('.test') || member.user.email.includes('example.com')) continue;
 
         // ✅ VALIDAR DUPLICADOS: Verificar si ya enviamos email de cumpleaños hace menos de 24 horas
         const isDuplicate = await this.duplicateChecker.isDuplicate({
@@ -221,7 +221,7 @@ export class AutoEmailService {
       this.logger.log(`⏰ Encontradas ${memberships.length} membresías venciendo hoy`);
 
       for (const membershipRecord of memberships) {
-        if (!membershipRecord.member?.user?.email) continue;
+        if (!membershipRecord.member?.user?.email || membershipRecord.member.user.email.endsWith('.local') || membershipRecord.member.user.email.endsWith('.test') || membershipRecord.member.user.email.includes('example.com')) continue;
 
         // ✅ VALIDAR DUPLICADOS: Verificar si ya enviamos recordatorio de vencimiento en últimas 24 horas
         const isDuplicate = await this.duplicateChecker.isDuplicate({
@@ -308,7 +308,7 @@ export class AutoEmailService {
       this.logger.log(`📅 Encontradas ${memberships.length} membresías venciendo pronto`);
 
       for (const membershipRecord of memberships) {
-        if (!membershipRecord.member?.user?.email) continue;
+        if (!membershipRecord.member?.user?.email || membershipRecord.member.user.email.endsWith('.local') || membershipRecord.member.user.email.endsWith('.test') || membershipRecord.member.user.email.includes('example.com')) continue;
 
         // ✅ VALIDAR DUPLICADOS: Verificar si ya enviamos recordatorio en últimas 72 horas (3 días)
         const isDuplicate = await this.duplicateChecker.isDuplicate({
@@ -393,7 +393,7 @@ export class AutoEmailService {
       this.logger.log(`⚠️ Encontradas ${memberships.length} membresías vencidas`);
 
       for (const membershipRecord of memberships) {
-        if (!membershipRecord.member?.user?.email) continue;
+        if (!membershipRecord.member?.user?.email || membershipRecord.member.user.email.endsWith('.local') || membershipRecord.member.user.email.endsWith('.test') || membershipRecord.member.user.email.includes('example.com')) continue;
 
         // ✅ VALIDAR DUPLICADOS: Verificar si ya enviamos recordatorio en últimas 7 días
         const isDuplicate = await this.duplicateChecker.isDuplicate({
