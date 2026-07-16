@@ -325,6 +325,7 @@ export class EmailService {
     subject: string;
     html: string;
     text: string;
+    attachments?: Array<{ filename: string; content: Buffer | string; contentType?: string; encoding?: string }>;
   }): Promise<void> {
     try {
       if (!this.transporter) {
@@ -341,6 +342,7 @@ export class EmailService {
         subject: options.subject,
         html: options.html,
         text: options.text,
+        attachments: options.attachments,
       });
 
       this.logger.log(`Email sent to ${options.to}`);

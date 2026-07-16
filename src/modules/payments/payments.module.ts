@@ -8,12 +8,14 @@ import { PaymentsController } from './payments.controller';
 import { AuthModule } from '../auth/auth.module';
 import { EmailSettingsModule } from '../email-settings/email-settings.module';
 import { PaymentSubscriber } from '../../entities/payment.subscriber';
+import { PromotionsModule } from '../promotions/promotions.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Payment, Member, MemberMembership]),
     AuthModule,
     EmailSettingsModule,
+    PromotionsModule,
   ],
   providers: [PaymentsService, PaymentSubscriber],
   controllers: [PaymentsController],

@@ -11,6 +11,7 @@ import { PromotionsService } from '../promotions/promotions.service';
 import { EmailService } from '../email-settings/email.service';
 import { GroupsService } from '../groups/groups.service';
 import { AccessService } from '../sync/access.service';
+import { WhatsappService } from '../whatsapp-settings/whatsapp.service';
 
 @Injectable()
 export class MemberMembershipsService {
@@ -27,6 +28,7 @@ export class MemberMembershipsService {
     private readonly emailService: EmailService,
     private readonly groupsService: GroupsService,
     private readonly accessService: AccessService,
+    private readonly whatsappService: WhatsappService,
   ) {}
 
   /**
@@ -384,9 +386,9 @@ export class MemberMembershipsService {
       console.log(`[MemberMembershipsService] ⚠️  NO se incrementó contador - appliedPromotionCode está vacío`);
     }
 
-    // Enviar email de confirmación de membresía al miembro
+    // Enviar WhatsApp y email de confirmación de membresía al miembro
     try {
-      console.log(`[MemberMembershipsService] 📧 Iniciando envío de email de membresía...`);
+      console.log(`[MemberMembershipsService] 💬 Iniciando envío de confirmación de membresía...`);
       
       const memberWithUser = await this.memberRepository.findOne({
         where: { id: memberId },
@@ -441,6 +443,23 @@ export class MemberMembershipsService {
             <p>¡Gracias por confiar en nosotros!</p>
           </div>
         `;
+
+        if (memberWithUser.user.phone) {
+          try {
+            console.log(`[MemberMembershipsService] 💬 Enviando WhatsApp a: ${memberWithUser.user.phone}`);
+            const waMessage = `Hola *${memberName}*,\n\n` +
+              `Tu membresía ha sido asignada exitosamente. Aquí están los detalles:\n\n` +
+              `📌 *Plan:* ${membershipName}\n` +
+              `📅 *Inicio:* ${startDateFormatted}\n` +
+              `⏳ *Vencimiento:* ${endDateFormatted}\n` +
+              `💰 *Monto a Pagar:* RD$ ${parseFloat(finalAmount as any).toFixed(2)}\n\n` +
+              `¡Gracias por confiar en nosotros!`;
+            await this.whatsappService.sendMessage(memberWithUser.user.phone, waMessage);
+            console.log(`[MemberMembershipsService] ✅ WhatsApp enviado exitosamente.`);
+          } catch (waError) {
+            console.error(`[MemberMembershipsService] ❌ Error al enviar WhatsApp:`, waError.message);
+          }
+        }
 
         console.log(`[MemberMembershipsService] 📧 Enviando email a: ${memberEmail}`);
         

@@ -52,6 +52,21 @@ export class CashRegisterController {
     }
   }
 
+  @Post('send-report')
+  @Roles(UserRole.ADMIN, UserRole.EMPLEADO_CAJERO, UserRole.ENCARGADO)
+  async sendClosingReport(
+    @Body() body: { base64Pdf: string },
+  ) {
+    try {
+      console.log('[CashRegister] Sending PDF report to recipients...');
+      await this.cashRegisterService.sendPdfReport(body.base64Pdf);
+      return { success: true, message: 'PDF report sent to recipients' };
+    } catch (error) {
+      console.error('[CashRegister] Error sending report:', error);
+      throw error;
+    }
+  }
+
   @Get('today')
   @Roles(UserRole.ADMIN, UserRole.EMPLEADO_CAJERO, UserRole.ENCARGADO)
   async getTodayRegister(@Request() req) {

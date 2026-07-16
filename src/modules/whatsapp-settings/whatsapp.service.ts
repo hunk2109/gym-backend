@@ -220,4 +220,29 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
       }
     }
   }
+
+  public async sendBase64Pdf(phoneNumber: string, base64Data: string, filename: string, caption: string): Promise<boolean> {
+    if (this.status !== WhatsappStatus.CONNECTED) {
+      this.logger.error(`Cannot send WhatsApp PDF: Client status is ${this.status}`);
+      throw new Error('WhatsApp client is not connected');
+    }
+
+    try {
+      const { chatId, cleanNumber } = await this.getValidChatId(phoneNumber);
+
+      // Send caption text first
+      await this.client.sendMessage(chatId, caption);
+
+      // Send the PDF as media using base64 data directly
+      this.logger.log(`Sending base64 PDF to ${cleanNumber}`);
+      const media = new MessageMedia('application/pdf', base64Data, filename);
+      await this.client.sendMessage(chatId, media, { caption: filename });
+
+      this.logger.log(`Base64 PDF sent successfully to ${cleanNumber}`);
+      return true;
+    } catch (error) {
+      this.logger.error(`Failed to send base64 PDF to ${phoneNumber}`, error);
+      throw error;
+    }
+  }
 }

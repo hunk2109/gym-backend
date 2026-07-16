@@ -92,6 +92,9 @@ export class GymSettings {
   @Column({ type: 'datetime', nullable: true })
   mb360LastHeartbeat: Date; // Última conexión exitosa
 
+  @Column({ type: 'json', nullable: true })
+  closingReportRecipients: any; // { name: string, phone: string, email: string, sendWhatsapp: boolean, sendEmail: boolean }[]
+
   @CreateDateColumn()
   createdAt: Date;
 

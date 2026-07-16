@@ -8,6 +8,8 @@ import { CreatePaymentDto, UpdatePaymentDto } from './dto/create-payment.dto';
 import { PermissionsService } from '../auth/services/permissions.service';
 import { EmailService } from '../email-settings/email.service';
 
+import { PromotionsService } from '../promotions/promotions.service';
+
 @Injectable()
 export class PaymentsService {
   private readonly logger = new Logger(PaymentsService.name);
@@ -21,6 +23,7 @@ export class PaymentsService {
     private memberMembershipRepository: Repository<MemberMembership>,
     private readonly permissionsService: PermissionsService,
     private readonly emailService: EmailService,
+    private readonly promotionsService: PromotionsService,
   ) {}
 
   async createPayment(createPaymentDto: CreatePaymentDto, userId?: string): Promise<Payment> {
@@ -434,7 +437,7 @@ export class PaymentsService {
     }
   }
 
-  async getAllPaymentsWithoutPagination(): Promise<Payment[]> {
+  async getAllPaymentsWithoutPagination(): Promise<any[]> {
     try {
       this.logger.log(`[Payments] getAllPaymentsWithoutPagination - Obteniendo todos los pagos`);
 
@@ -443,8 +446,33 @@ export class PaymentsService {
         .orderBy('COALESCE(payment.paymentDate, payment.createdAt)', 'DESC')
         .getMany();
 
-      this.logger.log(`[Payments] Total de pagos encontrados: ${payments.length}`);
-      return payments;
+      const enrichedPayments = await Promise.all(
+        payments.map(async (payment) => {
+          let member: any = null;
+          if (payment.paymentType === PaymentType.MEMBERSHIP) {
+            const mm = await this.memberMembershipRepository.findOne({
+              where: { paymentId: payment.id },
+              relations: ['member', 'member.user'],
+            });
+            if (mm) member = mm.member;
+          } else if (payment.paymentType === PaymentType.REGISTRATION) {
+            const m = await this.memberRepository.findOne({
+              where: { registrationPaymentId: payment.id },
+              relations: ['user'],
+            });
+            if (m) member = m;
+          }
+
+          return {
+            ...payment,
+            member,
+            memberName: member?.user ? `${member.user.firstName} ${member.user.lastName}` : 'Sin nombre',
+          };
+        })
+      );
+
+      this.logger.log(`[Payments] Total de pagos encontrados: ${enrichedPayments.length}`);
+      return enrichedPayments;
     } catch (error) {
       this.logger.error(`[Payments] Error en getAllPaymentsWithoutPagination: ${error.message}`);
       return [];
@@ -458,8 +486,8 @@ export class PaymentsService {
    * Pagar un pago por su ID
    * Verifica que esté PENDING y procesa según el tipo de pago
    */
-  async payPayment(paymentId: string, paymentMethod: string = 'cash', userId?: string): Promise<any> {
-    console.log(`[PAYMENTS_SERVICE] payPayment called - paymentId: ${paymentId}, paymentMethod: ${paymentMethod}`);
+  async payPayment(paymentId: string, paymentMethod: string = 'cash', userId?: string, discountCode?: string, paymentDate?: Date): Promise<any> {
+    console.log(`[PAYMENTS_SERVICE] payPayment called - paymentId: ${paymentId}, paymentMethod: ${paymentMethod}, discountCode: ${discountCode}`);
 
     // 1. Obtener el pago
     const payment = await this.paymentRepository.findOne({
@@ -481,14 +509,14 @@ export class PaymentsService {
     let result: any;
     switch (payment.paymentType) {
       case PaymentType.REGISTRATION:
-        result = await this.payRegistrationPayment(payment, paymentMethod, userId);
+        result = await this.payRegistrationPayment(payment, paymentMethod, userId, discountCode, paymentDate);
         break;
       case PaymentType.MEMBERSHIP:
-        result = await this.payMembershipPayment(payment, paymentMethod, userId);
+        result = await this.payMembershipPayment(payment, paymentMethod, userId, discountCode, paymentDate);
         break;
       default:
-        // Otros tipos de pago también se completan igual
-        result = await this.payOtherTypePayment(payment, paymentMethod, userId);
+        // Otros tipos de pago también se completan igual (sin descuentos soportados por ahora)
+        result = await this.payOtherTypePayment(payment, paymentMethod, userId, paymentDate);
     }
 
     return result;
@@ -497,21 +525,40 @@ export class PaymentsService {
   /**
    * Procesar pago de inscripción
    */
-  private async payRegistrationPayment(payment: Payment, paymentMethod: string, userId?: string): Promise<any> {
+  private async payRegistrationPayment(payment: Payment, paymentMethod: string, userId?: string, discountCode?: string, paymentDate?: Date): Promise<any> {
     console.log(`[PAYMENTS_SERVICE] Processing REGISTRATION payment: ID=${payment.id}, Amount=${payment.amount}`);
 
-    // Actualizar estado a COMPLETED
+    let finalAmount = payment.amount;
+
+    if (discountCode) {
+      const validation = await this.promotionsService.validatePromoCode({
+        code: discountCode,
+      });
+
+      if (!validation.valid) {
+        throw new BadRequestException(`Código de descuento inválido: ${validation.message}`);
+      }
+
+      const discountAmount = payment.amount * (validation.discount / 100);
+      finalAmount = payment.amount - discountAmount;
+      
+      // Actualizar el uso del cupón
+      await this.promotionsService.applyPromotion(discountCode);
+    }
+
+    // Actualizar estado a COMPLETED y nuevo monto
     payment.status = PaymentStatus.COMPLETED;
+    payment.amount = finalAmount;
     payment.paymentMethod = paymentMethod as any;
-    payment.paymentDate = new Date();
+    payment.paymentDate = paymentDate || new Date();
     if (userId) {
       payment.updatedBy = userId;
     }
 
     const updatedPayment = await this.paymentRepository.save(payment);
-    console.log(`[PAYMENTS_SERVICE] ✅ Registration payment saved: ID=${updatedPayment.id}, Status=${updatedPayment.status}`);
+    console.log(`[PAYMENTS_SERVICE] ✅ Registration payment saved: ID=${updatedPayment.id}, Status=${updatedPayment.status}, FinalAmount=${finalAmount}`);
 
-    this.logger.log(`[Registration Payment] ✅ Payment completed. Amount: $${payment.amount}`);
+    this.logger.log(`[Registration Payment] ✅ Payment completed. Amount: $${finalAmount}`);
 
     return {
       statusCode: 200,
@@ -524,21 +571,42 @@ export class PaymentsService {
   /**
    * Procesar pago de membresía
    */
-  private async payMembershipPayment(payment: Payment, paymentMethod: string, userId?: string): Promise<any> {
+  private async payMembershipPayment(payment: Payment, paymentMethod: string, userId?: string, discountCode?: string, paymentDate?: Date): Promise<any> {
     console.log(`[PAYMENTS_SERVICE] Processing MEMBERSHIP payment: ID=${payment.id}, Amount=${payment.amount}`);
 
-    // Actualizar estado a COMPLETED
+    let finalAmount = payment.amount;
+    let appliedDiscountPercentage = 0;
+
+    if (discountCode) {
+      const validation = await this.promotionsService.validatePromoCode({
+        code: discountCode,
+      });
+
+      if (!validation.valid) {
+        throw new BadRequestException(`Código de descuento inválido: ${validation.message}`);
+      }
+
+      appliedDiscountPercentage = validation.discount;
+      const discountAmount = payment.amount * (validation.discount / 100);
+      finalAmount = payment.amount - discountAmount;
+      
+      // Actualizar el uso del cupón
+      await this.promotionsService.applyPromotion(discountCode);
+    }
+
+    // Actualizar estado a COMPLETED y el nuevo monto
     payment.status = PaymentStatus.COMPLETED;
+    payment.amount = finalAmount;
     payment.paymentMethod = paymentMethod as any;
-    payment.paymentDate = new Date();
+    payment.paymentDate = paymentDate || new Date();
     if (userId) {
       payment.updatedBy = userId;
     }
 
     const updatedPayment = await this.paymentRepository.save(payment);
-    console.log(`[PAYMENTS_SERVICE] ✅ Membership payment saved: ID=${updatedPayment.id}, Status=${updatedPayment.status}`);
 
-    this.logger.log(`[Membership Payment] ✅ Payment completed. Amount: $${payment.amount}`);
+    console.log(`[PAYMENTS_SERVICE] ✅ Membership payment saved: ID=${updatedPayment.id}, Status=${updatedPayment.status}, FinalAmount=${finalAmount}`);
+    this.logger.log(`[Membership Payment] ✅ Payment completed. Amount: $${finalAmount}`);
 
     return {
       statusCode: 200,
@@ -551,13 +619,13 @@ export class PaymentsService {
   /**
    * Procesar otros tipos de pago (CLASS, PRODUCT, SERVICE, OTHER)
    */
-  private async payOtherTypePayment(payment: Payment, paymentMethod: string, userId?: string): Promise<any> {
-    console.log(`[PAYMENTS_SERVICE] Processing ${payment.paymentType} payment: ID=${payment.id}, Amount=${payment.amount}`);
+  private async payOtherTypePayment(payment: Payment, paymentMethod: string, userId?: string, paymentDate?: Date): Promise<any> {
+    console.log(`[PAYMENTS_SERVICE] Processing OTHER payment: ID=${payment.id}, Amount=${payment.amount}`);
 
     // Actualizar estado a COMPLETED
     payment.status = PaymentStatus.COMPLETED;
     payment.paymentMethod = paymentMethod as any;
-    payment.paymentDate = new Date();
+    payment.paymentDate = paymentDate || new Date();
     if (userId) {
       payment.updatedBy = userId;
     }

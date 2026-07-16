@@ -89,12 +89,13 @@ export class PaymentsController {
   @HttpCode(HttpStatus.OK)
   async payPayment(
     @Param('id') paymentId: string,
-    @Body() body: { paymentMethod?: string },
+    @Body() body: { paymentMethod?: string; discountCode?: string; paymentDate?: string },
     @Req() req: any,
   ): Promise<any> {
     const userId = req.user?.userId;
-    console.log(`[PAYMENTS_CONTROLLER] POST /payments/:id/pay - paymentId: ${paymentId}, paymentMethod: ${body.paymentMethod || 'cash'}`);
-    return this.paymentsService.payPayment(paymentId, body.paymentMethod || 'cash', userId);
+    console.log(`[PAYMENTS_CONTROLLER] POST /payments/:id/pay - paymentId: ${paymentId}, paymentMethod: ${body.paymentMethod || 'cash'}, discountCode: ${body.discountCode || 'None'}, paymentDate: ${body.paymentDate || 'now'}`);
+    const date = body.paymentDate ? new Date(body.paymentDate) : undefined;
+    return this.paymentsService.payPayment(paymentId, body.paymentMethod || 'cash', userId, body.discountCode, date);
   }
 
   @Patch(':id/status')

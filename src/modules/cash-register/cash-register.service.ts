@@ -7,6 +7,9 @@ import { Payment } from '../../entities/payment.entity';
 import { AuditLog } from '../../entities/audit-log.entity';
 import { OpenCashRegisterDto, CloseCashRegisterDto } from './dto/cash-register.dto';
 import { AuditLogService } from '../audit-logs/audit-log.service';
+import { WhatsappService } from '../whatsapp-settings/whatsapp.service';
+import { EmailService } from '../email-settings/email.service';
+import { GymSettingsService } from '../gym-settings/gym-settings.service';
 
 @Injectable()
 export class CashRegisterService {
@@ -20,6 +23,9 @@ export class CashRegisterService {
     @InjectRepository(AuditLog)
     private auditLogRepository: Repository<AuditLog>,
     private auditLogService: AuditLogService,
+    private whatsappService: WhatsappService,
+    private emailService: EmailService,
+    private gymSettingsService: GymSettingsService,
   ) {}
 
   async openCashRegister(userId: string, dto: OpenCashRegisterDto): Promise<CashRegister> {
@@ -190,6 +196,58 @@ export class CashRegisterService {
     } catch (error) {
       console.error('[CashRegisterService] ❌ Error in closeCashRegister:', error);
       throw error;
+    }
+  }
+
+  async sendPdfReport(base64Pdf: string): Promise<void> {
+    try {
+      const settings = await this.gymSettingsService.getSettings();
+      if (!settings || !settings.closingReportRecipients || !Array.isArray(settings.closingReportRecipients)) {
+        console.log('[CashRegisterService] No closing report recipients configured, skipping.');
+        return;
+      }
+
+      const filename = `Cierre_Caja_${new Date().toISOString().slice(0, 10)}.pdf`;
+      const summaryText = `*Reporte de Cierre de Caja*\nSe adjunta el recibo del cierre de caja.\n_Generado por Gym Manager_`;
+      const summaryHtml = `<h2>Reporte de Cierre de Caja</h2><p>Se adjunta el recibo del cierre de caja generado por Gym Manager.</p>`;
+
+      const pdfBuffer = Buffer.from(base64Pdf, 'base64');
+
+      for (const recipient of settings.closingReportRecipients) {
+        if (recipient.sendWhatsapp && recipient.phone) {
+          try {
+            await this.whatsappService.sendBase64Pdf(
+              recipient.phone,
+              base64Pdf,
+              filename,
+              summaryText,
+            );
+            console.log(`[CashRegisterService] ✓ WhatsApp PDF sent to ${recipient.phone}`);
+          } catch (e) {
+            console.error(`[CashRegisterService] Failed to send WhatsApp PDF to ${recipient.phone}`, e);
+          }
+        }
+        if (recipient.sendEmail && recipient.email) {
+          try {
+            await this.emailService.sendEmailDirect({
+              to: recipient.email,
+              subject: `Reporte de Cierre de Caja - ${filename}`,
+              text: summaryText.replace(/\*/g, '').replace(/_/g, ''),
+              html: summaryHtml,
+              attachments: [{
+                filename,
+                content: pdfBuffer,
+                contentType: 'application/pdf',
+              }],
+            });
+            console.log(`[CashRegisterService] ✓ Email PDF sent to ${recipient.email}`);
+          } catch (e) {
+            console.error(`[CashRegisterService] Failed to send Email PDF to ${recipient.email}`, e);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('[CashRegisterService] Error sending PDF report:', error);
     }
   }
 

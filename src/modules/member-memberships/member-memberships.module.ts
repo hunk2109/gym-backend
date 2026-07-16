@@ -10,6 +10,7 @@ import { PromotionsModule } from '../promotions/promotions.module';
 import { EmailSettingsModule } from '../email-settings/email-settings.module';
 import { GroupsModule } from '../groups/groups.module';
 import { SyncModule } from '../sync/sync.module';
+import { WhatsappSettingsModule } from '../whatsapp-settings/whatsapp-settings.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { SyncModule } from '../sync/sync.module';
     EmailSettingsModule,
     GroupsModule,
     SyncModule,
+    WhatsappSettingsModule,
   ],
   controllers: [MemberMembershipsController],
   providers: [MemberMembershipsService],

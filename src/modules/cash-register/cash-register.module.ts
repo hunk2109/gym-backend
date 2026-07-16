@@ -10,9 +10,17 @@ import { SeedCashRegisterController } from './seed-cash-register.controller';
 import { CashRegisterValidationService } from './cash-register.validation.service';
 import { CashRegisterExportService } from './cash-register.export.service';
 import { AuditLogService } from '../audit-logs/audit-log.service';
+import { WhatsappSettingsModule } from '../whatsapp-settings/whatsapp-settings.module';
+import { EmailSettingsModule } from '../email-settings/email-settings.module';
+import { GymSettingsModule } from '../gym-settings/gym-settings.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([CashRegister, Sale, Payment, AuditLog])],
+  imports: [
+    TypeOrmModule.forFeature([CashRegister, Sale, Payment, AuditLog]),
+    WhatsappSettingsModule,
+    EmailSettingsModule,
+    GymSettingsModule
+  ],
   providers: [CashRegisterService, CashRegisterValidationService, CashRegisterExportService, AuditLogService],
   controllers: [CashRegisterController, SeedCashRegisterController],
   exports: [CashRegisterService, CashRegisterValidationService, CashRegisterExportService],

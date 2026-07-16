@@ -86,6 +86,9 @@ export class CreateGymSettingsDto {
   @IsOptional()
   @IsString()
   mb360Timezone?: string;
+
+  @IsOptional()
+  closingReportRecipients?: any;
 }
 
 export class UpdateGymSettingsDto {
@@ -173,4 +176,7 @@ export class UpdateGymSettingsDto {
   @IsOptional()
   @IsString()
   mb360Timezone?: string;
+
+  @IsOptional()
+  closingReportRecipients?: any;
 }
