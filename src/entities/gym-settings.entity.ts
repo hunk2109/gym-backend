@@ -95,6 +95,9 @@ export class GymSettings {
   @Column({ type: 'json', nullable: true })
   closingReportRecipients: any; // { name: string, phone: string, email: string, sendWhatsapp: boolean, sendEmail: boolean }[]
 
+  @Column({ type: 'varchar', default: 'both' })
+  notificationChannel: string; // 'email', 'whatsapp', or 'both'
+
   @CreateDateColumn()
   createdAt: Date;
 

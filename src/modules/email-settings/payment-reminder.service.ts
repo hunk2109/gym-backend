@@ -9,6 +9,7 @@ import { Member } from '../../entities/member.entity';
 import { MemberMembership } from '../../entities/member-membership.entity';
 import { GymSettingsService } from '../gym-settings/gym-settings.service';
 import { CronLoggingService } from './cron-logging.service';
+import { WhatsappService } from '../whatsapp-settings/whatsapp.service';
 
 @Injectable()
 export class PaymentReminderService {
@@ -24,6 +25,7 @@ export class PaymentReminderService {
     private emailService: EmailService,
     private gymSettingsService: GymSettingsService,
     private cronLoggingService: CronLoggingService,
+    private whatsappService: WhatsappService,
   ) {}
 
   async createReminder(dto: CreatePaymentReminderDto): Promise<PaymentReminder> {
@@ -158,17 +160,33 @@ export class PaymentReminderService {
 
       // Obtener configuración del gimnasio
       const gymSettings = await this.gymSettingsService.getSettings();
+      const notificationChannel = gymSettings?.notificationChannel || 'both';
 
       const subject = this.getReminderSubject(reminder.type);
       const htmlContent = this.getReminderTemplate(reminder, member, memberMembership, gymSettings);
+      const plainText = this.stripHtml(htmlContent);
 
-      // Enviar email
-      await this.emailService.sendEmailDirect({
-        to: memberUser.email,
-        subject,
-        html: htmlContent,
-        text: this.stripHtml(htmlContent),
-      });
+      const sendEmail = notificationChannel === 'both' || notificationChannel === 'email';
+      const sendWhatsapp = notificationChannel === 'both' || notificationChannel === 'whatsapp';
+
+      if (sendEmail && memberUser.email) {
+        await this.emailService.sendEmailDirect({
+          to: memberUser.email,
+          subject,
+          html: htmlContent,
+          text: plainText,
+        });
+        this.logger.log(`Payment reminder email sent to ${memberUser.email}`);
+      }
+
+      if (sendWhatsapp && memberUser.phone) {
+        try {
+          await this.whatsappService.sendMessage(memberUser.phone, plainText);
+          this.logger.log(`Payment reminder whatsapp sent to ${memberUser.phone}`);
+        } catch (waError) {
+          this.logger.error(`Failed to send WhatsApp reminder to ${memberUser.phone}:`, waError);
+        }
+      }
 
       // Actualizar recordatorio
       reminder.lastSentAt = new Date();

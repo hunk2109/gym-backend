@@ -89,6 +89,10 @@ export class CreateGymSettingsDto {
 
   @IsOptional()
   closingReportRecipients?: any;
+
+  @IsOptional()
+  @IsString()
+  notificationChannel?: string;
 }
 
 export class UpdateGymSettingsDto {
@@ -179,4 +183,8 @@ export class UpdateGymSettingsDto {
 
   @IsOptional()
   closingReportRecipients?: any;
+
+  @IsOptional()
+  @IsString()
+  notificationChannel?: string;
 }

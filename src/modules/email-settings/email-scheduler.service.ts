@@ -11,6 +11,7 @@ import { EmailTemplate, EmailTriggerType } from './entities';
 import { SendEmailDto } from './dto';
 import { GymSettingsService } from '../gym-settings/gym-settings.service';
 import { CronLoggingService } from './cron-logging.service';
+import { WhatsappService } from '../whatsapp-settings/whatsapp.service';
 
 @Injectable()
 export class EmailSchedulerService {
@@ -31,6 +32,7 @@ export class EmailSchedulerService {
     private emailService: EmailService,
     private gymSettingsService: GymSettingsService,
     private cronLoggingService: CronLoggingService,
+    private whatsappService: WhatsappService,
   ) {}
 
   /**
@@ -69,10 +71,14 @@ export class EmailSchedulerService {
 
       // Obtener nombre del gimnasio
       let gymName = 'GYM Manager';
+      let notificationChannel = 'both';
       try {
         const gymSettings = await this.gymSettingsService.getSettings();
         if (gymSettings?.gymName) {
           gymName = gymSettings.gymName;
+        }
+        if (gymSettings?.notificationChannel) {
+          notificationChannel = gymSettings.notificationChannel;
         }
       } catch (gymError) {
         this.logger.warn(`Failed to get gym settings: ${gymError.message}`);
@@ -96,16 +102,35 @@ export class EmailSchedulerService {
             variables['code'] = this.generatePromoCode('BDAY');
           }
 
-          await this.emailService.sendEmail({
-            templateId: template.id,
-            recipientEmail: user.email,
-            recipientName: `${user.firstName} ${user.lastName}`,
-            memberId: member.id,
-            variables,
-          });
+          const sendEmail = notificationChannel === 'both' || notificationChannel === 'email';
+          const sendWhatsapp = notificationChannel === 'both' || notificationChannel === 'whatsapp';
 
-          this.logger.log(`Birthday email sent to ${user.email}`);
-          emailsSent++;
+          if (sendEmail && user.email) {
+            await this.emailService.sendEmail({
+              templateId: template.id,
+              recipientEmail: user.email,
+              recipientName: `${user.firstName} ${user.lastName}`,
+              memberId: member.id,
+              variables,
+            });
+            this.logger.log(`Birthday email sent to ${user.email}`);
+            emailsSent++;
+          }
+
+          if (sendWhatsapp && user.phone) {
+            let rawText = template.htmlContent || '¡Feliz Cumpleaños!';
+            for (const [key, value] of Object.entries(variables)) {
+              const regex = new RegExp(`{{\\s*${key}\\s*}}`, 'g');
+              rawText = rawText.replace(regex, value as string);
+            }
+            const plainText = rawText.replace(/<[^>]*>?/gm, '').trim();
+            try {
+              await this.whatsappService.sendMessage(user.phone, plainText);
+              this.logger.log(`Birthday whatsapp sent to ${user.phone}`);
+            } catch (waError) {
+              this.logger.error(`Failed to send WhatsApp to ${user.phone}:`, waError);
+            }
+          }
         } catch (error) {
           this.logger.error(`Failed to send birthday email to member ${member.id}`, error);
         }
@@ -160,10 +185,14 @@ export class EmailSchedulerService {
 
       // Obtener nombre del gimnasio
       let gymName = 'GYM Manager';
+      let notificationChannel = 'both';
       try {
         const gymSettings = await this.gymSettingsService.getSettings();
         if (gymSettings?.gymName) {
           gymName = gymSettings.gymName;
+        }
+        if (gymSettings?.notificationChannel) {
+          notificationChannel = gymSettings.notificationChannel;
         }
       } catch (gymError) {
         this.logger.warn(`Failed to get gym settings: ${gymError.message}`);
@@ -191,16 +220,35 @@ export class EmailSchedulerService {
             variables['code'] = this.generatePromoCode('ANNV');
           }
 
-          await this.emailService.sendEmail({
-            templateId: template.id,
-            recipientEmail: user.email,
-            recipientName: `${user.firstName} ${user.lastName}`,
-            memberId: member.id,
-            variables,
-          });
+          const sendEmail = notificationChannel === 'both' || notificationChannel === 'email';
+          const sendWhatsapp = notificationChannel === 'both' || notificationChannel === 'whatsapp';
 
-          this.logger.log(`Anniversary email sent to ${user.email}`);
-          emailsSent++;
+          if (sendEmail && user.email) {
+            await this.emailService.sendEmail({
+              templateId: template.id,
+              recipientEmail: user.email,
+              recipientName: `${user.firstName} ${user.lastName}`,
+              memberId: member.id,
+              variables,
+            });
+            this.logger.log(`Anniversary email sent to ${user.email}`);
+            emailsSent++;
+          }
+
+          if (sendWhatsapp && user.phone) {
+            let rawText = template.htmlContent || '¡Feliz Aniversario!';
+            for (const [key, value] of Object.entries(variables)) {
+              const regex = new RegExp(`{{\\s*${key}\\s*}}`, 'g');
+              rawText = rawText.replace(regex, value as string);
+            }
+            const plainText = rawText.replace(/<[^>]*>?/gm, '').trim();
+            try {
+              await this.whatsappService.sendMessage(user.phone, plainText);
+              this.logger.log(`Anniversary whatsapp sent to ${user.phone}`);
+            } catch (waError) {
+              this.logger.error(`Failed to send WhatsApp to ${user.phone}:`, waError);
+            }
+          }
         } catch (error) {
           this.logger.error(`Failed to send anniversary email to member ${anniversary.member.id}`, error);
         }
