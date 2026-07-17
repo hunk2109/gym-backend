@@ -30,7 +30,7 @@ pm2 delete sggi-backend 2>$null
 
 # 6. Iniciar la aplicación
 Write-Host "6. Iniciando el backend de forma invisible..." -ForegroundColor Yellow
-pm2 start dist/main.js --name "sggi-backend"
+pm2 start dist/src/main.js --name "sggi-backend"
 
 # 7. Guardar la configuración
 Write-Host "7. Guardando configuración para el próximo reinicio..." -ForegroundColor Yellow
