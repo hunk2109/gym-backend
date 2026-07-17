@@ -11,6 +11,7 @@ import { EmailService } from '../email-settings/email.service';
 import { ModulesManagementService } from '../modules-management/modules-management.service';
 import { GymSettingsService } from '../gym-settings/gym-settings.service';
 import { AccessService } from '../sync/access.service';
+import { WhatsappService, WhatsappStatus } from '../whatsapp-settings/whatsapp.service';
 
 @Injectable()
 export class EmployeeService {
@@ -26,6 +27,7 @@ export class EmployeeService {
     private modulesManagementService: ModulesManagementService,
     private gymSettingsService: GymSettingsService,
     private accessService: AccessService,
+    private whatsappService: WhatsappService,
   ) {}
 
   async create(createDto: CreateEmployeeDto, authUser?: any): Promise<Employee> {
@@ -61,8 +63,11 @@ export class EmployeeService {
     });
     const createdEmployee = await this.employeeRepository.save(employee) as any;
 
-    // Crear usuario automáticamente para el empleado
+    const existingUser = await this.userRepository.findOne({ where: { email: createDto.email } });
+
     let tempPassword: string | null = null;
+    if (!existingUser) {
+      // Crear usuario automáticamente para el empleado
     try {
       tempPassword = this.generateTemporaryPassword();
       const hashedPassword = await bcrypt.hash(tempPassword, 10);
@@ -127,6 +132,13 @@ export class EmployeeService {
       } catch (settingError) {
         this.logger.warn(`Failed to check email setting: ${settingError.message}, proceeding with email`);
       }
+    } catch (userError) {
+      this.logger.error(`Failed to create user for employee ${createdEmployee.email}`, userError);
+      // No fallar la operación si el usuario no se crea
+    }
+    } else {
+      this.logger.log(`User already exists for employee ${createdEmployee.email}, skipping user creation.`);
+    }
 
       // SINCRONIZAR A ZKACCESS (Empleado sin límite de tiempo)
       try {
@@ -141,10 +153,6 @@ export class EmployeeService {
       } catch (accessError) {
         this.logger.error(`[EmployeeService] ❌ Falló la sincronización a Access del empleado ${createdEmployee.id}`, accessError);
       }
-    } catch (userError) {
-      this.logger.error(`Failed to create user for employee ${createdEmployee.email}`, userError);
-      // No fallar la operación si el usuario no se crea
-    }
 
     // Registrar creación en auditoría
     try {
@@ -354,18 +362,20 @@ export class EmployeeService {
     employee.isActive = false;
     
     try {
-      // Marcar usuario como inactivo también
-      try {
-        const user = await this.userRepository.findOne({
-          where: { email: employee.email },
-        });
-        if (user) {
-          user.isActive = false;
-          await this.userRepository.save(user);
-          this.logger.log(`User deactivated for employee ${employee.email}`);
+      // Marcar usuario como inactivo también (sólo si no se pide omitirlo, por defecto sí se desactiva)
+      if (authUser?.skipUserDeactivation !== true) {
+        try {
+          const user = await this.userRepository.findOne({
+            where: { email: employee.email },
+          });
+          if (user) {
+            user.isActive = false;
+            await this.userRepository.save(user);
+            this.logger.log(`User deactivated for employee ${employee.email}`);
+          }
+        } catch (userError) {
+          this.logger.warn(`Failed to deactivate user for employee ${employee.email}: ${userError.message}`);
         }
-      } catch (userError) {
-        this.logger.warn(`Failed to deactivate user for employee ${employee.email}: ${userError.message}`);
       }
 
       // Guardar empleado como inactivo
@@ -487,5 +497,52 @@ export class EmployeeService {
       console.error('Error getting user name:', error);
     }
     return undefined;
+  }
+
+  async resetPasswordAndSendCredentials(user: User, employee: Employee) {
+    try {
+      const tempPassword = this.generateTemporaryPassword();
+      user.passwordHash = await bcrypt.hash(tempPassword, 10);
+      await this.userRepository.save(user);
+
+      // Obtener nombre del gimnasio
+      let gymName = 'GYM Manager';
+      try {
+        const gymSettings = await this.gymSettingsService.getSettings();
+        if (gymSettings?.gymName) {
+          gymName = gymSettings.gymName;
+        }
+      } catch (e) {}
+
+      // Enviar correo si está habilitado
+      try {
+        const sendWelcomeEmail = await this.modulesManagementService.getModuleSetting('employees', 'sendWelcomeEmailToEmployees');
+        if (sendWelcomeEmail) {
+          await this.emailService.sendEmail({
+            recipientEmail: user.email,
+            recipientName: `${user.firstName} ${user.lastName}`,
+            subject: `¡Bienvenido a ${gymName}! - Acceso de Empleado`,
+            htmlContent: this.generateEmployeeWelcomeEmailHTML(user.firstName, user.email, tempPassword, gymName),
+          });
+          this.logger.log(`Credentials email sent to ${user.email}`);
+        }
+      } catch (e) {
+        this.logger.error(`Failed to send credentials email to ${user.email}`, e);
+      }
+
+      // Enviar WhatsApp si está activo
+      try {
+        const statusInfo = this.whatsappService.getStatus();
+        if (statusInfo && statusInfo.status === WhatsappStatus.CONNECTED) {
+          const waMessage = `🏋️ *¡Bienvenido a tu cuenta de empleado en ${gymName}!*\n\nHola *${user.firstName}*, tu rol ha sido actualizado. Aquí tienes tus nuevas credenciales de acceso:\n\n📧 *Email:* ${user.email}\n🔑 *Contraseña temporal:* ${tempPassword}\n\n⚠️ Por favor, cambia tu contraseña al ingresar.\nNo compartas estos datos con nadie.`;
+          await this.whatsappService.sendMessage(user.phone || employee.phone, waMessage);
+          this.logger.log(`Credentials WhatsApp sent to ${user.phone || employee.phone}`);
+        }
+      } catch (e) {
+        this.logger.error(`Failed to send credentials WhatsApp to ${user.email}`, e);
+      }
+    } catch (e) {
+      this.logger.error(`Error in resetPasswordAndSendCredentials for ${user.email}`, e);
+    }
   }
 }

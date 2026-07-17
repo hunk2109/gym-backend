@@ -9,6 +9,7 @@ import { EmailSettingsModule } from '../email-settings/email-settings.module';
 import { ModulesManagementModule } from '../modules-management/modules-management.module';
 import { GymSettingsModule } from '../gym-settings/gym-settings.module';
 import { SyncModule } from '../sync/sync.module';
+import { WhatsappSettingsModule } from '../whatsapp-settings/whatsapp-settings.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { SyncModule } from '../sync/sync.module';
     ModulesManagementModule,
     GymSettingsModule,
     SyncModule,
+    WhatsappSettingsModule,
   ],
   providers: [EmployeeService],
   controllers: [EmployeeController],

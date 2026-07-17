@@ -94,14 +94,21 @@ export class UserRolesService {
                 this.logger.error(`[UserRolesService] Error reactivando ZKAccess para empleado ${existingEmployee.id}`, accessError);
               }
             }
+            
+            // Enviar credenciales
+            await this.employeeService.resetPasswordAndSendCredentials(user, existingEmployee);
           } else {
              // Solo actualizar el rol si ya estaba activo
              existingEmployee.role = this.mapUserRoleToEmployeeRole(newRole);
              await this.employeeService.update(existingEmployee.id, existingEmployee);
+             
+             // Opcional: si ya estaba activo, podríamos no reenviar contraseñas
+             // Pero el usuario pidió que se manden las credenciales "cuando pase eso" (cuando se cambie el rol)
+             await this.employeeService.resetPasswordAndSendCredentials(user, existingEmployee);
           }
         } else {
           // Crear empleado nuevo (salario 0)
-          await this.employeeService.create({
+          const createdEmployee = await this.employeeService.create({
             firstName: user.firstName,
             lastName: user.lastName,
             email: user.email,
@@ -112,12 +119,14 @@ export class UserRolesService {
             hireDate: new Date().toISOString(),
           }, { id: requestingUserId });
           this.logger.log(`[UserRolesService] Empleado nuevo creado para usuario ${user.id} tras cambio de rol a ${newRole}.`);
+          
+          await this.employeeService.resetPasswordAndSendCredentials(user, createdEmployee);
         }
       } else if (oldRole !== UserRole.CLIENTE && newRole === UserRole.CLIENTE) {
         // Degradación: Empleado -> Cliente
         const existingEmployee = await this.employeeService.findByEmail(user.email);
         if (existingEmployee && existingEmployee.isActive) {
-           await this.employeeService.delete(existingEmployee.id, { id: requestingUserId });
+           await this.employeeService.delete(existingEmployee.id, { id: requestingUserId, skipUserDeactivation: true });
            this.logger.log(`[UserRolesService] Empleado ${existingEmployee.id} desactivado tras cambio de rol a ${newRole}.`);
         }
       }
