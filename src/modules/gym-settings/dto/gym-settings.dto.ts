@@ -92,6 +92,14 @@ export class CreateGymSettingsDto {
 
   @IsOptional()
   @IsString()
+  closingReportTime1?: string;
+
+  @IsOptional()
+  @IsString()
+  closingReportTime2?: string;
+
+  @IsOptional()
+  @IsString()
   notificationChannel?: string;
 }
 
@@ -183,6 +191,14 @@ export class UpdateGymSettingsDto {
 
   @IsOptional()
   closingReportRecipients?: any;
+
+  @IsOptional()
+  @IsString()
+  closingReportTime1?: string;
+
+  @IsOptional()
+  @IsString()
+  closingReportTime2?: string;
 
   @IsOptional()
   @IsString()

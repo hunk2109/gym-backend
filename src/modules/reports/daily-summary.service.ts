@@ -23,17 +23,29 @@ export class DailySummaryService {
     private whatsappService: WhatsappService,
   ) {}
 
-  @Cron('0 12,21 * * *')
+  @Cron(CronExpression.EVERY_MINUTE)
   async handleDailySummaryCron() {
-    this.logger.log('Iniciando cron job de resumen diario...');
     try {
-      await this.generateAndSendDailySummary();
+      const settingsList = await this.gymSettingsRepository.find({ order: { updatedAt: 'DESC' }, take: 1 });
+      if (!settingsList.length) return;
+      
+      const settings = settingsList[0];
+      const time1 = settings.closingReportTime1 || '12:00';
+      const time2 = settings.closingReportTime2 || '21:00';
+
+      const now = new Date();
+      const timeString = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+
+      if (timeString === time1 || timeString === time2) {
+        this.logger.log(`Es la hora programada (${timeString}) para el reporte diario...`);
+        await this.generateAndSendDailySummary(settings);
+      }
     } catch (error) {
       this.logger.error('Error al ejecutar cron job de resumen diario:', error);
     }
   }
 
-  async generateAndSendDailySummary() {
+  async generateAndSendDailySummary(passedSettings?: GymSettings) {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today);
@@ -118,10 +130,12 @@ export class DailySummaryService {
     await browser.close();
     
     // 5. Enviar a Destinatarios
-    const settingsList = await this.gymSettingsRepository.find({ order: { updatedAt: 'DESC' }, take: 1 });
-    if (!settingsList.length) return;
-    
-    const settings = settingsList[0];
+    let settings = passedSettings;
+    if (!settings) {
+      const settingsList = await this.gymSettingsRepository.find({ order: { updatedAt: 'DESC' }, take: 1 });
+      if (!settingsList.length) return;
+      settings = settingsList[0];
+    }
     const recipients = settings.closingReportRecipients || [];
 
     for (const recipient of recipients) {

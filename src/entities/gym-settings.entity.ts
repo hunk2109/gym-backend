@@ -95,6 +95,12 @@ export class GymSettings {
   @Column({ type: 'json', nullable: true })
   closingReportRecipients: any; // { name: string, phone: string, email: string, sendWhatsapp: boolean, sendEmail: boolean }[]
 
+  @Column({ type: 'varchar', default: '12:00' })
+  closingReportTime1: string;
+
+  @Column({ type: 'varchar', default: '21:00' })
+  closingReportTime2: string;
+
   @Column({ type: 'varchar', default: 'both' })
   notificationChannel: string; // 'email', 'whatsapp', or 'both'
 
