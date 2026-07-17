@@ -55,6 +55,10 @@ export class UserRolesService {
 
     const oldRole = user.role;
     user.role = newRole;
+    
+    // Siempre asegurar que el usuario esté activo si se cambia a cliente o si se está cambiando de rol
+    user.isActive = true;
+    
     const updatedUser = await this.userRepository.save(user);
 
     // Log de acción sensible
