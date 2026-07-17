@@ -17,7 +17,8 @@ export class SyncService {
   async performInitialSync(): Promise<any> {
     this.logger.log('Iniciando sincronización inicial...');
     try {
-      const result = await this.accessService.syncAll();
+      // Pasamos true para incluir los productos en la carga manual
+      const result = await this.accessService.syncAll(true);
       this.lastSyncTime = new Date();
       return {
         success: true,
@@ -41,15 +42,15 @@ export class SyncService {
     this.isSyncEnabled = true;
     this.logger.log('Sincronización automática habilitada');
 
-    // Ejecutar la primera sincronización inmediatamente
-    this.accessService.syncAll().catch((error) => {
+    // Ejecutar la primera sincronización inmediatamente (sin productos)
+    this.accessService.syncAll(false).catch((error) => {
       this.logger.error(`Error en sync automático: ${error}`);
     });
 
-    // Luego ejecutar cada 5 minutos
+    // Luego ejecutar cada 5 minutos (sin productos)
     this.syncInterval = setInterval(() => {
       this.logger.log('Ejecutando sincronización automática...');
-      this.accessService.syncAll().catch((error) => {
+      this.accessService.syncAll(false).catch((error) => {
         this.logger.error(`Error en sync automático: ${error}`);
       });
     }, 5 * 60 * 1000); // 5 minutos

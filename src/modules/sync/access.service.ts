@@ -602,20 +602,27 @@ export class AccessService {
 
   /**
    * Ejecuta sincronización completa
+   * @param includeProducts Si es true, también sincroniza los productos (Carga Inicial). False por defecto.
    */
-  async syncAll() {
+  async syncAll(includeProducts: boolean = false) {
     this.validateAccessDbPath();
-    this.logger.log('========== INICIANDO SINCRONIZACIÓN COMPLETA ==========');
+    this.logger.log(`========== INICIANDO SINCRONIZACIÓN COMPLETA (Productos: ${includeProducts}) ==========`);
 
-    const results = {
+    const results: any = {
       users: await this.syncUsers(),
-      products: await this.syncProducts(),
       members: await this.syncMembers(),
       memberships: await this.syncMemberships(),
       payments: await this.syncPayments(),
       attendances: await this.syncAttendances(),
       timestamp: new Date(),
     };
+
+    if (includeProducts) {
+      this.logger.log('Sincronizando productos (Carga Inicial manual)...');
+      results.products = await this.syncProducts();
+    } else {
+      this.logger.log('Omitiendo sincronización de productos para mantener el stock manual.');
+    }
 
     this.logger.log('========== SINCRONIZACIÓN COMPLETADA ==========');
     return results;
