@@ -709,7 +709,7 @@ export class MembershipsService {
                   name: currentMembership.member.user.firstName,
                   lastname: currentMembership.member.user.lastName,
                   email: currentMembership.member.user.email,
-                  acc_enddate: null, // Bloquear
+                  acc_enddate: '2000-01-01', // Bloquear
                 });
               }
             } catch(e) {}
@@ -814,7 +814,7 @@ export class MembershipsService {
               name: currentMembership.member.user.firstName,
               lastname: currentMembership.member.user.lastName,
               email: currentMembership.member.user.email,
-              acc_enddate: null, // Bloquear
+              acc_enddate: '2000-01-01', // Bloquear
             });
           }
         } catch(e) {}

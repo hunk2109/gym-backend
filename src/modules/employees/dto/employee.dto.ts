@@ -33,6 +33,14 @@ export class CreateEmployeeDto {
   @IsOptional()
   @IsString()
   emergencyContact?: string;
+
+  @IsOptional()
+  @IsString()
+  bank?: string;
+
+  @IsOptional()
+  @IsString()
+  accountNumber?: string;
 }
 
 export class UpdateEmployeeDto {
@@ -72,4 +80,12 @@ export class UpdateEmployeeDto {
   @IsOptional()
   @IsString()
   emergencyContact?: string;
+
+  @IsOptional()
+  @IsString()
+  bank?: string;
+
+  @IsOptional()
+  @IsString()
+  accountNumber?: string;
 }

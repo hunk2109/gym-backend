@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Body, Param, UseGuards, Req, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Post, Get, Body, Param, Query, UseGuards, Req, HttpCode, HttpStatus } from '@nestjs/common';
 import { UserRolesService } from './user-roles.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -45,8 +45,13 @@ export class UserRolesController {
 
   @Get('clients')
   @Roles(UserRole.ADMIN)
-  async getActiveClients(@Req() req: any) {
-    const clients = await this.userRolesService.getActiveClients();
+  async getActiveClients(
+    @Req() req: any,
+    @Query('limit') limit?: string,
+    @Query('search') search?: string,
+  ) {
+    const limitNum = limit ? parseInt(limit, 10) : undefined;
+    const clients = await this.userRolesService.getActiveClients(limitNum, search);
     
     // Mapear a objetos simples sin campos sensibles
     const clientsData = clients.map(client => ({

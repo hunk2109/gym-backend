@@ -10,6 +10,7 @@ import { User, UserRole } from '../../entities/user.entity';
 import { EmailService } from '../email-settings/email.service';
 import { ModulesManagementService } from '../modules-management/modules-management.service';
 import { GymSettingsService } from '../gym-settings/gym-settings.service';
+import { AccessService } from '../sync/access.service';
 
 @Injectable()
 export class EmployeeService {
@@ -24,6 +25,7 @@ export class EmployeeService {
     private emailService: EmailService,
     private modulesManagementService: ModulesManagementService,
     private gymSettingsService: GymSettingsService,
+    private accessService: AccessService,
   ) {}
 
   async create(createDto: CreateEmployeeDto, authUser?: any): Promise<Employee> {
@@ -35,8 +37,26 @@ export class EmployeeService {
       throw new BadRequestException('Employee with this email already exists');
     }
 
+    // Generar accessCode (ej: 900001)
+    const lastEmployeeWithCode = await this.employeeRepository
+      .createQueryBuilder('employee')
+      .where('employee.accessCode IS NOT NULL')
+      .orderBy('employee.accessCode', 'DESC')
+      .limit(1)
+      .getOne();
+    
+    let nextCode = 900001;
+    if (lastEmployeeWithCode && lastEmployeeWithCode.accessCode) {
+      const parsed = parseInt(lastEmployeeWithCode.accessCode, 10);
+      if (!isNaN(parsed)) {
+        nextCode = parsed + 1;
+      }
+    }
+    const accessCode = nextCode.toString();
+
     const employee = this.employeeRepository.create({
       ...createDto,
+      accessCode,
       hireDate: createDto.hireDate ? new Date(createDto.hireDate) : new Date(),
     });
     const createdEmployee = await this.employeeRepository.save(employee) as any;
@@ -73,42 +93,53 @@ export class EmployeeService {
 
         if (!sendWelcomeEmail) {
           this.logger.log(`Welcome email disabled for employees, skipping email for ${createdEmployee.email}`);
-          return createdEmployee;
+        } else {
+          // Enviar email con contraseña temporal
+          try {
+            // Obtener nombre del gimnasio
+            let gymName = 'GYM Manager';
+            try {
+              const gymSettings = await this.gymSettingsService.getSettings();
+              if (gymSettings?.gymName) {
+                gymName = gymSettings.gymName;
+              }
+            } catch (gymError) {
+              this.logger.warn(`Failed to get gym settings: ${gymError.message}, using default gym name`);
+            }
+
+            await this.emailService.sendEmail({
+              recipientEmail: createdEmployee.email,
+              recipientName: `${createdEmployee.firstName} ${createdEmployee.lastName}`,
+              subject: `¡Bienvenido a ${gymName}! - Acceso de Empleado`,
+              htmlContent: this.generateEmployeeWelcomeEmailHTML(
+                createdEmployee.firstName,
+                createdEmployee.email,
+                tempPassword,
+                gymName,
+              ),
+            });
+            
+            this.logger.log(`Welcome email sent to employee ${createdEmployee.email}`);
+          } catch (emailError) {
+            this.logger.error(`Failed to send welcome email to employee ${createdEmployee.email}`, emailError);
+          }
         }
       } catch (settingError) {
         this.logger.warn(`Failed to check email setting: ${settingError.message}, proceeding with email`);
       }
 
-      // Enviar email con contraseña temporal
+      // SINCRONIZAR A ZKACCESS (Empleado sin límite de tiempo)
       try {
-        // Obtener nombre del gimnasio
-        let gymName = 'GYM Manager';
-        try {
-          const gymSettings = await this.gymSettingsService.getSettings();
-          if (gymSettings?.gymName) {
-            gymName = gymSettings.gymName;
-          }
-        } catch (gymError) {
-          this.logger.warn(`Failed to get gym settings: ${gymError.message}, using default gym name`);
-        }
-
-        await this.emailService.sendEmail({
-          recipientEmail: createdEmployee.email,
-          recipientName: `${createdEmployee.firstName} ${createdEmployee.lastName}`,
-          subject: `¡Bienvenido a ${gymName}! - Acceso de Empleado`,
-          htmlContent: this.generateEmployeeWelcomeEmailHTML(
-            createdEmployee.firstName,
-            createdEmployee.email,
-            tempPassword,
-            gymName,
-          ),
-          plainTextContent: `Hola ${createdEmployee.firstName},\n\nTe hemos creado una cuenta como empleado en ${gymName}.\n\nTus datos de acceso:\nEmail: ${createdEmployee.email}\nContraseña temporal: ${tempPassword}\n\nPor favor, cámbiala en tu perfil después de iniciar sesión.`,
+        this.logger.log(`[EmployeeService] 🔄 Empujando empleado a ZKAccess (USERINFO)...`);
+        await this.accessService.pushMemberToAccess({
+          Badgenumber: accessCode,
+          name: createdEmployee.firstName,
+          lastname: createdEmployee.lastName,
+          email: createdEmployee.email,
+          acc_enddate: '2099-12-31'
         });
-
-        this.logger.log(`Welcome email sent to ${createdEmployee.email}`);
-      } catch (emailError) {
-        this.logger.error(`Failed to send welcome email to ${createdEmployee.email}`, emailError);
-        // No fallar la operación si el email no se envía
+      } catch (accessError) {
+        this.logger.error(`[EmployeeService] ❌ Falló la sincronización a Access del empleado ${createdEmployee.id}`, accessError);
       }
     } catch (userError) {
       this.logger.error(`Failed to create user for employee ${createdEmployee.email}`, userError);
@@ -248,9 +279,13 @@ export class EmployeeService {
   async findById(id: string): Promise<Employee> {
     const employee = await this.employeeRepository.findOne({ where: { id } });
     if (!employee) {
-      throw new NotFoundException('Employee not found');
+      throw new NotFoundException(`Employee with ID ${id} not found`);
     }
     return employee;
+  }
+
+  async findByEmail(email: string): Promise<Employee | null> {
+    return this.employeeRepository.findOne({ where: { email } });
   }
 
   async findByRole(role: EmployeeRole): Promise<Employee[]> {
@@ -336,6 +371,22 @@ export class EmployeeService {
       // Guardar empleado como inactivo
       await this.employeeRepository.save(employee);
       this.logger.log(`Employee deactivated (soft delete): ${employee.id}`);
+
+      // Bloquear en Access
+      try {
+        if (employee.accessCode) {
+          this.logger.log(`[EmployeeService] 🔄 Bloqueando empleado en ZKAccess (USERINFO)...`);
+          await this.accessService.pushMemberToAccess({
+            Badgenumber: employee.accessCode,
+            name: employee.firstName,
+            lastname: employee.lastName,
+            email: employee.email,
+            acc_enddate: '2000-01-01' // Fecha pasada para bloquear acceso
+          });
+        }
+      } catch (accessError) {
+        this.logger.error(`[EmployeeService] ❌ Falló la sincronización de bloqueo a Access del empleado ${employee.id}`, accessError);
+      }
 
       // Registrar eliminación en auditoría
       try {

@@ -55,6 +55,15 @@ export class Employee {
   @Column({ type: 'text', nullable: true })
   emergencyContact: string;
 
+  @Column({ type: 'varchar', nullable: true })
+  bank: string;
+
+  @Column({ type: 'varchar', nullable: true })
+  accountNumber: string;
+
+  @Column({ type: 'varchar', nullable: true, unique: true })
+  accessCode: string;
+
   @CreateDateColumn()
   createdAt: Date;
 

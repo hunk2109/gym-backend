@@ -350,7 +350,7 @@ export class MembersService {
         name: user.firstName,
         lastname: user.lastName,
         email: user.email,
-        acc_enddate: null // Nuevo socio sin suscripción empieza bloqueado o sin fecha
+        acc_enddate: '2000-01-01' // Nuevo socio sin suscripción empieza bloqueado o sin fecha
       });
     } catch (accessError) {
       this.logger.error(`[MembersService] ❌ Falló la sincronización a Access del socio ${savedMember.id}`, accessError);
