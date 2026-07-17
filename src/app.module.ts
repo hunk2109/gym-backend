@@ -4,6 +4,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { APP_INTERCEPTOR } from '@nestjs/core';
+import { ScheduleModule } from '@nestjs/schedule';
 import * as mysql from 'mysql2/promise';
 
 import { User } from './entities/user.entity';
@@ -115,6 +116,7 @@ import { LoggerMiddleware } from './common/middleware';
         };
       },
     }),
+    ScheduleModule.forRoot(),
     PassportModule,
     JwtModule.register({
       secret: process.env.JWT_SECRET || 'muerete66',

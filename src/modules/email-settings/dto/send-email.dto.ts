@@ -31,6 +31,9 @@ export class SendEmailDto {
   // Variables para reemplazar en template
   @IsOptional()
   variables?: Record<string, string>;
+
+  @IsOptional()
+  attachments?: { filename: string; content: any; contentType?: string }[];
 }
 
 export class SendTestEmailDto {

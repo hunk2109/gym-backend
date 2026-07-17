@@ -6,6 +6,7 @@ import { EmployeeRole } from '../../entities/employee.entity';
 import { PermissionsService } from '../auth/services/permissions.service';
 import { EmployeeService } from '../employees/employee.service';
 import { AccessService } from '../sync/access.service';
+import { Member } from '../../entities/member.entity';
 
 @Injectable()
 export class UserRolesService {
@@ -14,6 +15,8 @@ export class UserRolesService {
   constructor(
     @InjectRepository(User)
     private userRepository: Repository<User>,
+    @InjectRepository(Member)
+    private memberRepository: Repository<Member>,
     private readonly permissionsService: PermissionsService,
     @Inject(forwardRef(() => EmployeeService))
     private readonly employeeService: EmployeeService,
@@ -132,6 +135,33 @@ export class UserRolesService {
         if (existingEmployee && existingEmployee.isActive) {
            await this.employeeService.delete(existingEmployee.id, { id: requestingUserId, skipUserDeactivation: true });
            this.logger.log(`[UserRolesService] Empleado ${existingEmployee.id} desactivado tras cambio de rol a ${newRole}.`);
+        }
+        
+        // Asegurarnos de que exista como Miembro para que salga en la pantalla
+        const existingMember = await this.memberRepository.findOne({ where: { userId: user.id } });
+        if (!existingMember) {
+          // Generar código de miembro
+          const year = new Date().getFullYear();
+          const lastMember = await this.memberRepository
+            .createQueryBuilder('member')
+            .where('member.memberCode LIKE :year', { year: `${year}-%` })
+            .orderBy('member.memberCode', 'DESC')
+            .limit(1)
+            .getOne();
+          
+          let nextSequence = 1;
+          if (lastMember && lastMember.memberCode) {
+            nextSequence = parseInt(lastMember.memberCode.split('-')[1], 10) + 1;
+          }
+          const memberCode = `${year}-${String(nextSequence).padStart(4, '0')}`;
+
+          await this.memberRepository.save({
+            userId: user.id,
+            memberCode: memberCode,
+            emergencyContact: '',
+            emergencyPhone: '',
+          });
+          this.logger.log(`[UserRolesService] Perfil de miembro creado para el usuario ${user.id}`);
         }
       }
     } catch (employeeSyncError) {

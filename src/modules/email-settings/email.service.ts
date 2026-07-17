@@ -143,13 +143,17 @@ export class EmailService {
       }
 
       // Enviar correo
-      const mailOptions = {
+      const mailOptions: any = {
         from: `${config.senderName || 'Gym Manager'} <${config.email}>`,
         to: dto.recipientEmail,
         subject,
         html: htmlContent,
         text: plainTextContent,
       };
+
+      if (dto.attachments && dto.attachments.length > 0) {
+        mailOptions.attachments = dto.attachments;
+      }
 
       const info = await this.transporter.sendMail(mailOptions);
 
