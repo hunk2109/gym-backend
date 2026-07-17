@@ -185,13 +185,19 @@ export class EmailService {
         }
 
         if (phoneNumber) {
-          // Si el WhatsApp está conectado, enviar el PDF
-          const statusInfo = this.whatsappService.getStatus();
-          if (statusInfo.status === 'CONNECTED') {
-            const fallbackText = `¡Hola! Te hemos enviado una notificación importante de Gym Manager. Adjuntamos el documento detallado.\n\nAsunto: ${subject}`;
-            await this.whatsappService.sendHtmlAsPdf(phoneNumber, htmlContent, fallbackText);
+          // Si el correo tiene adjuntos (ej. reportes manuales), no enviamos WhatsApp automático
+          // porque el servicio correspondiente (CashRegister o DailySummary) ya lo envía directamente.
+          if (dto.attachments && dto.attachments.length > 0) {
+            this.logger.log(`Skipping auto WhatsApp send for ${phoneNumber} because email has attachments.`);
           } else {
-            this.logger.warn(`WhatsApp no está conectado. No se pudo enviar el PDF a ${phoneNumber}`);
+            // Si el WhatsApp está conectado, enviar el PDF
+            const statusInfo = this.whatsappService.getStatus();
+            if (statusInfo.status === 'CONNECTED') {
+              const fallbackText = `¡Hola! Te hemos enviado una notificación importante de Gym Manager. Adjuntamos el documento detallado.\n\nAsunto: ${subject}`;
+              await this.whatsappService.sendHtmlAsPdf(phoneNumber, htmlContent, fallbackText);
+            } else {
+              this.logger.warn(`WhatsApp no está conectado. No se pudo enviar el PDF a ${phoneNumber}`);
+            }
           }
         }
       } catch (waError) {
@@ -359,12 +365,16 @@ export class EmailService {
         });
 
         if (userWithPhone?.phone) {
-          const statusInfo = this.whatsappService.getStatus();
-          if (statusInfo.status === 'CONNECTED') {
-            const fallbackText = `¡Hola! Te hemos enviado una notificación importante de Gym Manager. Adjuntamos el documento detallado.\n\nAsunto: ${options.subject}`;
-            await this.whatsappService.sendHtmlAsPdf(userWithPhone.phone, options.html, fallbackText);
+          if (options.attachments && options.attachments.length > 0) {
+            this.logger.log(`Skipping auto WhatsApp direct send for ${userWithPhone.phone} because email has attachments.`);
           } else {
-            this.logger.warn(`WhatsApp no está conectado. No se pudo enviar el PDF a ${userWithPhone.phone}`);
+            const statusInfo = this.whatsappService.getStatus();
+            if (statusInfo.status === 'CONNECTED') {
+              const fallbackText = `¡Hola! Te hemos enviado una notificación importante de Gym Manager. Adjuntamos el documento detallado.\n\nAsunto: ${options.subject}`;
+              await this.whatsappService.sendHtmlAsPdf(userWithPhone.phone, options.html, fallbackText);
+            } else {
+              this.logger.warn(`WhatsApp no está conectado. No se pudo enviar el PDF a ${userWithPhone.phone}`);
+            }
           }
         }
       } catch (waError) {
