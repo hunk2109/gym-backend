@@ -796,15 +796,18 @@ export class MembersService {
 
   async search(query: string, page: number = 1, limit: number = 10): Promise<{ data: Member[]; pagination: any }> {
     const skip = (page - 1) * limit;
+    const searchQuery = `%${query.toLowerCase()}%`;
 
-    // Search in user email, firstName, lastName or member documentId
+    // Search in user email, firstName, lastName, member code or documentId.
+    // MySQL does not support ILIKE, so use LOWER(...) LIKE for case-insensitive search.
     const [data, total] = await this.memberRepository
       .createQueryBuilder('member')
       .leftJoinAndSelect('member.user', 'user')
-      .where('user.email ILIKE :query', { query: `%${query}%` })
-      .orWhere('user.firstName ILIKE :query', { query: `%${query}%` })
-      .orWhere('user.lastName ILIKE :query', { query: `%${query}%` })
-      .orWhere('member.documentId ILIKE :query', { query: `%${query}%` })
+      .where('LOWER(user.email) LIKE :query', { query: searchQuery })
+      .orWhere('LOWER(user.firstName) LIKE :query', { query: searchQuery })
+      .orWhere('LOWER(user.lastName) LIKE :query', { query: searchQuery })
+      .orWhere('LOWER(member.memberCode) LIKE :query', { query: searchQuery })
+      .orWhere('LOWER(member.documentId) LIKE :query', { query: searchQuery })
       .skip(skip)
       .take(limit)
       .orderBy('member.createdAt', 'DESC')

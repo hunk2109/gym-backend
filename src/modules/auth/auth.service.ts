@@ -5,8 +5,10 @@ import { Repository, DataSource } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import { v4 as uuidv4 } from 'uuid';
 import { User, UserRole } from '../../entities/user.entity';
+import { Employee } from '../../entities/employee.entity';
 import { EmailService } from '../email-settings/email.service';
 import { GymSettingsService } from '../gym-settings/gym-settings.service';
+import { AttendancesService } from '../attendances/attendances.service';
 
 @Injectable()
 export class AuthService {
@@ -18,6 +20,7 @@ export class AuthService {
     private jwtService: JwtService,
     private emailService: EmailService,
     private gymSettingsService: GymSettingsService,
+    private attendancesService: AttendancesService,
     private dataSource: DataSource,
   ) {}
 
@@ -95,7 +98,45 @@ export class AuthService {
       throw new BadRequestException('Invalid credentials');
     }
 
+    await this.registerEmployeeLoginAttendance(user);
+
     return this.generateToken(user);
+  }
+
+  private async registerEmployeeLoginAttendance(user: User): Promise<void> {
+    if (!this.isEmployeeUserRole(user.role)) {
+      return;
+    }
+
+    try {
+      const employeeRepository = this.dataSource.getRepository(Employee);
+      const employee = await employeeRepository.findOne({
+        where: { email: user.email, isActive: true },
+      });
+
+      if (!employee) {
+        this.logger.warn(`[AuthService] No active employee found for login email: ${user.email}`);
+        return;
+      }
+
+      await this.attendancesService.registerEmployeeById(
+        employee.id,
+        'Registro automatico por inicio de sesion',
+      );
+    } catch (error) {
+      this.logger.error(
+        `[AuthService] Error registering employee login attendance for ${user.email}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
+  private isEmployeeUserRole(role: UserRole): boolean {
+    return [
+      UserRole.ENCARGADO,
+      UserRole.EMPLEADO_CAJERO,
+      UserRole.EMPLEADO_ENTRENADOR,
+    ].includes(role);
   }
 
   async logout(userId: string) {

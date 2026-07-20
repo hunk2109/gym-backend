@@ -11,6 +11,7 @@ import { PermissionsService } from './services/permissions.service';
 import { ResponseFilterService } from './services/response-filter.service';
 import { EmailSettingsModule } from '../email-settings/email-settings.module';
 import { GymSettingsModule } from '../gym-settings/gym-settings.module';
+import { AttendancesModule } from '../attendances/attendances.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { GymSettingsModule } from '../gym-settings/gym-settings.module';
     }),
     EmailSettingsModule,
     GymSettingsModule,
+    AttendancesModule,
   ],
   providers: [AuthService, JwtStrategy, RolesGuard, PermissionsService, ResponseFilterService],
   controllers: [AuthController],
