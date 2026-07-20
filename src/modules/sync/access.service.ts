@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { join } from 'path';
+import * as net from 'net';
 import { v4 as uuidv4 } from 'uuid';
 import { User, UserRole } from '../../entities/user.entity';
 import { Product } from '../../entities/product.entity';
@@ -125,6 +126,9 @@ export class AccessService {
       return result;
     } catch (error) {
       this.logger.error(`Error ejecutando query: ${error.message}`);
+      if (error.stdout) {
+        this.logger.error(`Stdout: ${error.stdout}`);
+      }
       if (error.stderr) {
         this.logger.error(`Stderr: ${error.stderr}`);
       }
@@ -160,6 +164,182 @@ export class AccessService {
       }
       throw error;
     }
+  }
+
+  private async executeAccessTables(): Promise<string[]> {
+    const scriptPath = join(process.cwd(), 'src', 'modules', 'sync', 'scripts', 'access-tables.py');
+    const dbPath = await this.getAccessDbPath();
+
+    try {
+      const { stdout, stderr } = await execPromise(
+        `python "${scriptPath}" "${dbPath}"`,
+        { maxBuffer: 1024 * 1024 * 2, cwd: process.cwd() },
+      );
+
+      if (stderr && stderr.trim()) {
+        this.logger.warn(`Stderr del script (tables): ${stderr}`);
+      }
+
+      const result = JSON.parse(stdout);
+      return Array.isArray(result) ? result : [];
+    } catch (error) {
+      this.logger.error(`Error listando tablas Access: ${error.message}`);
+      if (error.stdout) {
+        this.logger.error(`Stdout tables: ${error.stdout}`);
+      }
+      return [];
+    }
+  }
+
+  private async executeOptionalAccessQuery(query: string): Promise<any[]> {
+    try {
+      return await this.executeAccessQuery(query);
+    } catch (error) {
+      const detail = error.stdout || error.stderr || error.message;
+      this.logger.warn(`Consulta opcional Access fallida: ${detail}`);
+      return [];
+    }
+  }
+
+  private async executeFirstSuccessfulAccessQuery(queries: string[]): Promise<any[]> {
+    for (const query of queries) {
+      const rows = await this.executeOptionalAccessQuery(query);
+      if (rows.length > 0) {
+        return rows;
+      }
+    }
+    return [];
+  }
+
+  private parseAccessNumber(value: any): number {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  private async getFirstAccessCount(query: string, field: string): Promise<number> {
+    const rows = await this.executeOptionalAccessQuery(query);
+    return this.parseAccessNumber(rows[0]?.[field]);
+  }
+
+  async getAccessDashboard(limit: number = 30): Promise<any> {
+    await this.validateAccessDbPath();
+    const dbPath = await this.getAccessDbPath();
+    const safeLimit = Math.min(Math.max(Number(limit) || 30, 1), 100);
+
+    const machines = await this.executeFirstSuccessfulAccessQuery([
+      'SELECT * FROM [machines] ORDER BY [ID]',
+      'SELECT * FROM [machines]',
+      'SELECT * FROM machines',
+      'SELECT * FROM Machines',
+      'SELECT * FROM [machine] ORDER BY [ID]',
+      'SELECT * FROM [machine]',
+      'SELECT * FROM machine',
+      'SELECT * FROM Machine',
+    ]);
+    const availableTables = machines.length === 0 ? await this.executeAccessTables() : [];
+
+    const recentLogs = await this.executeOptionalAccessQuery(`
+      SELECT TOP ${safeLimit}
+        pin,
+        time,
+        verified
+      FROM acc_monitor_log
+      ORDER BY time DESC
+    `);
+
+    const usersCount = await this.getFirstAccessCount(
+      'SELECT COUNT(*) AS total FROM USERINFO',
+      'total',
+    );
+    const attendanceLogsCount = await this.getFirstAccessCount(
+      'SELECT COUNT(*) AS total FROM acc_monitor_log',
+      'total',
+    );
+    const activeAccessCount = await this.getFirstAccessCount(
+      'SELECT COUNT(*) AS total FROM USERINFO WHERE acc_enddate >= Date()',
+      'total',
+    );
+
+    return {
+      success: true,
+      dbPath,
+      machines: machines.map((machine) => ({
+        id: machine.ID,
+        alias: machine.MachineAlias || machine.alias || machine.device_name || 'Equipo ZKTeco',
+        ip: machine.IP || machine.ipaddress || null,
+        port: this.parseAccessNumber(machine.Port || 4370),
+        serialNumber: machine.sn || null,
+        deviceName: machine.device_name || machine.ProductType || null,
+        firmwareVersion: machine.FirmwareVersion || null,
+        enabled: machine.Enabled === true || machine.Enabled === -1 || machine.Enabled === 1,
+        realtime: machine.realtime === true || machine.realtime === -1 || machine.realtime === 1 || machine.realtime === 'Si' || machine.realtime === 'Sí',
+        userCount: this.parseAccessNumber(machine.usercount),
+        fingerCount: this.parseAccessNumber(machine.fingercount),
+        transactionCount: this.parseAccessNumber(machine.transaction_count),
+        lastActivity: machine.last_activity || null,
+      })),
+      summary: {
+        users: usersCount,
+        activeAccess: activeAccessCount,
+        logs: attendanceLogsCount,
+        recentLogs: recentLogs.length,
+      },
+      availableTables,
+      machineTableFound: machines.length > 0,
+      recentLogs: recentLogs.map((log) => ({
+        pin: log.pin ?? null,
+        time: log.time ?? null,
+        verified: log.verified ?? null,
+      })),
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  async testAccessMachineConnection(machineId?: number): Promise<any> {
+    const dashboard = await this.getAccessDashboard(5);
+    const machines = dashboard.machines || [];
+    const machine = machineId
+      ? machines.find((item) => Number(item.id) === Number(machineId))
+      : machines[0];
+
+    if (!machine) {
+      const tables = dashboard.availableTables?.length
+        ? ` Tablas encontradas: ${dashboard.availableTables.slice(0, 12).join(', ')}`
+        : '';
+      throw new Error(`No se encontro la tabla machine/machines o no hay equipos en la base Access seleccionada.${tables}`);
+    }
+
+    if (!machine.ip || !machine.port) {
+      throw new Error('El equipo no tiene IP o puerto configurado');
+    }
+
+    const startedAt = Date.now();
+    await new Promise<void>((resolve, reject) => {
+      const socket = new net.Socket();
+      const timer = setTimeout(() => {
+        socket.destroy();
+        reject(new Error('Conexion expirada'));
+      }, 5000);
+
+      socket.connect(machine.port, machine.ip, () => {
+        clearTimeout(timer);
+        socket.destroy();
+        resolve();
+      });
+
+      socket.on('error', (error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+    });
+
+    return {
+      success: true,
+      message: `Equipo ${machine.alias} disponible en ${machine.ip}:${machine.port}`,
+      machine,
+      latencyMs: Date.now() - startedAt,
+      timestamp: new Date().toISOString(),
+    };
   }
 
   /**

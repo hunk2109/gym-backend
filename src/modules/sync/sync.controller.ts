@@ -2,6 +2,7 @@ import { Controller, Post, Get, Put, Body, Logger, HttpCode, Query } from '@nest
 import { Public } from '../auth/decorators/public.decorator';
 import { SyncService } from './sync.service';
 import { ConfigService } from './config.service';
+import { AccessService } from './access.service';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -12,6 +13,7 @@ export class SyncController {
   constructor(
     private readonly syncService: SyncService,
     private readonly configService: ConfigService,
+    private readonly accessService: AccessService,
   ) {}
 
   /**
@@ -65,6 +67,41 @@ export class SyncController {
   @Public()
   getSyncStatus() {
     return this.syncService.getSyncStatus();
+  }
+
+  /**
+   * GET /api/sync/access-dashboard
+   * Obtiene datos principales de ZKAccess/Access para la pantalla de control
+   */
+  @Get('access-dashboard')
+  @Public()
+  async getAccessDashboard(@Query('limit') limit?: string) {
+    try {
+      return await this.accessService.getAccessDashboard(Number(limit) || 30);
+    } catch (error) {
+      return {
+        success: false,
+        error: error.message || 'Error obteniendo datos de Access',
+      };
+    }
+  }
+
+  /**
+   * POST /api/sync/access-machine/test
+   * Prueba conectividad TCP al equipo configurado en la tabla machine
+   */
+  @Post('access-machine/test')
+  @Public()
+  @HttpCode(200)
+  async testAccessMachineConnection(@Body() body: { machineId?: number }) {
+    try {
+      return await this.accessService.testAccessMachineConnection(body?.machineId);
+    } catch (error) {
+      return {
+        success: false,
+        error: error.message || 'No se pudo conectar al equipo',
+      };
+    }
   }
 
   /**
