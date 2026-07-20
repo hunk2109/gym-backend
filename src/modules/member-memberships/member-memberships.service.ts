@@ -11,6 +11,7 @@ import { PromotionsService } from '../promotions/promotions.service';
 import { EmailService } from '../email-settings/email.service';
 import { GroupsService } from '../groups/groups.service';
 import { AccessService } from '../sync/access.service';
+import { ZktecoDeviceService } from '../sync/zkteco-device.service';
 import { WhatsappService } from '../whatsapp-settings/whatsapp.service';
 import { GymSettingsService } from '../gym-settings/gym-settings.service';
 
@@ -29,6 +30,7 @@ export class MemberMembershipsService {
     private readonly emailService: EmailService,
     private readonly groupsService: GroupsService,
     private readonly accessService: AccessService,
+    private readonly zktecoDeviceService: ZktecoDeviceService,
     private readonly whatsappService: WhatsappService,
     private readonly gymSettingsService: GymSettingsService,
   ) {}
@@ -540,6 +542,8 @@ export class MemberMembershipsService {
       console.error(`[MemberMembershipsService] ❌ Error sincronizando a ZKAccess:`, accessError.message);
     }
 
+    await this.syncMemberToDeviceSafe(memberId, 'assign-membership');
+
     return savedMemberMembership;
     } catch (error) {
       console.error('[ASSIGN MEMBERSHIP] ❌ ERROR COMPLETO:', error);
@@ -665,7 +669,27 @@ export class MemberMembershipsService {
       console.error(`[MemberMembershipsService] ❌ Error sincronizando a ZKAccess:`, accessError.message);
     }
 
+    await this.deleteMemberFromDeviceSafe(memberId, 'remove-membership');
+
     console.log(`[REMOVE MEMBERSHIP] ✓ Membresía removida para: ${memberId}\n`);
+  }
+
+  private async syncMemberToDeviceSafe(memberId: string, reason: string): Promise<void> {
+    try {
+      await this.zktecoDeviceService.syncMemberById(memberId);
+      console.log(`[MemberMembershipsService] Miembro ${memberId} sincronizado con equipo ZKTeco (${reason})`);
+    } catch (error) {
+      console.warn(`[MemberMembershipsService] No se pudo sincronizar miembro ${memberId} con equipo ZKTeco (${reason}): ${error.message}`);
+    }
+  }
+
+  private async deleteMemberFromDeviceSafe(memberId: string, reason: string): Promise<void> {
+    try {
+      await this.zktecoDeviceService.deleteMemberById(memberId);
+      console.log(`[MemberMembershipsService] Miembro ${memberId} removido del equipo ZKTeco (${reason})`);
+    } catch (error) {
+      console.warn(`[MemberMembershipsService] No se pudo remover miembro ${memberId} del equipo ZKTeco (${reason}): ${error.message}`);
+    }
   }
 
   /**

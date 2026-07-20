@@ -11,6 +11,7 @@ import { EmailService } from '../email-settings/email.service';
 import { ModulesManagementService } from '../modules-management/modules-management.service';
 import { GymSettingsService } from '../gym-settings/gym-settings.service';
 import { AccessService } from '../sync/access.service';
+import { ZktecoDeviceService } from '../sync/zkteco-device.service';
 
 @Injectable()
 export class MembersService {
@@ -29,6 +30,7 @@ export class MembersService {
     private modulesManagementService: ModulesManagementService,
     private gymSettingsService: GymSettingsService,
     private accessService: AccessService,
+    private zktecoDeviceService: ZktecoDeviceService,
   ) {}
 
   /**
@@ -355,6 +357,8 @@ export class MembersService {
     } catch (accessError) {
       this.logger.error(`[MembersService] ❌ Falló la sincronización a Access del socio ${savedMember.id}`, accessError);
     }
+
+    await this.syncMemberToDeviceSafe(savedMember.id, 'create');
 
     return savedMember;
   }
@@ -691,7 +695,9 @@ export class MembersService {
 
     Object.assign(member, updateMemberDto);
 
-    return this.memberRepository.save(member);
+    const saved = await this.memberRepository.save(member);
+    await this.syncMemberToDeviceSafe(id, 'update');
+    return saved;
   }
 
   async removeMemberships(id: string): Promise<{ message: string }> {
@@ -773,6 +779,8 @@ export class MembersService {
       }
     }
     
+    await this.deleteMemberFromDeviceSafe(id, 'remove-memberships');
+
     return { message: 'Memberships and companions removed successfully' };
   }
 
@@ -791,6 +799,24 @@ export class MembersService {
     
     if (result.affected === 0) {
       throw new NotFoundException(`Member with ID ${id} not found`);
+    }
+  }
+
+  private async syncMemberToDeviceSafe(memberId: string, reason: string): Promise<void> {
+    try {
+      await this.zktecoDeviceService.syncMemberById(memberId);
+      this.logger.log(`[MembersService] Miembro ${memberId} sincronizado con equipo ZKTeco (${reason})`);
+    } catch (error) {
+      this.logger.warn(`[MembersService] No se pudo sincronizar miembro ${memberId} con equipo ZKTeco (${reason}): ${error.message}`);
+    }
+  }
+
+  private async deleteMemberFromDeviceSafe(memberId: string, reason: string): Promise<void> {
+    try {
+      await this.zktecoDeviceService.deleteMemberById(memberId);
+      this.logger.log(`[MembersService] Miembro ${memberId} removido del equipo ZKTeco (${reason})`);
+    } catch (error) {
+      this.logger.warn(`[MembersService] No se pudo remover miembro ${memberId} del equipo ZKTeco (${reason}): ${error.message}`);
     }
   }
 

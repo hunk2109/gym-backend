@@ -14,6 +14,7 @@ import { PromotionsService } from '../promotions/promotions.service';
 import { EmailService } from '../email-settings/email.service';
 import { GymSettingsService } from '../gym-settings/gym-settings.service';
 import { AccessService } from '../sync/access.service';
+import { ZktecoDeviceService } from '../sync/zkteco-device.service';
 
 @Injectable()
 export class MembershipsService {
@@ -34,6 +35,7 @@ export class MembershipsService {
     private emailService: EmailService,
     private gymSettingsService: GymSettingsService,
     private accessService: AccessService,
+    private zktecoDeviceService: ZktecoDeviceService,
   ) {}
 
   // Membership CRUD
@@ -338,6 +340,8 @@ export class MembershipsService {
       where: { id: result.id },
       relations: ['member', 'membership'],
     });
+
+    await this.syncMemberToDeviceSafe(member.id, 'assign-membership');
 
     return saved as MemberMembership;
   }
@@ -1159,6 +1163,7 @@ export class MembershipsService {
     }
 
     await this.memberMembershipRepository.remove(membership);
+    await this.syncMemberToDeviceSafe(membership.memberId, 'remove-membership');
   }
 
   /**
@@ -1210,7 +1215,18 @@ export class MembershipsService {
       where: { memberId },
     });
 
+    await this.syncMemberToDeviceSafe(memberId, 'remove-membership-by-member');
+
     console.log(`[MembershipsService] DESPUÉS de remover - Miembro ${memberId} tiene ${remainingMemberships.length} membresías restantes`);
+  }
+
+  private async syncMemberToDeviceSafe(memberId: string, reason: string): Promise<void> {
+    try {
+      await this.zktecoDeviceService.syncMemberById(memberId);
+      console.log(`[MembershipsService] Miembro ${memberId} sincronizado con equipo ZKTeco (${reason})`);
+    } catch (error) {
+      console.warn(`[MembershipsService] No se pudo sincronizar miembro ${memberId} con equipo ZKTeco (${reason}): ${error.message}`);
+    }
   }
 
   /**

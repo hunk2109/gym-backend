@@ -3,6 +3,7 @@ import { Public } from '../auth/decorators/public.decorator';
 import { SyncService } from './sync.service';
 import { ConfigService } from './config.service';
 import { AccessService } from './access.service';
+import { ZktecoDeviceService } from './zkteco-device.service';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -14,6 +15,7 @@ export class SyncController {
     private readonly syncService: SyncService,
     private readonly configService: ConfigService,
     private readonly accessService: AccessService,
+    private readonly zktecoDeviceService: ZktecoDeviceService,
   ) {}
 
   /**
@@ -100,6 +102,59 @@ export class SyncController {
       return {
         success: false,
         error: error.message || 'No se pudo conectar al equipo',
+      };
+    }
+  }
+
+  /**
+   * POST /api/sync/zk-device/test
+   * Prueba conexion real al equipo ZKTeco usando protocolo de dispositivo
+   */
+  @Post('zk-device/test')
+  @Public()
+  @HttpCode(200)
+  async testZktecoDevice(): Promise<any> {
+    try {
+      return await this.zktecoDeviceService.testConnection();
+    } catch (error) {
+      return {
+        success: false,
+        error: error.message || 'No se pudo conectar al equipo ZKTeco',
+      };
+    }
+  }
+
+  /**
+   * GET /api/sync/zk-device/users
+   * Lee usuarios directamente desde el equipo ZKTeco
+   */
+  @Get('zk-device/users')
+  @Public()
+  async getZktecoDeviceUsers(): Promise<any> {
+    try {
+      return await this.zktecoDeviceService.getUsers();
+    } catch (error) {
+      return {
+        success: false,
+        error: error.message || 'No se pudieron leer usuarios del equipo ZKTeco',
+      };
+    }
+  }
+
+  /**
+   * POST /api/sync/zk-device/push-active-users
+   * Envia miembros/empleados activos al equipo ZKTeco sin tocar huellas
+   */
+  @Post('zk-device/push-active-users')
+  @Public()
+  @HttpCode(200)
+  async pushActiveUsersToZktecoDevice(): Promise<any> {
+    try {
+      return await this.zktecoDeviceService.pushActiveUsers();
+    } catch (error) {
+      return {
+        success: false,
+        error: error.message || 'No se pudieron enviar usuarios al equipo ZKTeco',
       };
     }
   }

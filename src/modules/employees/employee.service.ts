@@ -11,6 +11,7 @@ import { EmailService } from '../email-settings/email.service';
 import { ModulesManagementService } from '../modules-management/modules-management.service';
 import { GymSettingsService } from '../gym-settings/gym-settings.service';
 import { AccessService } from '../sync/access.service';
+import { ZktecoDeviceService } from '../sync/zkteco-device.service';
 import { WhatsappService, WhatsappStatus } from '../whatsapp-settings/whatsapp.service';
 
 @Injectable()
@@ -27,6 +28,7 @@ export class EmployeeService {
     private modulesManagementService: ModulesManagementService,
     private gymSettingsService: GymSettingsService,
     private accessService: AccessService,
+    private zktecoDeviceService: ZktecoDeviceService,
     private whatsappService: WhatsappService,
   ) {}
 
@@ -181,7 +183,27 @@ export class EmployeeService {
       // No fallar la operación si el log falla
     }
 
+    await this.syncEmployeeToDeviceSafe(createdEmployee.id, 'create');
+
     return createdEmployee;
+  }
+
+  private async syncEmployeeToDeviceSafe(employeeId: string, reason: string): Promise<void> {
+    try {
+      await this.zktecoDeviceService.syncEmployeeById(employeeId);
+      this.logger.log(`[EmployeeService] Empleado ${employeeId} sincronizado con equipo ZKTeco (${reason})`);
+    } catch (error) {
+      this.logger.warn(`[EmployeeService] No se pudo sincronizar empleado ${employeeId} con equipo ZKTeco (${reason}): ${error.message}`);
+    }
+  }
+
+  private async deleteEmployeeFromDeviceSafe(employeeId: string, reason: string): Promise<void> {
+    try {
+      await this.zktecoDeviceService.deleteEmployeeById(employeeId);
+      this.logger.log(`[EmployeeService] Empleado ${employeeId} removido del equipo ZKTeco (${reason})`);
+    } catch (error) {
+      this.logger.warn(`[EmployeeService] No se pudo remover empleado ${employeeId} del equipo ZKTeco (${reason}): ${error.message}`);
+    }
   }
 
   private generateTemporaryPassword(): string {
@@ -350,6 +372,8 @@ export class EmployeeService {
       // No fallar la operación si el log falla
     }
 
+    await this.syncEmployeeToDeviceSafe(updatedEmployee.id, 'update');
+
     return updatedEmployee;
   }
 
@@ -397,6 +421,8 @@ export class EmployeeService {
       } catch (accessError) {
         this.logger.error(`[EmployeeService] ❌ Falló la sincronización de bloqueo a Access del empleado ${employee.id}`, accessError);
       }
+
+      await this.deleteEmployeeFromDeviceSafe(employee.id, 'delete');
 
       // Registrar eliminación en auditoría
       try {
