@@ -15,6 +15,8 @@ import os
 from datetime import datetime
 from pathlib import Path
 
+from src.modules.sync.scripts.access_common import build_access_connection_string, resolve_access_db_path
+
 # =============================================================================
 # CONFIGURACIÓN
 # =============================================================================
@@ -29,7 +31,7 @@ MYSQL_CONFIG = {
 }
 
 # Ruta de Access (por defecto)
-DEFAULT_ACCESS_DB = r'c:\develop\gym-backend\dowtown.mdb'
+DEFAULT_ACCESS_DB = resolve_access_db_path(default_path=None, cwd=os.getcwd())
 
 # =============================================================================
 # FUNCIONES AUXILIARES
@@ -38,7 +40,7 @@ DEFAULT_ACCESS_DB = r'c:\develop\gym-backend\dowtown.mdb'
 def get_access_db_path():
     """Obtiene la ruta de la base de datos Access."""
     if len(sys.argv) > 1:
-        path = sys.argv[1]
+        path = resolve_access_db_path(sys.argv[1], default_path=None, cwd=os.getcwd())
         if os.path.exists(path):
             print(f"✓ Usando base de datos: {path}")
             return path
@@ -46,17 +48,18 @@ def get_access_db_path():
             print(f"✗ Ruta no encontrada: {path}")
             sys.exit(1)
     else:
-        if os.path.exists(DEFAULT_ACCESS_DB):
-            print(f"✓ Usando base de datos por defecto: {DEFAULT_ACCESS_DB}")
-            return DEFAULT_ACCESS_DB
+        path = DEFAULT_ACCESS_DB
+        if os.path.exists(path):
+            print(f"✓ Usando base de datos por defecto: {path}")
+            return path
         else:
-            print(f"✗ Base de datos por defecto no encontrada: {DEFAULT_ACCESS_DB}")
+            print(f"✗ Base de datos por defecto no encontrada: {path}")
             sys.exit(1)
 
 def connect_access(db_path):
     """Conecta a la base de datos Access."""
     try:
-        conn = pyodbc.connect(f'Driver={{Microsoft Access Driver (*.mdb, *.accdb)}};DBQ={db_path};')
+        conn = pyodbc.connect(build_access_connection_string(db_path))
         print("✓ Conectado a Access\n")
         return conn
     except Exception as e:

@@ -286,10 +286,11 @@ export class MembershipsService {
         console.log(`[MembershipsService] Membresía recurrente - Sumando ${updatedMembership.durationMonths} meses`);
         end.setMonth(end.getMonth() + updatedMembership.durationMonths);
       }
-      // Fallback: 30 días por defecto
+      // Error when no membership duration is defined
       else {
-        console.log(`[MembershipsService] Fallback - Sumando 30 días por defecto`);
-        end.setDate(end.getDate() + 30);
+        throw new BadRequestException(
+          'No se puede calcular la fecha de fin: la membresía no tiene duración definida.',
+        );
       }
     }
 
@@ -387,8 +388,9 @@ export class MembershipsService {
     } else if (!isRecurring && currentMembership.membership.durationDays) {
       newEndDate.setDate(newEndDate.getDate() + currentMembership.membership.durationDays);
     } else {
-      // Fallback: 30 días
-      newEndDate.setDate(newEndDate.getDate() + 30);
+      throw new BadRequestException(
+        'No se puede renovar esta membresía porque no tiene duración definida.',
+      );
     }
 
     let discountAmount = 0;
@@ -1177,6 +1179,31 @@ export class MembershipsService {
     console.log(`[MembershipsService] ANTES de remover - Miembro ${memberId} tiene membresía: ${membership.id}`);
 
     await this.memberMembershipRepository.remove(membership);
+
+    // El estado de membresía se calcula desde member_memberships.
+
+    // Sincronizar a ZKAccess: marcar fecha de fin pasada para bloquear acceso
+    try {
+      const memberWithUser = await this.memberRepository.findOne({
+        where: { id: memberId },
+        relations: ['user'],
+      });
+
+      if (memberWithUser && memberWithUser.user) {
+        await this.accessService.pushMemberToAccess({
+          Badgenumber: memberWithUser.memberCode.replace(/[^0-9]/g, ''),
+          name: memberWithUser.user.firstName,
+          lastname: memberWithUser.user.lastName,
+          email: memberWithUser.user.email,
+          acc_enddate: '2000-01-01',
+        });
+        console.log(`[MembershipsService] ✅ ZKAccess actualizado en removeMembershipByMemberId para memberId=${memberId}`);
+      } else {
+        console.log(`[MembershipsService] ⚠️ No se pudo sincronizar a ZKAccess porque no se encontró el miembro o usuario para memberId=${memberId}`);
+      }
+    } catch (accessError) {
+      console.error(`[MembershipsService] ❌ Error sincronizando ZKAccess al remover membresía:`, accessError.message);
+    }
 
     // Después de remover, verificar si hay más membresías pendientes
     const remainingMemberships = await this.memberMembershipRepository.find({

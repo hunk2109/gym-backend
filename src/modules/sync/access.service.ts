@@ -165,13 +165,28 @@ export class AccessService {
   /**
    * Envía un miembro a ZKAccess
    */
-  async pushMemberToAccess(userData: { Badgenumber: string, name: string, lastname: string, email: string, acc_enddate: string | null }): Promise<void> {
+  async pushMemberToAccess(userData: { Badgenumber: string, name: string, lastname: string, email: string, acc_startdate?: string | null, acc_enddate?: string | null, USERID?: number | null }): Promise<void> {
     await this.validateAccessDbPath();
     try {
       await this.executeAccessWrite(userData);
       this.logger.log(`Socio ${userData.Badgenumber} empujado a ZKAccess correctamente.`);
     } catch (error) {
       this.logger.error(`Error empujando socio ${userData.Badgenumber} a ZKAccess: ${error.message}`);
+      throw error;
+    }
+  }
+
+  async deleteMemberFromAccess(badgeNumber: string, accessUserId?: number): Promise<void> {
+    await this.validateAccessDbPath();
+    try {
+      const payload: any = { Badgenumber: badgeNumber, action: 'delete' };
+      if (accessUserId !== undefined && accessUserId !== null) {
+        payload.USERID = accessUserId;
+      }
+      await this.executeAccessWrite(payload);
+      this.logger.log(`Socio ${badgeNumber} eliminado de ZKAccess correctamente.`);
+    } catch (error) {
+      this.logger.error(`Error eliminando socio ${badgeNumber} de ZKAccess: ${error.message}`);
       throw error;
     }
   }
@@ -263,7 +278,9 @@ export class AccessService {
         Gender,
         BIRTHDAY,
         street,
-        CITY
+        CITY,
+        acc_startdate,
+        acc_enddate
       FROM USERINFO
       ORDER BY USERID
     `;
@@ -272,6 +289,16 @@ export class AccessService {
       const members = await this.executeAccessQuery(query);
       let inserted = 0;
       let updated = 0;
+
+      // Membresía a asignar para migraciones desde Access cuando el usuario tiene acceso activo
+      const baseMembershipId = 'ea7f7057-b4a2-4000-b89c-5aaa3b696fbd';
+      let baseMembership = await this.membershipRepository.findOne({
+        where: { id: baseMembershipId },
+      });
+
+      if (!baseMembership) {
+        this.logger.warn(`No se encontró la membresía con id ${baseMembershipId}. Se omite la asignación automática.`);
+      }
 
       for (const member of members) {
         const {
@@ -285,6 +312,8 @@ export class AccessService {
           BIRTHDAY: dateOfBirth,
           street: address,
           CITY: city,
+          acc_startdate: accessStartDate,
+          acc_enddate: accessEndDate,
         } = member;
 
         // Usar USERID como identificador único
@@ -346,17 +375,62 @@ export class AccessService {
           city: city || null,
         };
 
+        let memberRecord = existingMember;
         if (existingMember) {
           // No incluir id en update
           const { ...updateData } = memberData;
           await this.memberRepository.update(existingMember.id, updateData);
           updated++;
         } else {
-          await this.memberRepository.save({
+          memberRecord = await this.memberRepository.save({
             id: uuidv4(),
             ...memberData,
           });
           inserted++;
+        }
+
+        const memberRecordId = memberRecord?.id || existingMember?.id;
+        if (memberRecordId && baseMembership) {
+          const startDateValue = accessStartDate ? new Date(accessStartDate) : new Date();
+          const endDateValue = accessEndDate ? new Date(accessEndDate) : null;
+          const today = new Date();
+          const hasActiveAccess = endDateValue ? endDateValue >= today : false;
+
+          this.logger.debug(`Usuario ${memberId} acc_startdate=${accessStartDate} acc_enddate=${accessEndDate} -> activo=${hasActiveAccess}`);
+
+          if (hasActiveAccess) {
+            const existingMembership = await this.memberMembershipRepository.findOne({
+              where: {
+                memberId: memberRecordId,
+                membershipId: baseMembership.id,
+              },
+            });
+
+            if (!existingMembership) {
+              const startDate = startDateValue;
+              const endDate = endDateValue || new Date(startDate);
+
+              await this.memberMembershipRepository.save({
+                id: uuidv4(),
+                memberId: memberRecordId,
+                membershipId: baseMembership.id,
+                startDate,
+                endDate,
+                isActive: true,
+                classesUsed: 0,
+                payAmount: 0,
+                isRecurring: true,
+              });
+              this.logger.log(`Asignada membresía Access Sync a member ${memberRecordId} desde ${startDate.toISOString().split('T')[0]} hasta ${endDate.toISOString().split('T')[0]}`);
+            }
+          }
+        }
+
+        if (existingMember) {
+          // No incluir id en update
+          const { ...updateData } = memberData;
+          await this.memberRepository.update(existingMember.id, updateData);
+          updated++;
         }
       }
 

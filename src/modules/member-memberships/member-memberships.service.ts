@@ -164,9 +164,13 @@ export class MemberMembershipsService {
     } else if (isRecurring && membership.durationMonths) {
       console.log(`[MemberMembershipsService] Membresía recurrente - Sumando ${membership.durationMonths} meses a partir de ${startDate.toISOString()}`);
       endDate.setMonth(endDate.getMonth() + membership.durationMonths);
+    } else if (dto.endDate) {
+      endDate = new Date(dto.endDate);
+      console.log(`[MemberMembershipsService] No hay duración definida; usando endDate proporcionada: ${dto.endDate}`);
     } else {
-      console.log(`[MemberMembershipsService] Fallback - Sumando 30 días por defecto`);
-      endDate.setDate(endDate.getDate() + 30);
+      throw new BadRequestException(
+        'No se puede calcular la fecha de fin: la membresía no tiene duración definida.',
+      );
     }
     console.log(`[MemberMembershipsService] endDate RECALCULADA: ${endDate.toISOString()}`);
 
@@ -513,13 +517,23 @@ export class MemberMembershipsService {
       accEndDate.setDate(accEndDate.getDate() + graceDays);
 
       if (memberDetails && memberDetails.user) {
-        await this.accessService.pushMemberToAccess({
+        const accessUserIdMatch = memberDetails.memberCode?.match(/^MEM_(\d+)$/);
+        const accessUserId = accessUserIdMatch ? Number(accessUserIdMatch[1]) : undefined;
+
+        const payload: any = {
           Badgenumber: memberDetails.memberCode.replace(/[^0-9]/g, ''),
           name: memberDetails.user.firstName,
           lastname: memberDetails.user.lastName,
           email: memberDetails.user.email,
-          acc_enddate: accEndDate.toISOString().split('T')[0] // Enviar la fecha calculada + gracia
-        });
+          acc_startdate: startDate.toISOString().split('T')[0],
+          acc_enddate: accEndDate.toISOString().split('T')[0], // Enviar la fecha calculada + gracia
+        };
+
+        if (accessUserId !== undefined && !Number.isNaN(accessUserId)) {
+          payload.USERID = accessUserId;
+        }
+
+        await this.accessService.pushMemberToAccess(payload);
         console.log(`[MemberMembershipsService] ✅ Sincronización a ZKAccess exitosa.`);
       }
     } catch (accessError) {
@@ -630,11 +644,8 @@ export class MemberMembershipsService {
     
     console.log(`[REMOVE MEMBERSHIP] ✓ Membresía eliminada de la BD: ${memberMembership.id} - Registros eliminados: ${deleteResult.affected}`);
 
-    // TERCERO: Actualizar el miembro para indicar que NO tiene membresía activa
-    await this.memberRepository.update(
-      { id: memberId },
-      { hasMembership: false } as any,
-    );
+    // TERCERO: Actualizar el miembro local solo si es necesario según lógica de negocio
+    // El estado de membresía se calcula dinámicamente desde member_memberships.
     
     // SINCRONIZAR A ZKACCESS: Remover fecha de vencimiento
     try {

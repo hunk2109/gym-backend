@@ -9,17 +9,20 @@ import json
 import sys
 from urllib.parse import unquote
 
+from access_common import build_access_connection_string, resolve_access_db_path
+
+
 def main():
     if len(sys.argv) < 3:
         print(json.dumps({"error": "Faltan argumentos"}))
         sys.exit(1)
 
-    db_path = sys.argv[1]
+    db_path = resolve_access_db_path(sys.argv[1], default_path=None, cwd=None)
     query = unquote(sys.argv[2])
 
     try:
         # Conectar a Access
-        conn = pyodbc.connect(f'Driver={{Microsoft Access Driver (*.mdb, *.accdb)}};DBQ={db_path};')
+        conn = pyodbc.connect(build_access_connection_string(db_path))
         cursor = conn.cursor()
 
         # Ejecutar query

@@ -743,6 +743,35 @@ export class MembersService {
     
     // 5. Eliminar todas las membresías del miembro (pero mantener el miembro mismo)
     await this.memberMembershipRepository.delete({ memberId: id });
+
+    // 6. Actualizar estado local y sincronizar a ZKAccess para bloquear acceso
+    const member = await this.memberRepository.findOne({
+      where: { id },
+      relations: ['user'],
+    });
+
+    if (member) {
+      if (!member.memberCode) {
+        console.warn(`[MembersService] ⚠️ No se puede sincronizar a ZKAccess porque memberCode es nulo o vacío para el miembro ${id}`);
+      } else if (!member.user) {
+        console.warn(`[MembersService] ⚠️ No se puede sincronizar a ZKAccess porque no se encontró user para el miembro ${id}`);
+      } else {
+        const badgeNumber = member.memberCode.replace(/[^0-9]/g, '');
+        const accessUserIdMatch = member.memberCode?.match(/^MEM_(\d+)$/i);
+        const accessUserId = accessUserIdMatch ? Number(accessUserIdMatch[1]) : undefined;
+
+        if (!badgeNumber) {
+          console.warn(`[MembersService] ⚠️ No se puede sincronizar a ZKAccess porque Badgenumber queda vacío para memberCode=${member.memberCode}`);
+        } else {
+          try {
+            await this.accessService.deleteMemberFromAccess(badgeNumber, accessUserId);
+            console.log(`[MembersService] ✅ ZKAccess eliminado tras remover membresías del miembro ${id}`);
+          } catch (accessError) {
+            console.error(`[MembersService] ❌ Error eliminando socio de ZKAccess tras remover membresías del miembro ${id}:`, accessError?.message ?? accessError);
+          }
+        }
+      }
+    }
     
     return { message: 'Memberships and companions removed successfully' };
   }
