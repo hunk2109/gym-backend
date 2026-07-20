@@ -5,6 +5,9 @@ import { Product } from '../../entities/product.entity';
 import { CreateProductDto, UpdateProductDto } from './dto/create-product.dto';
 import { PermissionsService } from '../auth/services/permissions.service';
 import { AuditLogService } from '../audit-logs/audit-log.service';
+import { EmailService } from '../email-settings/email.service';
+import { WhatsappService } from '../whatsapp-settings/whatsapp.service';
+import { GymSettingsService } from '../gym-settings/gym-settings.service';
 
 @Injectable()
 export class ProductService {
@@ -15,6 +18,9 @@ export class ProductService {
     private productRepository: Repository<Product>,
     private readonly permissionsService: PermissionsService,
     private readonly auditLogService: AuditLogService,
+    private readonly emailService: EmailService,
+    private readonly whatsappService: WhatsappService,
+    private readonly gymSettingsService: GymSettingsService,
   ) {}
 
   async getAllProducts(page = 1, limit = 10) {
@@ -73,6 +79,11 @@ export class ProductService {
       throw new NotFoundException(`Product with ID ${id} not found or update failed`);
     }
     
+    const updatedProduct = await this.getProductById(id);
+    const quantityAdded = typeof updateProductDto.quantityAvailable === 'number'
+      ? updateProductDto.quantityAvailable - oldProduct.quantityAvailable
+      : 0;
+
     // Registrar cambios en auditoría
     try {
       const userId = authUser?.id || authUser?.sub || authUser?.userId;
@@ -98,8 +109,16 @@ export class ProductService {
       this.logger.error('Error logging product update:', error);
       // No fallar la operación si el log falla
     }
+
+    if (quantityAdded > 0) {
+      try {
+        await this.sendProductEntryNotifications(updatedProduct, quantityAdded);
+      } catch (error) {
+        this.logger.error('Error sending product entry notification after update:', error);
+      }
+    }
     
-    return this.getProductById(id);
+    return updatedProduct;
   }
 
   async deleteProduct(id: string) {
@@ -152,7 +171,27 @@ export class ProductService {
   async addStock(id: string, quantity: number) {
     const product = await this.getProductById(id);
     product.quantityAvailable += quantity;
-    return this.productRepository.save(product);
+    const savedProduct = await this.productRepository.save(product);
+
+    try {
+      await this.auditLogService.create({
+        action: 'PRODUCT_STOCK_ADDED',
+        module: 'PRODUCTS',
+        description: `Entrada de stock para producto ${product.name}: +${quantity}`,
+        userName: 'Sistema',
+        newValue: { productId: product.id, quantityAdded: quantity, quantityAvailable: savedProduct.quantityAvailable },
+      });
+    } catch (error) {
+      this.logger.error('Error logging product stock addition:', error);
+    }
+
+    try {
+      await this.sendProductEntryNotifications(savedProduct, quantity);
+    } catch (error) {
+      this.logger.error('Error sending product entry notification:', error);
+    }
+
+    return savedProduct;
   }
 
   async removeStock(id: string, quantity: number) {
@@ -162,6 +201,61 @@ export class ProductService {
     }
     product.quantityAvailable -= quantity;
     return this.productRepository.save(product);
+  }
+
+  private async sendProductEntryNotifications(product: Product, quantityAdded: number) {
+    const settings = await this.gymSettingsService.getSettings();
+    if (!settings) {
+      this.logger.debug('[Products] No gym settings found; skipping product entry notifications.');
+      return;
+    }
+
+    const recipients = settings.closingReportRecipients || [];
+    if (!Array.isArray(recipients) || recipients.length === 0) {
+      this.logger.debug('[Products] No closingReportRecipients configured; skipping product entry notifications.');
+      return;
+    }
+
+    const notificationChannel = settings.notificationChannel || 'both';
+    const unitCost = Number(product.cost ?? product.price ?? 0);
+    const entryTotal = unitCost * quantityAdded;
+    const subject = `Entrada de producto: ${product.name}`;
+    const htmlContent = `
+      <h2>Entrada de producto</h2>
+      <p>Se ha ingresado <strong>${quantityAdded}</strong> unidades del producto <strong>${product.name}</strong>.</p>
+      <p>Costo unitario: RD$ ${unitCost.toFixed(2)}</p>
+      <p>Total de la entrada: <strong>RD$ ${entryTotal.toFixed(2)}</strong></p>
+      <p>Cantidad disponible ahora: <strong>${product.quantityAvailable}</strong></p>
+      <p>Categoría: ${product.category || 'N/A'}</p>
+    `;
+    const plainTextContent = `Entrada de producto\n
+Se ha ingresado ${quantityAdded} unidades del producto ${product.name}.\nCosto unitario: RD$ ${unitCost.toFixed(2)}\nTotal de la entrada: RD$ ${entryTotal.toFixed(2)}\nCantidad disponible ahora: ${product.quantityAvailable}\nCategoría: ${product.category || 'N/A'}`;
+    const waMessage = `Entrada de producto: ${product.name}\nCantidad ingresada: ${quantityAdded}\nCosto unitario: RD$ ${unitCost.toFixed(2)}\nTotal de la entrada: RD$ ${entryTotal.toFixed(2)}\nDisponible: ${product.quantityAvailable}`;
+
+    for (const recipient of recipients) {
+      if ((notificationChannel === 'both' || notificationChannel === 'email') && recipient.sendEmail && recipient.email) {
+        try {
+          await this.emailService.sendEmailDirect({
+            to: recipient.email,
+            subject,
+            html: htmlContent,
+            text: plainTextContent,
+          });
+          this.logger.log(`[Products] Notification email sent to ${recipient.email}`);
+        } catch (error) {
+          this.logger.error(`[Products] Failed to send product entry email to ${recipient.email}:`, error);
+        }
+      }
+
+      if ((notificationChannel === 'both' || notificationChannel === 'whatsapp') && recipient.sendWhatsapp && recipient.phone) {
+        try {
+          await this.whatsappService.sendMessage(recipient.phone, waMessage);
+          this.logger.log(`[Products] Notification WhatsApp sent to ${recipient.phone}`);
+        } catch (error) {
+          this.logger.error(`[Products] Failed to send product entry WhatsApp to ${recipient.phone}:`, error);
+        }
+      }
+    }
   }
 
   async getInventoryValue() {
