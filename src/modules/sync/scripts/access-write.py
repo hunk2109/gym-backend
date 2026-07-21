@@ -17,11 +17,17 @@ def connect_access(db_path):
         sys.exit(1)
 
 
-def find_access_userid(cursor, badge_number, access_user_id=None):
+def find_access_userid(cursor, badge_number, access_user_id=None, legacy_badge_number=None):
     cursor.execute("SELECT USERID FROM USERINFO WHERE Badgenumber = ?", (badge_number,))
     row = cursor.fetchone()
     if row:
         return row[0]
+
+    if legacy_badge_number:
+        cursor.execute("SELECT USERID FROM USERINFO WHERE Badgenumber = ?", (legacy_badge_number,))
+        row = cursor.fetchone()
+        if row:
+            return row[0]
 
     if badge_number.isdigit():
         normalized = str(int(badge_number))
@@ -66,6 +72,7 @@ def write_user(conn, user_data):
         start_date_str = user_data.get('acc_startdate')
         end_date_str = user_data.get('acc_enddate')
         access_user_id = user_data.get('USERID') or user_data.get('userId')
+        legacy_badge_number = user_data.get('legacyBadgenumber')
         
         # Convert date strings if provided
         acc_startdate = None
@@ -84,7 +91,7 @@ def write_user(conn, user_data):
         # set_valid_time = 1 if end_date is provided, else 0
         set_valid_time = 1 if acc_enddate else 0
 
-        user_id = find_access_userid(cursor, badge_number, access_user_id)
+        user_id = find_access_userid(cursor, badge_number, access_user_id, legacy_badge_number)
         
         if action_type == 'delete':
             if user_id is not None:
@@ -97,18 +104,25 @@ def write_user(conn, user_data):
                 # Update existing user
                 update_query = """
                     UPDATE USERINFO 
-                    SET name = ?, lastname = ?, email = ?, 
+                    SET Badgenumber = ?, name = ?, lastname = ?, email = ?, 
                         acc_startdate = ?, acc_enddate = ?, set_valid_time = ?
                     WHERE USERID = ?
                 """
-                cursor.execute(update_query, (first_name, last_name, email, acc_startdate, acc_enddate, set_valid_time, user_id))
+                cursor.execute(update_query, (badge_number, first_name, last_name, email, acc_startdate, acc_enddate, set_valid_time, user_id))
                 action = "updated"
             else:
-                insert_query = """
-                    INSERT INTO USERINFO (Badgenumber, name, lastname, email, acc_startdate, acc_enddate, set_valid_time, AccGroup, privilege, status)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0, 0)
-                """
-                cursor.execute(insert_query, (badge_number, first_name, last_name, email, acc_startdate, acc_enddate, set_valid_time))
+                if access_user_id is not None:
+                    insert_query = """
+                        INSERT INTO USERINFO (USERID, Badgenumber, name, lastname, email, acc_startdate, acc_enddate, set_valid_time, AccGroup, privilege, status)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0, 0)
+                    """
+                    cursor.execute(insert_query, (access_user_id, badge_number, first_name, last_name, email, acc_startdate, acc_enddate, set_valid_time))
+                else:
+                    insert_query = """
+                        INSERT INTO USERINFO (Badgenumber, name, lastname, email, acc_startdate, acc_enddate, set_valid_time, AccGroup, privilege, status)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0, 0)
+                    """
+                    cursor.execute(insert_query, (badge_number, first_name, last_name, email, acc_startdate, acc_enddate, set_valid_time))
                 action = "inserted"
             
         conn.commit()

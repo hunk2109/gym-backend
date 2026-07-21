@@ -345,9 +345,18 @@ export class AccessService {
   /**
    * Envía un miembro a ZKAccess
    */
-  async pushMemberToAccess(userData: { Badgenumber: string, name: string, lastname: string, email: string, acc_startdate?: string | null, acc_enddate?: string | null, USERID?: number | null }): Promise<void> {
+  async pushMemberToAccess(userData: { Badgenumber: string, name: string, lastname: string, email: string, acc_startdate?: string | null, acc_enddate?: string | null, USERID?: number | null, legacyBadgenumber?: string | null }): Promise<void> {
     await this.validateAccessDbPath();
     try {
+      const member = await this.findMemberByAccessBadge(userData.Badgenumber);
+      if (member) {
+        const legacyBadgenumber = userData.Badgenumber;
+        const zkUid = await this.ensureMemberZkUid(member.id);
+        userData.Badgenumber = String(zkUid);
+        delete userData.USERID;
+        userData.legacyBadgenumber = legacyBadgenumber;
+      }
+
       await this.executeAccessWrite(userData);
       this.logger.log(`Socio ${userData.Badgenumber} empujado a ZKAccess correctamente.`);
     } catch (error) {
@@ -369,6 +378,52 @@ export class AccessService {
       this.logger.error(`Error eliminando socio ${badgeNumber} de ZKAccess: ${error.message}`);
       throw error;
     }
+  }
+
+  async ensureMemberZkUid(memberId: string): Promise<number> {
+    const member = await this.memberRepository.findOne({ where: { id: memberId } });
+
+    if (!member) {
+      throw new Error(`Miembro ${memberId} no encontrado para asignar zkUid`);
+    }
+
+    if (member.zkUid && member.zkUid > 0 && member.zkUid <= 3000) {
+      return member.zkUid;
+    }
+
+    const [countRows, userRows, localRows] = await Promise.all([
+      this.executeOptionalAccessQuery('SELECT COUNT(*) AS total FROM USERINFO'),
+      this.executeOptionalAccessQuery('SELECT USERID, Badgenumber FROM USERINFO'),
+      this.memberRepository
+        .createQueryBuilder('member')
+        .select('member.zkUid', 'zkUid')
+        .where('member.zkUid IS NOT NULL')
+        .getRawMany<{ zkUid: number }>(),
+    ]);
+
+    const totalAccessUsers = Number(countRows?.[0]?.total || 0);
+    const usedUids = new Set<number>();
+
+    userRows.forEach((row) => {
+      [row.USERID, row.Badgenumber].forEach((value) => {
+        const uid = Number(value);
+        if (Number.isFinite(uid) && uid > 0 && uid <= 3000) {
+          usedUids.add(uid);
+        }
+      });
+    });
+
+    localRows.forEach((row) => {
+      const uid = Number(row.zkUid);
+      if (Number.isFinite(uid) && uid > 0 && uid <= 3000) {
+        usedUids.add(uid);
+      }
+    });
+
+    const nextUid = this.findNextZkUid(totalAccessUsers + 1, usedUids);
+    await this.memberRepository.update(member.id, { zkUid: nextUid });
+
+    return nextUid;
   }
 
   /**
@@ -700,11 +755,22 @@ export class AccessService {
           
           if (pin) {
             const cleanPin = String(pin).trim();
-            const formattedPin = `MEM_${cleanPin.padStart(6, '0')}`;
-            member = await this.memberRepository.findOne({ 
-              where: { memberCode: formattedPin },
-              relations: ['user']
-            });
+            const numericPin = Number(cleanPin);
+
+            if (Number.isFinite(numericPin)) {
+              member = await this.memberRepository.findOne({
+                where: { zkUid: numericPin },
+                relations: ['user'],
+              });
+            }
+
+            if (!member) {
+              const formattedPin = `MEM_${cleanPin.padStart(6, '0')}`;
+              member = await this.memberRepository.findOne({
+                where: { memberCode: formattedPin },
+                relations: ['user']
+              });
+            }
             
             if (member && member.user && member.user.role !== 'cliente') {
               isEmployee = true;
@@ -880,5 +946,50 @@ export class AccessService {
 
     this.logger.log('========== SINCRONIZACIÓN COMPLETADA ==========');
     return results;
+  }
+
+  private async findMemberByAccessBadge(badgeNumber?: string | null): Promise<Member | null> {
+    if (!badgeNumber) {
+      return null;
+    }
+
+    const badge = String(badgeNumber).trim();
+    const digits = badge.replace(/\D/g, '');
+    const candidates = new Set<string>([badge]);
+
+    if (/^\d{8}$/.test(digits)) {
+      candidates.add(`${digits.substring(0, 4)}-${digits.substring(4)}`);
+    }
+
+    if (/^\d{1,6}$/.test(digits)) {
+      candidates.add(`MEM_${digits.padStart(6, '0')}`);
+    }
+
+    for (const memberCode of candidates) {
+      const member = await this.memberRepository.findOne({ where: { memberCode } });
+      if (member) {
+        return member;
+      }
+    }
+
+    return null;
+  }
+
+  private findNextZkUid(startAt: number, usedUids: Set<number>): number {
+    const start = Math.min(Math.max(Number(startAt) || 1, 1), 3000);
+
+    for (let uid = start; uid <= 3000; uid++) {
+      if (!usedUids.has(uid)) {
+        return uid;
+      }
+    }
+
+    for (let uid = 1; uid < start; uid++) {
+      if (!usedUids.has(uid)) {
+        return uid;
+      }
+    }
+
+    throw new Error('No hay zkUid libre disponible para ZKAccess (limite 3000)');
   }
 }
