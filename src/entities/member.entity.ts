@@ -32,6 +32,9 @@ export class Member {
   @Column({ type: 'varchar', unique: true, nullable: true })
   memberCode: string;
 
+  @Column({ type: 'int', unique: true, nullable: true })
+  zkUid?: number;
+
   @Column({ type: 'varchar', nullable: true })
   documentId: string;
 

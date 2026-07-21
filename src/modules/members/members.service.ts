@@ -228,19 +228,15 @@ export class MembersService {
     }
 
     // Generar código de miembro (YYYY-#### incremental)
-    const year = new Date().getFullYear();
+    const year = new Date().getFullYear().toString();
     const lastMember = await this.memberRepository
       .createQueryBuilder('member')
       .where('member.memberCode LIKE :year', { year: `${year}-%` })
       .orderBy('member.memberCode', 'DESC')
       .limit(1)
       .getOne();
-    
-    let nextSequence = 1;
-    if (lastMember && lastMember.memberCode) {
-      const lastSequence = parseInt(lastMember.memberCode.split('-')[1], 10);
-      nextSequence = lastSequence + 1;
-    }
+
+    const nextSequence = this.getSequenceFromMemberCode(lastMember?.memberCode) + 1;
     const memberCode = `${year}-${String(nextSequence).padStart(4, '0')}`;
 
     // Preparar datos del member, filtrando campos que no son de la entidad
@@ -844,6 +840,15 @@ export class MembersService {
     } catch (error) {
       this.logger.warn(`[MembersService] No se pudo remover miembro ${memberId} del equipo ZKTeco (${reason}): ${error.message}`);
     }
+  }
+
+  private getSequenceFromMemberCode(memberCode?: string | null): number {
+    if (!memberCode) {
+      return 0;
+    }
+
+    const sequence = Number(memberCode.split('-')[1]);
+    return Number.isFinite(sequence) ? sequence : 0;
   }
 
   async search(query: string, page: number = 1, limit: number = 10): Promise<{ data: Member[]; pagination: any }> {

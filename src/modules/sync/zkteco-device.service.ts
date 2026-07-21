@@ -34,6 +34,7 @@ interface ZkPushResult {
 @Injectable()
 export class ZktecoDeviceService {
   private readonly logger = new Logger(ZktecoDeviceService.name);
+  private readonly defaultDevicePassword = '123456';
 
   constructor(
     private readonly accessService: AccessService,
@@ -81,21 +82,15 @@ export class ZktecoDeviceService {
 
   async pushActiveUsers(): Promise<any> {
     const config = await this.getDeviceConfig();
-    const users = await this.buildActiveUserPayloads();
 
     return this.withDevice(config, async (device) => {
+      const usedDeviceUids = await this.getUsedDeviceUids(device);
+      const users = await this.buildActiveUserPayloads(usedDeviceUids);
       const results: ZkPushResult[] = [];
 
       for (const user of users) {
         try {
-          await device.setUser(
-            user.uid,
-            user.userId,
-            user.name,
-            user.password,
-            user.role,
-            user.cardNo,
-          );
+          await this.sendUserToDevice(device, user);
 
           results.push({
             userId: user.userId,
@@ -103,12 +98,13 @@ export class ZktecoDeviceService {
             success: true,
           });
         } catch (error) {
-          this.logger.error(`Error enviando usuario ${user.userId} al equipo: ${error.message}`);
+          const errorMessage = this.toErrorMessage(error);
+          this.logger.error(`Error enviando usuario ${user.userId} al equipo: ${errorMessage}`);
           results.push({
             userId: user.userId,
             name: user.name,
             success: false,
-            error: error.message,
+            error: errorMessage,
           });
         }
       }
@@ -149,12 +145,27 @@ export class ZktecoDeviceService {
       return this.deleteMemberById(memberId);
     }
 
-    const payload = this.memberToZkUser(activeMembership);
-    if (!payload) {
-      return { success: false, message: 'Miembro sin codigo valido para ZKTeco' };
-    }
+    const config = await this.getDeviceConfig();
 
-    return this.pushSingleUser(payload);
+    return this.withDevice(config, async (device) => {
+      const usedDeviceUids = await this.getUsedDeviceUids(device);
+      const payload = await this.memberToZkUser(activeMembership, usedDeviceUids);
+
+      if (!payload) {
+        return { success: false, message: 'Miembro sin codigo valido para ZKTeco' };
+      }
+
+      await this.sendUserToDevice(device, payload);
+
+      return {
+        success: true,
+        message: `Usuario ${payload.name} enviado al equipo`,
+        data: {
+          user: payload,
+          timestamp: new Date().toISOString(),
+        },
+      };
+    });
   }
 
   async deleteMemberById(memberId: string): Promise<any> {
@@ -162,7 +173,7 @@ export class ZktecoDeviceService {
       where: { id: memberId },
     });
 
-    const uid = this.extractNumericId(member?.memberCode);
+    const uid = member?.zkUid || null;
     if (!uid) {
       return { success: false, message: 'Miembro sin codigo valido para eliminar del equipo' };
     }
@@ -196,12 +207,13 @@ export class ZktecoDeviceService {
       where: { id: employeeId },
     });
 
-    const uid = this.extractNumericId(employee?.accessCode);
-    if (!uid) {
+    const accessCode = this.toAccessUserId(employee?.accessCode);
+    const deviceUid = this.toEmployeeDeviceUid(accessCode);
+    if (!deviceUid) {
       return { success: false, message: 'Empleado sin codigo valido para eliminar del equipo' };
     }
 
-    return this.deleteUserByUid(uid);
+    return this.deleteUserByUid(deviceUid);
   }
 
   private async getDeviceConfig(): Promise<ZkDeviceConfig> {
@@ -238,14 +250,7 @@ export class ZktecoDeviceService {
     const config = await this.getDeviceConfig();
 
     return this.withDevice(config, async (device) => {
-      await device.setUser(
-        user.uid,
-        user.userId,
-        user.name,
-        user.password,
-        user.role,
-        user.cardNo,
-      );
+      await this.sendUserToDevice(device, user);
 
       return {
         success: true,
@@ -275,6 +280,17 @@ export class ZktecoDeviceService {
     });
   }
 
+  private async sendUserToDevice(device: any, user: ZkUserPayload): Promise<void> {
+    await device.setUser(
+      String(user.uid),
+      user.userId.substring(0, 9),
+      user.name,
+      user.password || this.defaultDevicePassword,
+      user.role,
+      user.cardNo,
+    );
+  }
+
   private async safeCall<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
     try {
       return await fn();
@@ -283,7 +299,7 @@ export class ZktecoDeviceService {
     }
   }
 
-  private async buildActiveUserPayloads(): Promise<ZkUserPayload[]> {
+  private async buildActiveUserPayloads(usedDeviceUids: Set<number>): Promise<ZkUserPayload[]> {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -295,9 +311,13 @@ export class ZktecoDeviceService {
       relations: ['member', 'member.user'],
     });
 
-    const memberUsers = activeMemberships
-      .map((membership) => this.memberToZkUser(membership))
-      .filter((user): user is ZkUserPayload => user !== null);
+    const memberUsers: ZkUserPayload[] = [];
+    for (const membership of activeMemberships) {
+      const payload = await this.memberToZkUser(membership, usedDeviceUids);
+      if (payload) {
+        memberUsers.push(payload);
+      }
+    }
 
     const employees = await this.employeeRepository.find({
       where: { isActive: true },
@@ -313,55 +333,141 @@ export class ZktecoDeviceService {
     return Array.from(byUserId.values()).sort((a, b) => a.uid - b.uid);
   }
 
-  private memberToZkUser(membership: MemberMembership): ZkUserPayload | null {
+  private async memberToZkUser(
+    membership: MemberMembership,
+    usedDeviceUids: Set<number>,
+  ): Promise<ZkUserPayload | null> {
     const member = membership.member;
     const user = member?.user;
     const badgeNumber = member?.memberCode;
-    const uid = this.extractNumericId(badgeNumber);
+    const accessUserId = this.toAccessUserId(badgeNumber);
 
-    if (!uid || !badgeNumber || !user) {
+    if (!accessUserId || !badgeNumber || !user || !member) {
       return null;
     }
 
+    const uid = await this.ensureMemberZkUid(member, usedDeviceUids);
+
     return {
       uid,
-      userId: String(uid),
+      userId: String(accessUserId),
       name: this.cleanDeviceName(`${user.firstName || ''} ${user.lastName || ''}`),
-      password: '',
+      password: this.defaultDevicePassword,
       role: 0,
       cardNo: 0,
     };
   }
 
   private employeeToZkUser(employee: Employee): ZkUserPayload | null {
-    const uid = this.extractNumericId(employee.accessCode);
+    const accessCode = this.toAccessUserId(employee.accessCode);
+    const uid = this.toEmployeeDeviceUid(accessCode);
 
-    if (!uid || !employee.accessCode) {
+    if (!uid || !accessCode || !employee.accessCode) {
       return null;
     }
 
     return {
       uid,
-      userId: String(uid),
+      userId: String(accessCode),
       name: this.cleanDeviceName(`${employee.firstName || ''} ${employee.lastName || ''}`),
-      password: '',
+      password: this.defaultDevicePassword,
       role: 0,
       cardNo: 0,
     };
   }
 
-  private extractNumericId(value?: string | null): number | null {
+  private toAccessUserId(value?: string | null): number | null {
     if (!value) {
       return null;
     }
 
-    const match = String(value).match(/(\d+)/);
-    if (!match) {
+    const digits = String(value).replace(/\D/g, '');
+    if (!digits) {
       return null;
     }
 
-    const parsed = Number(match[1]);
+    const parsed = Number(digits);
     return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }
+
+  private toEmployeeDeviceUid(accessCode: number | null): number | null {
+    if (!accessCode) {
+      return null;
+    }
+
+    if (accessCode <= 3000) {
+      return accessCode;
+    }
+
+    return 2500 + ((accessCode - 1) % 500) + 1;
+  }
+
+  private async ensureMemberZkUid(member: Member, usedDeviceUids: Set<number>): Promise<number> {
+    if (member.zkUid && member.zkUid > 0 && member.zkUid <= 3000) {
+      usedDeviceUids.add(member.zkUid);
+      return member.zkUid;
+    }
+
+    const localUids = await this.memberRepository
+      .createQueryBuilder('member')
+      .select('member.zkUid', 'zkUid')
+      .where('member.zkUid IS NOT NULL')
+      .getRawMany<{ zkUid: number }>();
+
+    localUids.forEach((item) => {
+      const uid = Number(item.zkUid);
+      if (Number.isFinite(uid) && uid > 0) {
+        usedDeviceUids.add(uid);
+      }
+    });
+
+    const nextUid = this.findNextAvailableZkUid(usedDeviceUids);
+    member.zkUid = nextUid;
+    await this.memberRepository.update(member.id, { zkUid: nextUid });
+    usedDeviceUids.add(nextUid);
+
+    return nextUid;
+  }
+
+  private findNextAvailableZkUid(usedDeviceUids: Set<number>): number {
+    const nextAfterLast = Math.max(0, ...Array.from(usedDeviceUids)) + 1;
+
+    for (let uid = nextAfterLast; uid <= 3000; uid++) {
+      if (!usedDeviceUids.has(uid)) {
+        return uid;
+      }
+    }
+
+    for (let uid = 1; uid < nextAfterLast && uid <= 3000; uid++) {
+      if (!usedDeviceUids.has(uid)) {
+        return uid;
+      }
+    }
+
+    throw new Error('No hay UID libre disponible en el equipo ZKTeco (limite 3000)');
+  }
+
+  private async getUsedDeviceUids(device: any): Promise<Set<number>> {
+    const users: any = await this.safeCall(() => device.getUsers(), null);
+    const rows = Array.isArray(users) ? users : Array.isArray(users?.data) ? users.data : [];
+    const used = new Set<number>();
+
+    rows.forEach((user: any) => {
+      const uid = Number(user?.uid);
+      if (Number.isFinite(uid) && uid > 0) {
+        used.add(uid);
+      }
+    });
+
+    return used;
+  }
+
+  private toErrorMessage(error: unknown): string {
+    if (error instanceof Error) {
+      return error.message;
+    }
+
+    return String(error);
   }
 
   private cleanDeviceName(value: string): string {
