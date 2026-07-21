@@ -129,7 +129,10 @@ export class ZktecoDeviceService {
     });
   }
 
-  async syncMemberById(memberId: string): Promise<any> {
+  async syncMemberById(
+    memberId: string,
+    options: { allowWithoutActiveMembership?: boolean } = {},
+  ): Promise<any> {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -143,7 +146,7 @@ export class ZktecoDeviceService {
       order: { endDate: 'DESC' },
     });
 
-    if (!activeMembership) {
+    if (!activeMembership && !options.allowWithoutActiveMembership) {
       return this.deleteMemberById(memberId);
     }
 
@@ -151,7 +154,9 @@ export class ZktecoDeviceService {
 
     return this.withDevice(config, async (device) => {
       const usedDeviceUids = await this.getUsedDeviceUids(device);
-      const payload = await this.memberToZkUser(activeMembership, usedDeviceUids);
+      const payload = activeMembership
+        ? await this.memberToZkUser(activeMembership, usedDeviceUids)
+        : await this.memberRecordToZkUser(memberId, usedDeviceUids);
 
       if (!payload) {
         return { success: false, message: 'Miembro sin codigo valido para ZKTeco' };
@@ -291,6 +296,12 @@ export class ZktecoDeviceService {
       user.role,
       user.cardNo,
     );
+
+    await this.sleep(350);
+    const confirmed = await this.userExistsOnDevice(device, user);
+    if (!confirmed) {
+      throw new Error(`El equipo no confirmo el usuario uid=${user.uid}, userid=${user.userId}`);
+    }
   }
 
   private async safeCall<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
@@ -345,6 +356,34 @@ export class ZktecoDeviceService {
     const accessUserId = this.toAccessUserId(badgeNumber);
 
     if (!accessUserId || !badgeNumber || !user || !member) {
+      return null;
+    }
+
+    const uid = await this.ensureMemberZkUid(member, usedDeviceUids);
+
+    return {
+      uid,
+      userId: String(accessUserId),
+      name: this.cleanDeviceName(`${user.firstName || ''} ${user.lastName || ''}`),
+      password: this.defaultDevicePassword,
+      role: 0,
+      cardNo: 0,
+    };
+  }
+
+  private async memberRecordToZkUser(
+    memberId: string,
+    usedDeviceUids: Set<number>,
+  ): Promise<ZkUserPayload | null> {
+    const member = await this.memberRepository.findOne({
+      where: { id: memberId },
+      relations: ['user'],
+    });
+    const user = member?.user;
+    const badgeNumber = member?.memberCode;
+    const accessUserId = this.toAccessUserId(badgeNumber);
+
+    if (!member || !user || !badgeNumber || !accessUserId) {
       return null;
     }
 
@@ -478,6 +517,23 @@ export class ZktecoDeviceService {
     }
 
     return [];
+  }
+
+  private async userExistsOnDevice(device: any, user: ZkUserPayload): Promise<boolean> {
+    const users = await this.safeCall(() => device.getUsers(), null);
+    const rows = this.normalizeDeviceUsers(users);
+    const expectedUid = Number(user.uid);
+    const expectedUserId = String(user.userId).substring(0, 9);
+
+    return rows.some((row: any) => {
+      const rowUid = Number(row?.uid);
+      const rowUserId = String(row?.userid ?? row?.userId ?? row?.USERID ?? '');
+      return rowUid === expectedUid || rowUserId === expectedUserId;
+    });
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   private toErrorMessage(error: unknown): string {

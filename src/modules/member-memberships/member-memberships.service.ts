@@ -676,7 +676,11 @@ export class MemberMembershipsService {
 
   private async syncMemberToDeviceSafe(memberId: string, reason: string): Promise<void> {
     try {
-      await this.zktecoDeviceService.syncMemberById(memberId);
+      const result = await this.zktecoDeviceService.syncMemberById(memberId);
+      if (result?.success === false) {
+        console.warn(`[MemberMembershipsService] Miembro ${memberId} no fue sincronizado con equipo ZKTeco (${reason}): ${result.message || 'sin detalle'}`);
+        return;
+      }
       console.log(`[MemberMembershipsService] Miembro ${memberId} sincronizado con equipo ZKTeco (${reason})`);
     } catch (error) {
       console.warn(`[MemberMembershipsService] No se pudo sincronizar miembro ${memberId} con equipo ZKTeco (${reason}): ${error.message}`);
