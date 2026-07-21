@@ -692,12 +692,38 @@ export class MembersService {
 
   async update(id: string, updateMemberDto: UpdateMemberDto): Promise<Member> {
     const member = await this.findById(id);
+    const incomingUser = (updateMemberDto as any).user || {};
+    const userUpdate: Partial<User> = {
+      firstName: updateMemberDto.firstName ?? incomingUser.firstName,
+      lastName: updateMemberDto.lastName ?? incomingUser.lastName,
+      email: updateMemberDto.email ?? incomingUser.email,
+      phone: updateMemberDto.phone ?? incomingUser.phone,
+    };
 
-    Object.assign(member, updateMemberDto);
+    const hasUserChanges = Object.values(userUpdate).some((value) => value !== undefined);
+    if (hasUserChanges && member.userId) {
+      await this.userRepository.update(
+        { id: member.userId },
+        Object.fromEntries(
+          Object.entries(userUpdate).filter(([, value]) => value !== undefined),
+        ),
+      );
+    }
+
+    const {
+      firstName,
+      lastName,
+      email,
+      phone,
+      user,
+      ...memberUpdate
+    } = updateMemberDto as any;
+
+    Object.assign(member, memberUpdate);
 
     const saved = await this.memberRepository.save(member);
     await this.syncMemberToDeviceSafe(id, 'update');
-    return saved;
+    return this.findById(saved.id);
   }
 
   async removeMemberships(id: string): Promise<{ message: string }> {
