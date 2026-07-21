@@ -7,6 +7,7 @@ import { MemberMembership } from '../../entities/member-membership.entity';
 import { CreatePaymentDto, UpdatePaymentDto } from './dto/create-payment.dto';
 import { PermissionsService } from '../auth/services/permissions.service';
 import { EmailService } from '../email-settings/email.service';
+import { WhatsappService } from '../whatsapp-settings/whatsapp.service';
 
 import { PromotionsService } from '../promotions/promotions.service';
 
@@ -23,6 +24,7 @@ export class PaymentsService {
     private memberMembershipRepository: Repository<MemberMembership>,
     private readonly permissionsService: PermissionsService,
     private readonly emailService: EmailService,
+    private readonly whatsappService: WhatsappService,
     private readonly promotionsService: PromotionsService,
   ) {}
 
@@ -138,6 +140,7 @@ export class PaymentsService {
   async updatePaymentStatus(id: string, status: PaymentStatus, paymentDate?: Date, userId?: string): Promise<Payment> {
     console.log(`[PAYMENTS_SERVICE] updatePaymentStatus called with userId:`, userId);
     const payment = await this.getPaymentById(id);
+    const previousStatus = payment.status;
 
     payment.status = status;
     
@@ -160,6 +163,10 @@ export class PaymentsService {
     console.log(`[PAYMENTS_SERVICE] Before save - payment:`, { id: payment.id, status: payment.status, paymentDate: payment.paymentDate, updatedBy: payment.updatedBy });
     const savedPayment = await this.paymentRepository.save(payment);
     console.log(`[PAYMENTS_SERVICE] After save - savedPayment:`, { id: savedPayment.id, status: savedPayment.status, paymentDate: savedPayment.paymentDate, updatedBy: savedPayment.updatedBy });
+
+    if (previousStatus !== PaymentStatus.COMPLETED && savedPayment.status === PaymentStatus.COMPLETED) {
+      await this.sendPaymentConfirmationSafe(savedPayment);
+    }
 
     return savedPayment;
   }
@@ -559,6 +566,7 @@ export class PaymentsService {
     console.log(`[PAYMENTS_SERVICE] ✅ Registration payment saved: ID=${updatedPayment.id}, Status=${updatedPayment.status}, FinalAmount=${finalAmount}`);
 
     this.logger.log(`[Registration Payment] ✅ Payment completed. Amount: $${finalAmount}`);
+    await this.sendPaymentConfirmationSafe(updatedPayment);
 
     return {
       statusCode: 200,
@@ -607,6 +615,7 @@ export class PaymentsService {
 
     console.log(`[PAYMENTS_SERVICE] ✅ Membership payment saved: ID=${updatedPayment.id}, Status=${updatedPayment.status}, FinalAmount=${finalAmount}`);
     this.logger.log(`[Membership Payment] ✅ Payment completed. Amount: $${finalAmount}`);
+    await this.sendPaymentConfirmationSafe(updatedPayment, appliedDiscountPercentage);
 
     return {
       statusCode: 200,
@@ -641,5 +650,126 @@ export class PaymentsService {
       message: `✅ Pago completado exitosamente`,
       data: updatedPayment,
     };
+  }
+
+  private async sendPaymentConfirmationSafe(payment: Payment, discountPercentage: number = 0): Promise<void> {
+    try {
+      if (![PaymentType.MEMBERSHIP, PaymentType.REGISTRATION].includes(payment.paymentType)) {
+        return;
+      }
+
+      const context = await this.resolvePaymentMemberContext(payment);
+      if (!context?.member?.user) {
+        this.logger.warn(`[Payments] No se pudo enviar confirmacion: pago ${payment.id} sin miembro asociado`);
+        return;
+      }
+
+      const { member, membershipName, startDate, endDate } = context;
+      const user = member.user;
+      const memberName = `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'cliente';
+      const paymentLabel = payment.paymentType === PaymentType.REGISTRATION ? 'inscripcion' : 'membresia';
+      const amount = this.formatMoney(payment.amount);
+      const paidAt = this.formatDate(payment.paymentDate || new Date());
+      const details = [
+        payment.paymentType === PaymentType.MEMBERSHIP && membershipName ? `Plan: ${membershipName}` : null,
+        startDate ? `Inicio: ${this.formatDate(startDate)}` : null,
+        endDate ? `Vencimiento: ${this.formatDate(endDate)}` : null,
+        discountPercentage > 0 ? `Descuento aplicado: ${discountPercentage}%` : null,
+      ].filter(Boolean);
+
+      const plainText = [
+        `Hola ${memberName},`,
+        '',
+        `Hemos recibido tu pago de ${paymentLabel}.`,
+        `Monto pagado: RD$ ${amount}`,
+        `Fecha de pago: ${paidAt}`,
+        ...details.map((detail) => String(detail)),
+        '',
+        'Gracias por tu pago.',
+      ].join('\n');
+
+      const htmlContent = `
+        <div style="font-family: Arial, sans-serif; color: #222; line-height: 1.5;">
+          <h2 style="margin: 0 0 12px;">Pago recibido</h2>
+          <p>Hola <strong>${memberName}</strong>, hemos recibido tu pago de ${paymentLabel}.</p>
+          <table style="border-collapse: collapse; width: 100%; max-width: 520px;">
+            <tr><td style="padding: 8px; border: 1px solid #ddd;"><strong>Monto pagado</strong></td><td style="padding: 8px; border: 1px solid #ddd;">RD$ ${amount}</td></tr>
+            <tr><td style="padding: 8px; border: 1px solid #ddd;"><strong>Fecha de pago</strong></td><td style="padding: 8px; border: 1px solid #ddd;">${paidAt}</td></tr>
+            ${details.map((detail) => `<tr><td colspan="2" style="padding: 8px; border: 1px solid #ddd;">${detail}</td></tr>`).join('')}
+          </table>
+          <p>Gracias por tu pago.</p>
+        </div>
+      `;
+
+      if (user.phone) {
+        try {
+          await this.whatsappService.sendMessage(user.phone, plainText);
+          this.logger.log(`[Payments] Confirmacion WhatsApp enviada a ${user.phone}`);
+        } catch (error) {
+          this.logger.warn(`[Payments] No se pudo enviar WhatsApp de pago ${payment.id}: ${error.message}`);
+        }
+      }
+
+      if (user.email) {
+        try {
+          await this.emailService.sendEmail({
+            recipientEmail: user.email,
+            recipientName: memberName,
+            subject: `Pago de ${paymentLabel} recibido`,
+            htmlContent,
+            plainTextContent: plainText,
+          });
+          this.logger.log(`[Payments] Confirmacion email enviada a ${user.email}`);
+        } catch (error) {
+          this.logger.warn(`[Payments] No se pudo enviar email de pago ${payment.id}: ${error.message}`);
+        }
+      }
+    } catch (error) {
+      this.logger.warn(`[Payments] Error preparando confirmacion de pago ${payment.id}: ${error.message}`);
+    }
+  }
+
+  private async resolvePaymentMemberContext(payment: Payment): Promise<{
+    member: Member;
+    membershipName?: string;
+    startDate?: Date;
+    endDate?: Date;
+  } | null> {
+    if (payment.paymentType === PaymentType.MEMBERSHIP) {
+      const memberMembership = await this.memberMembershipRepository.findOne({
+        where: { paymentId: payment.id },
+        relations: ['member', 'member.user', 'membership'],
+      });
+
+      if (!memberMembership?.member) {
+        return null;
+      }
+
+      return {
+        member: memberMembership.member,
+        membershipName: memberMembership.membership?.name,
+        startDate: memberMembership.startDate,
+        endDate: memberMembership.endDate,
+      };
+    }
+
+    if (payment.paymentType === PaymentType.REGISTRATION) {
+      const member = await this.memberRepository.findOne({
+        where: { registrationPaymentId: payment.id },
+        relations: ['user'],
+      });
+
+      return member ? { member } : null;
+    }
+
+    return null;
+  }
+
+  private formatMoney(value: any): string {
+    return Number(value || 0).toFixed(2);
+  }
+
+  private formatDate(value: Date | string): string {
+    return new Date(value).toLocaleDateString('es-DO');
   }
 }

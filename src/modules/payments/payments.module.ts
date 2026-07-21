@@ -9,6 +9,7 @@ import { AuthModule } from '../auth/auth.module';
 import { EmailSettingsModule } from '../email-settings/email-settings.module';
 import { PaymentSubscriber } from '../../entities/payment.subscriber';
 import { PromotionsModule } from '../promotions/promotions.module';
+import { WhatsappSettingsModule } from '../whatsapp-settings/whatsapp-settings.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { PromotionsModule } from '../promotions/promotions.module';
     AuthModule,
     EmailSettingsModule,
     PromotionsModule,
+    WhatsappSettingsModule,
   ],
   providers: [PaymentsService, PaymentSubscriber],
   controllers: [PaymentsController],
