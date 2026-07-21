@@ -68,12 +68,14 @@ export class ZktecoDeviceService {
 
     return this.withDevice(config, async (device) => {
       const users = await device.getUsers();
+      const userRows = this.normalizeDeviceUsers(users);
       return {
         success: true,
-        message: `${Array.isArray(users) ? users.length : 0} usuarios leidos del equipo`,
+        message: `${userRows.length} usuarios leidos del equipo`,
         data: {
           config,
-          users,
+          users: userRows,
+          raw: users,
           timestamp: new Date().toISOString(),
         },
       };
@@ -449,7 +451,7 @@ export class ZktecoDeviceService {
 
   private async getUsedDeviceUids(device: any): Promise<Set<number>> {
     const users: any = await this.safeCall(() => device.getUsers(), null);
-    const rows = Array.isArray(users) ? users : Array.isArray(users?.data) ? users.data : [];
+    const rows = this.normalizeDeviceUsers(users);
     const used = new Set<number>();
 
     rows.forEach((user: any) => {
@@ -460,6 +462,22 @@ export class ZktecoDeviceService {
     });
 
     return used;
+  }
+
+  private normalizeDeviceUsers(users: any): any[] {
+    if (Array.isArray(users)) {
+      return users;
+    }
+
+    if (Array.isArray(users?.data)) {
+      return users.data;
+    }
+
+    if (Array.isArray(users?.users)) {
+      return users.users;
+    }
+
+    return [];
   }
 
   private toErrorMessage(error: unknown): string {
