@@ -715,6 +715,7 @@ export class MembershipsService {
                   name: currentMembership.member.user.firstName,
                   lastname: currentMembership.member.user.lastName,
                   email: currentMembership.member.user.email,
+                  acc_startdate: '2000-01-01',
                   acc_enddate: '2000-01-01', // Bloquear
                 });
               }
@@ -737,6 +738,7 @@ export class MembershipsService {
                   name: currentMembership.member.user.firstName,
                   lastname: currentMembership.member.user.lastName,
                   email: currentMembership.member.user.email,
+                  acc_startdate: new Date(currentMembership.startDate).toISOString().split('T')[0],
                   acc_enddate: accEndDate.toISOString().split('T')[0],
                 });
               }
@@ -784,6 +786,7 @@ export class MembershipsService {
                 name: currentMembership.member.user.firstName,
                 lastname: currentMembership.member.user.lastName,
                 email: currentMembership.member.user.email,
+                acc_startdate: new Date(currentMembership.startDate).toISOString().split('T')[0],
                 acc_enddate: accEndDate.toISOString().split('T')[0],
               });
             }
@@ -820,6 +823,7 @@ export class MembershipsService {
               name: currentMembership.member.user.firstName,
               lastname: currentMembership.member.user.lastName,
               email: currentMembership.member.user.email,
+              acc_startdate: '2000-01-01',
               acc_enddate: '2000-01-01', // Bloquear
             });
           }
@@ -1036,6 +1040,7 @@ export class MembershipsService {
           name: memberWithUserSync.user.firstName,
           lastname: memberWithUserSync.user.lastName,
           email: memberWithUserSync.user.email,
+          acc_startdate: new Date(membership.startDate).toISOString().split('T')[0],
           acc_enddate: accEndDate.toISOString().split('T')[0],
         });
         console.log(`[MembershipsService] ✅ Acceso ZKAccess restaurado por pago completado.`);
@@ -1200,6 +1205,7 @@ export class MembershipsService {
           name: memberWithUser.user.firstName,
           lastname: memberWithUser.user.lastName,
           email: memberWithUser.user.email,
+          acc_startdate: '2000-01-01',
           acc_enddate: '2000-01-01',
         });
         console.log(`[MembershipsService] ✅ ZKAccess actualizado en removeMembershipByMemberId para memberId=${memberId}`);

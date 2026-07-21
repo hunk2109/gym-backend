@@ -95,6 +95,7 @@ export class UserRolesService {
                   name: user.firstName,
                   lastname: user.lastName,
                   email: user.email,
+                  acc_startdate: new Date().toISOString().split('T')[0],
                   acc_enddate: '2099-12-31'
                 });
               } catch (accessError) {

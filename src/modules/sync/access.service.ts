@@ -227,6 +227,9 @@ export class AccessService {
     const safeLimit = Math.min(Math.max(Number(limit) || 30, 1), 100);
 
     const machines = await this.executeFirstSuccessfulAccessQuery([
+      'SELECT * FROM [Machines] ORDER BY [ID]',
+      'SELECT * FROM [Machines]',
+      'SELECT * FROM Machines',
       'SELECT * FROM [machines] ORDER BY [ID]',
       'SELECT * FROM [machines]',
       'SELECT * FROM machines',
@@ -306,7 +309,14 @@ export class AccessService {
       const tables = dashboard.availableTables?.length
         ? ` Tablas encontradas: ${dashboard.availableTables.slice(0, 12).join(', ')}`
         : '';
-      throw new Error(`No se encontro la tabla machine/machines o no hay equipos en la base Access seleccionada.${tables}`);
+      const hasMachinesTable = dashboard.availableTables?.some((table: string) =>
+        String(table).toLowerCase() === 'machines' || String(table).toLowerCase() === 'machine',
+      );
+      throw new Error(
+        hasMachinesTable
+          ? `La tabla Machines existe, pero no tiene equipos en la base Access seleccionada.${tables}`
+          : `No se encontro la tabla machine/machines o no hay equipos en la base Access seleccionada.${tables}`,
+      );
     }
 
     if (!machine.ip || !machine.port) {

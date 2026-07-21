@@ -88,8 +88,19 @@ def write_user(conn, user_data):
             except (ValueError, TypeError):
                 access_user_id = None
             
-        # set_valid_time = 1 if end_date is provided, else 0
-        set_valid_time = 1 if acc_enddate else 0
+        # ZKAccess expects both validity dates when "Establecer validez" is checked.
+        # If the app sends no membership dates yet, keep the user created but blocked
+        # with an old validity range.
+        today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        old_block_date = datetime(2000, 1, 1)
+
+        if acc_enddate is None:
+            acc_enddate = old_block_date
+
+        if acc_startdate is None:
+            acc_startdate = old_block_date if acc_enddate < today else today
+
+        set_valid_time = 1
 
         user_id = find_access_userid(cursor, badge_number, access_user_id, legacy_badge_number)
         

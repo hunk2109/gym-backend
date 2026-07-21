@@ -150,6 +150,7 @@ export class EmployeeService {
           name: createdEmployee.firstName,
           lastname: createdEmployee.lastName,
           email: createdEmployee.email,
+          acc_startdate: new Date().toISOString().split('T')[0],
           acc_enddate: '2099-12-31'
         });
       } catch (accessError) {
@@ -415,6 +416,7 @@ export class EmployeeService {
             name: employee.firstName,
             lastname: employee.lastName,
             email: employee.email,
+            acc_startdate: '2000-01-01',
             acc_enddate: '2000-01-01' // Fecha pasada para bloquear acceso
           });
         }

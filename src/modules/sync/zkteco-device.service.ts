@@ -153,7 +153,8 @@ export class ZktecoDeviceService {
     const config = await this.getDeviceConfig();
 
     return this.withDevice(config, async (device) => {
-      const usedDeviceUids = await this.getUsedDeviceUids(device);
+      const deviceUsers = await this.getDeviceUserRows(device);
+      const usedDeviceUids = this.toUsedDeviceUids(deviceUsers);
       const payload = activeMembership
         ? await this.memberToZkUser(activeMembership, usedDeviceUids)
         : await this.memberRecordToZkUser(memberId, usedDeviceUids);
@@ -162,6 +163,7 @@ export class ZktecoDeviceService {
         return { success: false, message: 'Miembro sin codigo valido para ZKTeco' };
       }
 
+      await this.reassignMemberUidIfOccupied(memberId, payload, deviceUsers, usedDeviceUids);
       await this.sendUserToDevice(device, payload);
 
       return {
@@ -288,6 +290,14 @@ export class ZktecoDeviceService {
   }
 
   private async sendUserToDevice(device: any, user: ZkUserPayload): Promise<void> {
+    const existing = await this.findDeviceUserByUid(device, user.uid);
+    const expectedUserId = String(user.userId).substring(0, 9);
+    const existingUserId = this.deviceUserId(existing);
+
+    if (existing && existingUserId !== expectedUserId) {
+      throw new Error(`UID ${user.uid} ya existe en el equipo con userid=${existingUserId || 'N/A'}`);
+    }
+
     await device.setUser(
       String(user.uid),
       user.userId.substring(0, 9),
@@ -489,8 +499,16 @@ export class ZktecoDeviceService {
   }
 
   private async getUsedDeviceUids(device: any): Promise<Set<number>> {
+    const rows = await this.getDeviceUserRows(device);
+    return this.toUsedDeviceUids(rows);
+  }
+
+  private async getDeviceUserRows(device: any): Promise<any[]> {
     const users: any = await this.safeCall(() => device.getUsers(), null);
-    const rows = this.normalizeDeviceUsers(users);
+    return this.normalizeDeviceUsers(users);
+  }
+
+  private toUsedDeviceUids(rows: any[]): Set<number> {
     const used = new Set<number>();
 
     rows.forEach((user: any) => {
@@ -501,6 +519,29 @@ export class ZktecoDeviceService {
     });
 
     return used;
+  }
+
+  private async reassignMemberUidIfOccupied(
+    memberId: string,
+    payload: ZkUserPayload,
+    deviceUsers: any[],
+    usedDeviceUids: Set<number>,
+  ): Promise<void> {
+    const owner = this.findUserByUid(deviceUsers, payload.uid);
+    const ownerUserId = this.deviceUserId(owner);
+    const expectedUserId = String(payload.userId).substring(0, 9);
+
+    if (!owner || ownerUserId === expectedUserId) {
+      return;
+    }
+
+    const nextUid = this.findNextAvailableZkUid(usedDeviceUids);
+    await this.memberRepository.update(memberId, { zkUid: nextUid });
+    this.logger.warn(
+      `UID ${payload.uid} ocupado por userid=${ownerUserId || 'N/A'}. Reasignando miembro ${memberId} a uid=${nextUid}`,
+    );
+    payload.uid = nextUid;
+    usedDeviceUids.add(nextUid);
   }
 
   private normalizeDeviceUsers(users: any): any[] {
@@ -527,9 +568,27 @@ export class ZktecoDeviceService {
 
     return rows.some((row: any) => {
       const rowUid = Number(row?.uid);
-      const rowUserId = String(row?.userid ?? row?.userId ?? row?.USERID ?? '');
-      return rowUid === expectedUid || rowUserId === expectedUserId;
+      const rowUserId = this.deviceUserId(row);
+      return rowUid === expectedUid && rowUserId === expectedUserId;
     });
+  }
+
+  private async findDeviceUserByUid(device: any, uid: number): Promise<any | null> {
+    const rows = await this.getDeviceUserRows(device);
+    return this.findUserByUid(rows, uid);
+  }
+
+  private findUserByUid(rows: any[], uid: number): any | null {
+    const expectedUid = Number(uid);
+    return rows.find((row: any) => Number(row?.uid) === expectedUid) || null;
+  }
+
+  private deviceUserId(row: any): string {
+    if (!row) {
+      return '';
+    }
+
+    return String(row.userid ?? row.userId ?? row.USERID ?? '');
   }
 
   private sleep(ms: number): Promise<void> {

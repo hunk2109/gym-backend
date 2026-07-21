@@ -348,6 +348,7 @@ export class MembersService {
         name: user.firstName,
         lastname: user.lastName,
         email: user.email,
+        acc_startdate: '2000-01-01',
         acc_enddate: '2000-01-01' // Nuevo socio sin suscripción empieza bloqueado o sin fecha
       });
     } catch (accessError) {

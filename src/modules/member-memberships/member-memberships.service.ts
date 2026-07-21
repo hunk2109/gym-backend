@@ -661,6 +661,7 @@ export class MemberMembershipsService {
           name: memberDetails.user.firstName,
           lastname: memberDetails.user.lastName,
           email: memberDetails.user.email,
+          acc_startdate: '2000-01-01',
           acc_enddate: '2000-01-01' // Sin suscripción -> fecha pasada para bloquear
         });
         console.log(`[MemberMembershipsService] ✅ Remoción en ZKAccess exitosa.`);
