@@ -5,12 +5,13 @@ import { CampaignsService } from './campaigns.service';
 import { Campaign } from '../../entities/campaign.entity';
 import { Member } from '../../entities/member.entity';
 import { Promotion } from '../promotions/entities/promotion.entity';
+import { GymSettings } from '../../entities/gym-settings.entity';
 import { WhatsappSettingsModule } from '../whatsapp-settings/whatsapp-settings.module';
 import { EmailSettingsModule } from '../email-settings/email-settings.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Campaign, Member, Promotion]),
+    TypeOrmModule.forFeature([Campaign, Member, Promotion, GymSettings]),
     WhatsappSettingsModule,
     EmailSettingsModule,
   ],

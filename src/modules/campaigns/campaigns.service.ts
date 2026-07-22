@@ -6,6 +6,7 @@ import { WhatsappService } from '../whatsapp-settings/whatsapp.service';
 import { EmailService } from '../email-settings/email.service';
 import { Member } from '../../entities/member.entity';
 import { Promotion } from '../promotions/entities/promotion.entity';
+import { GymSettings } from '../../entities/gym-settings.entity';
 
 @Injectable()
 export class CampaignsService {
@@ -18,6 +19,8 @@ export class CampaignsService {
     private memberRepo: Repository<Member>,
     @InjectRepository(Promotion)
     private promotionRepo: Repository<Promotion>,
+    @InjectRepository(GymSettings)
+    private gymSettingsRepo: Repository<GymSettings>,
     private whatsappService: WhatsappService,
     private emailService: EmailService,
   ) {}
@@ -91,6 +94,15 @@ export class CampaignsService {
       coupon = await this.promotionRepo.findOne({ where: { code: couponCode } });
     }
 
+    // Obtener configuración del gimnasio (nombre y logo)
+    const gymSettings = await this.gymSettingsRepo.find({ take: 1 });
+    const gymName = gymSettings.length > 0 && gymSettings[0].gymName ? gymSettings[0].gymName : 'Gym Manager';
+    let logoHtml = '';
+    if (gymSettings.length > 0 && gymSettings[0].logoImage) {
+      const base64Logo = gymSettings[0].logoImage.toString('base64');
+      logoHtml = `<div style="text-align: center; margin-bottom: 20px;"><img src="data:image/png;base64,${base64Logo}" alt="Logo" style="max-height: 100px; border-radius: 8px;"></div>`;
+    }
+
     for (const member of members) {
       if (!member.user) continue;
       
@@ -127,7 +139,8 @@ export class CampaignsService {
         </head>
         <body>
           <div class="container">
-            <h1>Gym Manager</h1>
+            ${logoHtml}
+            <h1>${gymName}</h1>
             <div class="content">${message}</div>
             ${coupon ? `
               <div class="coupon-box">
@@ -137,7 +150,7 @@ export class CampaignsService {
                 ${coupon.expiresAt ? `<p style="margin:5px 0;">Válido hasta: ${coupon.expiresAt.toISOString().split('T')[0]}</p>` : ''}
               </div>
             ` : ''}
-            <div class="footer">Este es un mensaje automático, por favor no responder.</div>
+            <div class="footer">Este es un mensaje automático de ${gymName}, por favor no responder.</div>
           </div>
         </body>
         </html>
