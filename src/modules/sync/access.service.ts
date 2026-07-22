@@ -555,7 +555,7 @@ export class AccessService {
                id: baseMembershipId,
                name: 'Membresía Migrada',
                description: 'Membresía creada automáticamente por la migración',
-               type: MembershipType.REGULAR,
+               type: MembershipType.INDIVIDUAL,
                durationMonths: 1,
                price: 0,
                isActive: true,
