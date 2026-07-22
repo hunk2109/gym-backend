@@ -1,4 +1,4 @@
-import { IsString, IsNumber, IsBoolean, IsOptional, Min, Max, IsDateString } from 'class-validator';
+import { IsString, IsNumber, IsBoolean, IsOptional, Min, Max, IsDate } from 'class-validator';
 
 export class CreatePromotionDto {
   @IsString()
@@ -22,7 +22,7 @@ export class CreatePromotionDto {
   maxUses?: number;
 
   @IsOptional()
-  @IsDateString()
+  @IsDate()
   expiresAt?: Date;
 }
 
@@ -54,7 +54,7 @@ export class UpdatePromotionDto {
   active?: boolean;
 
   @IsOptional()
-  @IsDateString()
+  @IsDate()
   expiresAt?: Date;
 }
 
@@ -63,7 +63,7 @@ export class ValidatePromotionDto {
   code: string;
 
   @IsOptional()
-  @IsDateString()
+  @IsDate()
   birthDate?: Date;
 }
 

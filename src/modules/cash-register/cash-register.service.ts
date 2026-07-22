@@ -147,9 +147,19 @@ export class CashRegisterService {
       const totalPayments = Number(paymentsQuery[0]?.total || 0);
       console.log('[CashRegisterService] Total payments for the day:', totalPayments);
 
-      // Calcular lo que debería haber: Apertura + Ventas + Pagos
-      const expectedClosure = Number(cashRegister.openingAmount) + totalSales + totalPayments;
-      console.log('[CashRegisterService] Opening amount:', cashRegister.openingAmount, '+ Sales:', totalSales, '+ Payments:', totalPayments, '= Expected:', expectedClosure);
+      // Obtener total de transacciones manuales (entradas y salidas de caja)
+      const transactionsQuery = await this.cashRegisterRepository.query(
+        `SELECT COALESCE(SUM(CASE WHEN type = 'in' THEN amount ELSE -amount END), 0) as total FROM cash_register_transactions
+         WHERE cashRegisterId = ?`,
+        [cashRegister.id]
+      );
+      
+      const totalTransactions = Number(transactionsQuery[0]?.total || 0);
+      console.log('[CashRegisterService] Total manual transactions:', totalTransactions);
+
+      // Calcular lo que debería haber: Apertura + Ventas + Pagos + Transacciones
+      const expectedClosure = Number(cashRegister.openingAmount) + totalSales + totalPayments + totalTransactions;
+      console.log('[CashRegisterService] Opening amount:', cashRegister.openingAmount, '+ Sales:', totalSales, '+ Payments:', totalPayments, '+ Tx:', totalTransactions, '= Expected:', expectedClosure);
 
       // Calcular diferencia
       const difference = Number(dto.closingAmount) - expectedClosure;

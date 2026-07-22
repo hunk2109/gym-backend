@@ -85,7 +85,8 @@ export class SalesService {
 
     // Create sale
     const sale = this.saleRepository.create({
-      memberId: createSaleDto.memberId,
+      memberId: createSaleDto.memberId || null,
+      customerName: createSaleDto.customerName || null,
       totalAmount,
       discount: createSaleDto.discount || 0,
       paymentMethod: createSaleDto.paymentMethod,

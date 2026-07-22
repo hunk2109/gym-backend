@@ -36,7 +36,7 @@ export class ErrorHandlingInterceptor implements NestInterceptor {
     // Handle NestJS HTTP exceptions
     if (error.status) {
       statusCode = error.status;
-      message = error.message || error.response?.message || 'Error';
+      message = error.response?.message || error.message || 'Error';
     }
     // Handle specific error types
     else if (error instanceof TypeError) {

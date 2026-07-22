@@ -37,8 +37,14 @@ import { Table } from './entities/table.entity';
 import { TableAccount } from './entities/table-account.entity';
 import { TableAccountItem } from './entities/table-account-item.entity';
 import { AppConfig } from './entities/app-config.entity';
+import { AccountPayable } from './entities/account-payable.entity';
+import { AccountReceivable } from './entities/account-receivable.entity';
+import { CashRegisterTransaction } from './entities/cash-register-transaction.entity';
+import { Campaign } from './entities/campaign.entity';
+import { CampaignsModule } from './modules/campaigns/campaigns.module';
 
 import { AuthModule } from './modules/auth/auth.module';
+import { AccountingModule } from './modules/accounting/accounting.module';
 import { EmailSettingsModule } from './modules/email-settings/email-settings.module';
 import { ProductsModule } from './modules/products/products.module';
 import { EquipmentModule } from './modules/equipment/equipment.module';
@@ -110,7 +116,7 @@ import { LoggerMiddleware } from './common/middleware';
           username,
           password,
           database,
-          entities: [User, Product, Equipment, Sale, SaleItem, GymSettings, Employee, Member, Membership, MembershipAccessSchedule, MemberMembership, Group, GroupCompanion, GymClass, ClassEnrollment, Payment, Payroll, AuditLog, ModuleSettings, CashRegister, Coupon, Promotion, EmailConfig, EmailTemplate, EmailLog, PaymentReminder, CronExecutionLog, Attendance, Table, TableAccount, TableAccountItem, AppConfig],
+          entities: [User, Product, Equipment, Sale, SaleItem, GymSettings, Employee, Member, Membership, MembershipAccessSchedule, MemberMembership, Group, GroupCompanion, GymClass, ClassEnrollment, Payment, Payroll, AuditLog, ModuleSettings, CashRegister, Coupon, Promotion, Campaign, EmailConfig, EmailTemplate, EmailLog, PaymentReminder, CronExecutionLog, Attendance, Table, TableAccount, TableAccountItem, AppConfig, AccountPayable, AccountReceivable, CashRegisterTransaction],
           synchronize: true,
           logging: false,
         };
@@ -143,6 +149,7 @@ import { LoggerMiddleware } from './common/middleware';
     SystemParameterModule,
     CashRegisterModule,
     PromotionsModule,
+    CampaignsModule,
     EmailSettingsModule,
     CouponsModule,
     GroupsModule,
@@ -150,6 +157,7 @@ import { LoggerMiddleware } from './common/middleware';
     TablesModule,
     SyncModule,
     WhatsappSettingsModule,
+    AccountingModule,
   ],
   controllers: [],
   providers: [

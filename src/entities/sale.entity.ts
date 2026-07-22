@@ -24,6 +24,9 @@ export class Sale {
   @Column({ type: 'uuid', nullable: true })
   memberId: string | null;
 
+  @Column({ type: 'varchar', nullable: true })
+  customerName: string | null;
+
   @ManyToOne(() => User, (user) => user.sales)
   @JoinColumn({ name: 'memberId' })
   member: User | null;

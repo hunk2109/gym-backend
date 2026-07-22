@@ -1,0 +1,191 @@
+import { Injectable, Logger } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { Campaign, CampaignAudience, CampaignChannel } from '../../entities/campaign.entity';
+import { WhatsappService } from '../whatsapp-settings/whatsapp.service';
+import { EmailService } from '../email-settings/email.service';
+import { Member } from '../../entities/member.entity';
+import { Promotion } from '../promotions/entities/promotion.entity';
+
+@Injectable()
+export class CampaignsService {
+  private readonly logger = new Logger(CampaignsService.name);
+
+  constructor(
+    @InjectRepository(Campaign)
+    private campaignRepo: Repository<Campaign>,
+    @InjectRepository(Member)
+    private memberRepo: Repository<Member>,
+    @InjectRepository(Promotion)
+    private promotionRepo: Repository<Promotion>,
+    private whatsappService: WhatsappService,
+    private emailService: EmailService,
+  ) {}
+
+  async getCampaigns() {
+    return this.campaignRepo.find({ order: { createdAt: 'DESC' } });
+  }
+
+  async sendCampaign(dto: {
+    name: string;
+    audience: CampaignAudience;
+    channel: CampaignChannel;
+    messageTemplate: string;
+    couponCode?: string;
+    customMemberIds?: string[];
+  }) {
+    const campaign = this.campaignRepo.create({
+      name: dto.name,
+      audience: dto.audience,
+      channel: dto.channel,
+      messageTemplate: dto.messageTemplate,
+      attachedCouponCode: dto.couponCode,
+    });
+    const savedCampaign = await this.campaignRepo.save(campaign);
+
+    let members: Member[] = [];
+    const query = this.memberRepo.createQueryBuilder('member')
+      .leftJoinAndSelect('member.user', 'user');
+    
+    const today = new Date();
+
+    if (dto.audience === CampaignAudience.ALL) {
+      members = await query.getMany();
+    } else if (dto.audience === CampaignAudience.ACTIVE) {
+      query.innerJoin('member.memberships', 'm', 'm.isActive = true AND m.endDate >= :today', { today });
+      members = await query.getMany();
+    } else if (dto.audience === CampaignAudience.INACTIVE) {
+      query.leftJoin('member.memberships', 'm', 'm.isActive = true AND m.endDate >= :today', { today })
+           .andWhere('m.id IS NULL');
+      members = await query.getMany();
+    } else if (dto.audience === CampaignAudience.EXPIRING_SOON) {
+      const dateIn7Days = new Date();
+      dateIn7Days.setDate(today.getDate() + 7);
+      query.innerJoin('member.memberships', 'm', 'm.isActive = true AND m.endDate <= :date AND m.endDate >= :today', { date: dateIn7Days, today });
+      members = await query.getMany();
+    } else if (dto.audience === CampaignAudience.CUSTOM && dto.customMemberIds?.length) {
+      query.andWhereInIds(dto.customMemberIds);
+      members = await query.getMany();
+    }
+
+    savedCampaign.recipientsCount = members.length;
+    await this.campaignRepo.save(savedCampaign);
+
+    this.processCampaignAsync(savedCampaign, members, dto.messageTemplate, dto.couponCode, dto.channel);
+
+    return savedCampaign;
+  }
+
+  private async processCampaignAsync(
+    campaign: Campaign,
+    members: Member[],
+    template: string,
+    couponCode: string | undefined,
+    channel: CampaignChannel,
+  ) {
+    let successCount = 0;
+    let failCount = 0;
+    
+    let coupon: Promotion | null = null;
+    if (couponCode) {
+      coupon = await this.promotionRepo.findOne({ where: { code: couponCode } });
+    }
+
+    for (const member of members) {
+      if (!member.user) continue;
+      
+      const user = member.user;
+      let message = template.replace(/{nombre}/g, user.firstName || 'Cliente');
+      if (coupon) {
+        message = message.replace(/{cupon}/g, ''); 
+      }
+
+      const htmlContent = `
+        <!DOCTYPE html>
+        <html lang="es">
+        <head>
+          <meta charset="UTF-8">
+          <style>
+            body { font-family: 'Arial', sans-serif; background-color: #1a1a1a; color: #ffffff; padding: 40px; margin: 0; }
+            .container { max-width: 600px; margin: 0 auto; background-color: #222222; border-radius: 12px; padding: 30px; box-shadow: 0 10px 20px rgba(0,0,0,0.5); }
+            h1 { color: #facc15; text-align: center; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 10px; font-size: 28px; }
+            .content { font-size: 18px; line-height: 1.6; margin-bottom: 30px; white-space: pre-wrap; }
+            .coupon-box { 
+              background-color: #facc15; 
+              color: #1a1a1a; 
+              border: 3px dashed #1a1a1a; 
+              border-radius: 10px; 
+              padding: 20px; 
+              text-align: center; 
+              margin-top: 20px; 
+            }
+            .coupon-title { font-size: 24px; font-weight: bold; margin: 0 0 10px 0; }
+            .coupon-code { font-size: 32px; font-weight: 900; background-color: #ffffff; padding: 10px 20px; border-radius: 8px; display: inline-block; margin: 10px 0; border: 2px dashed #1a1a1a;}
+            .coupon-desc { font-size: 18px; margin: 5px 0; font-weight: bold;}
+            .footer { text-align: center; margin-top: 30px; font-size: 14px; color: #888; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <h1>Gym Manager</h1>
+            <div class="content">${message}</div>
+            ${coupon ? `
+              <div class="coupon-box">
+                <p class="coupon-title">CUPÓN DE DESCUENTO</p>
+                <div class="coupon-code">${coupon.code}</div>
+                <p class="coupon-desc">${coupon.discountPercentage}% OFF</p>
+                ${coupon.expiresAt ? `<p style="margin:5px 0;">Válido hasta: ${coupon.expiresAt.toISOString().split('T')[0]}</p>` : ''}
+              </div>
+            ` : ''}
+            <div class="footer">Este es un mensaje automático, por favor no responder.</div>
+          </div>
+        </body>
+        </html>
+      `;
+
+      try {
+        let sent = false;
+        
+        if (channel === CampaignChannel.WHATSAPP || channel === CampaignChannel.BOTH) {
+          if (user.phone) {
+            try {
+              const fallbackText = '¡Hola! Te hemos enviado un mensaje importante de Gym Manager. Adjuntamos el documento detallado.';
+              await this.whatsappService.sendHtmlAsPdf(user.phone, htmlContent, fallbackText);
+              sent = true;
+            } catch (e) {
+              this.logger.warn(`Failed WA to ${user.phone}: ${e.message}`);
+            }
+          }
+        }
+
+        if (channel === CampaignChannel.EMAIL || channel === CampaignChannel.BOTH) {
+          if (user.email) {
+            try {
+              await this.emailService.sendEmail({
+                recipientEmail: user.email,
+                subject: campaign.name,
+                htmlContent: htmlContent,
+              });
+              sent = true;
+            } catch (e) {
+              this.logger.warn(`Failed Email to ${user.email}: ${e.message}`);
+            }
+          }
+        }
+
+        if (sent) {
+          successCount++;
+        } else {
+          failCount++;
+        }
+      } catch (e) {
+        failCount++;
+      }
+    }
+
+    campaign.successfulSends = successCount;
+    campaign.failedSends = failCount;
+    await this.campaignRepo.save(campaign);
+    this.logger.log(`Campaign ${campaign.id} completed: ${successCount} success, ${failCount} fail.`);
+  }
+}
