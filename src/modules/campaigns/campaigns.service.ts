@@ -1,12 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { Campaign, CampaignAudience, CampaignChannel } from '../../entities/campaign.entity';
+import { Repository, LessThanOrEqual } from 'typeorm';
+import { Campaign, CampaignAudience, CampaignChannel, CampaignStatus } from '../../entities/campaign.entity';
 import { WhatsappService } from '../whatsapp-settings/whatsapp.service';
 import { EmailService } from '../email-settings/email.service';
 import { Member } from '../../entities/member.entity';
 import { Promotion } from '../promotions/entities/promotion.entity';
 import { GymSettings } from '../../entities/gym-settings.entity';
+import { Cron, CronExpression } from '@nestjs/schedule';
 
 @Injectable()
 export class CampaignsService {
@@ -29,6 +30,35 @@ export class CampaignsService {
     return this.campaignRepo.find({ order: { createdAt: 'DESC' } });
   }
 
+  private async getMembersForAudience(audience: CampaignAudience, customMemberIds?: string[]): Promise<Member[]> {
+    let members: Member[] = [];
+    const query = this.memberRepo.createQueryBuilder('member')
+      .leftJoinAndSelect('member.user', 'user');
+    
+    const today = new Date();
+
+    if (audience === CampaignAudience.ALL) {
+      members = await query.getMany();
+    } else if (audience === CampaignAudience.ACTIVE) {
+      query.innerJoin('member.memberships', 'm', 'm.isActive = true AND m.endDate >= :today', { today });
+      members = await query.getMany();
+    } else if (audience === CampaignAudience.INACTIVE) {
+      query.leftJoin('member.memberships', 'm', 'm.isActive = true AND m.endDate >= :today', { today })
+           .andWhere('m.id IS NULL');
+      members = await query.getMany();
+    } else if (audience === CampaignAudience.EXPIRING_SOON) {
+      const dateIn7Days = new Date();
+      dateIn7Days.setDate(today.getDate() + 7);
+      query.innerJoin('member.memberships', 'm', 'm.isActive = true AND m.endDate <= :date AND m.endDate >= :today', { date: dateIn7Days, today });
+      members = await query.getMany();
+    } else if (audience === CampaignAudience.CUSTOM && customMemberIds?.length) {
+      query.andWhereInIds(customMemberIds);
+      members = await query.getMany();
+    }
+
+    return members;
+  }
+
   async sendCampaign(dto: {
     name: string;
     audience: CampaignAudience;
@@ -36,47 +66,61 @@ export class CampaignsService {
     messageTemplate: string;
     couponCode?: string;
     customMemberIds?: string[];
+    scheduledAt?: Date;
   }) {
+    const isScheduled = dto.scheduledAt && new Date(dto.scheduledAt) > new Date();
+
     const campaign = this.campaignRepo.create({
       name: dto.name,
       audience: dto.audience,
       channel: dto.channel,
       messageTemplate: dto.messageTemplate,
       attachedCouponCode: dto.couponCode,
+      status: isScheduled ? CampaignStatus.SCHEDULED : CampaignStatus.IN_PROGRESS,
+      scheduledAt: dto.scheduledAt,
+      customMemberIdsJson: dto.customMemberIds ? JSON.stringify(dto.customMemberIds) : null,
     });
     const savedCampaign = await this.campaignRepo.save(campaign);
 
-    let members: Member[] = [];
-    const query = this.memberRepo.createQueryBuilder('member')
-      .leftJoinAndSelect('member.user', 'user');
-    
-    const today = new Date();
-
-    if (dto.audience === CampaignAudience.ALL) {
-      members = await query.getMany();
-    } else if (dto.audience === CampaignAudience.ACTIVE) {
-      query.innerJoin('member.memberships', 'm', 'm.isActive = true AND m.endDate >= :today', { today });
-      members = await query.getMany();
-    } else if (dto.audience === CampaignAudience.INACTIVE) {
-      query.leftJoin('member.memberships', 'm', 'm.isActive = true AND m.endDate >= :today', { today })
-           .andWhere('m.id IS NULL');
-      members = await query.getMany();
-    } else if (dto.audience === CampaignAudience.EXPIRING_SOON) {
-      const dateIn7Days = new Date();
-      dateIn7Days.setDate(today.getDate() + 7);
-      query.innerJoin('member.memberships', 'm', 'm.isActive = true AND m.endDate <= :date AND m.endDate >= :today', { date: dateIn7Days, today });
-      members = await query.getMany();
-    } else if (dto.audience === CampaignAudience.CUSTOM && dto.customMemberIds?.length) {
-      query.andWhereInIds(dto.customMemberIds);
-      members = await query.getMany();
+    if (isScheduled) {
+      this.logger.log(`Campaign ${savedCampaign.id} scheduled for ${dto.scheduledAt}`);
+      return savedCampaign;
     }
 
+    const members = await this.getMembersForAudience(dto.audience, dto.customMemberIds);
     savedCampaign.recipientsCount = members.length;
     await this.campaignRepo.save(savedCampaign);
 
     this.processCampaignAsync(savedCampaign, members, dto.messageTemplate, dto.couponCode, dto.channel);
 
     return savedCampaign;
+  }
+
+  @Cron(CronExpression.EVERY_MINUTE)
+  async processScheduledCampaigns() {
+    const now = new Date();
+    const scheduledCampaigns = await this.campaignRepo.find({
+      where: {
+        status: CampaignStatus.SCHEDULED,
+        scheduledAt: LessThanOrEqual(now)
+      }
+    });
+
+    for (const campaign of scheduledCampaigns) {
+      campaign.status = CampaignStatus.IN_PROGRESS;
+      await this.campaignRepo.save(campaign);
+
+      let customMemberIds: string[] | undefined;
+      if (campaign.customMemberIdsJson) {
+        try { customMemberIds = JSON.parse(campaign.customMemberIdsJson); } catch (e) {}
+      }
+
+      const members = await this.getMembersForAudience(campaign.audience, customMemberIds);
+      campaign.recipientsCount = members.length;
+      await this.campaignRepo.save(campaign);
+
+      this.processCampaignAsync(campaign, members, campaign.messageTemplate, campaign.attachedCouponCode, campaign.channel);
+    }
   }
 
   private async processCampaignAsync(
@@ -198,6 +242,7 @@ export class CampaignsService {
 
     campaign.successfulSends = successCount;
     campaign.failedSends = failCount;
+    campaign.status = CampaignStatus.COMPLETED;
     await this.campaignRepo.save(campaign);
     this.logger.log(`Campaign ${campaign.id} completed: ${successCount} success, ${failCount} fail.`);
   }

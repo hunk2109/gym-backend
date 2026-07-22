@@ -14,6 +14,14 @@ export enum CampaignChannel {
   BOTH = 'BOTH',
 }
 
+export enum CampaignStatus {
+  PENDING = 'PENDING',
+  SCHEDULED = 'SCHEDULED',
+  IN_PROGRESS = 'IN_PROGRESS',
+  COMPLETED = 'COMPLETED',
+  FAILED = 'FAILED',
+}
+
 @Entity('campaigns')
 export class Campaign {
   @PrimaryGeneratedColumn('uuid')
@@ -33,6 +41,15 @@ export class Campaign {
 
   @Column({ type: 'varchar', length: 255, nullable: true })
   attachedCouponCode: string;
+
+  @Column({ type: 'enum', enum: CampaignStatus, default: CampaignStatus.COMPLETED })
+  status: CampaignStatus;
+
+  @Column({ type: 'datetime', nullable: true })
+  scheduledAt: Date;
+
+  @Column({ type: 'text', nullable: true })
+  customMemberIdsJson: string; // Used to store selected members if scheduled for later
 
   @Column({ type: 'int', default: 0 })
   recipientsCount: number;
