@@ -127,9 +127,18 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
   public async restartClient() {
     this.logger.log('Restarting WhatsApp Client...');
     if (this.client) {
-      await this.client.destroy();
+      try {
+        await this.client.destroy();
+      } catch (e) {
+        this.logger.warn('Error destroying client during restart: ' + e.message);
+      }
     }
-    this.initializeClient();
+    this.status = WhatsappStatus.DISCONNECTED;
+    this.currentQrCode = null;
+    
+    setTimeout(() => {
+      this.initializeClient();
+    }, 2000);
     return { success: true };
   }
 
