@@ -535,14 +535,32 @@ export class AccessService {
       let inserted = 0;
       let updated = 0;
 
-      // Membresía a asignar para migraciones desde Access cuando el usuario tiene acceso activo
+      // Membresía a asignar para migraciones desde Access
+      const baseMembershipName = 'Plan Básico';
       const baseMembershipId = 'ea7f7057-b4a2-4000-b89c-5aaa3b696fbd';
       let baseMembership = await this.membershipRepository.findOne({
-        where: { id: baseMembershipId },
+        where: [
+          { name: baseMembershipName },
+          { id: baseMembershipId }
+        ],
       });
 
       if (!baseMembership) {
-        this.logger.warn(`No se encontró la membresía con id ${baseMembershipId}. Se omite la asignación automática.`);
+        this.logger.warn(`No se encontró la membresía con id ${baseMembershipId}. Buscando membresía alternativa...`);
+        baseMembership = await this.membershipRepository.findOne({ order: { price: 'ASC' } });
+        
+        if (!baseMembership) {
+           this.logger.warn(`No hay membresías en el sistema. Se creará una membresía genérica para las importaciones.`);
+           baseMembership = await this.membershipRepository.save({
+               id: baseMembershipId,
+               name: 'Membresía Migrada',
+               description: 'Membresía creada automáticamente por la migración',
+               type: MembershipType.REGULAR,
+               durationMonths: 1,
+               price: 0,
+               isActive: true,
+           });
+        }
       }
 
       for (const member of members) {
@@ -643,31 +661,36 @@ export class AccessService {
 
           this.logger.debug(`Usuario ${memberId} acc_startdate=${accessStartDate} acc_enddate=${accessEndDate} -> activo=${hasActiveAccess}`);
 
-          if (hasActiveAccess) {
-            const existingMembership = await this.memberMembershipRepository.findOne({
-              where: {
-                memberId: memberRecordId,
-                membershipId: baseMembership.id,
-              },
+          const existingMembership = await this.memberMembershipRepository.findOne({
+            where: {
+              memberId: memberRecordId,
+              membershipId: baseMembership.id,
+            },
+          });
+
+          const startDate = startDateValue;
+          const endDate = endDateValue || new Date(startDate);
+
+          if (!existingMembership) {
+            await this.memberMembershipRepository.save({
+              id: uuidv4(),
+              memberId: memberRecordId,
+              membershipId: baseMembership.id,
+              startDate,
+              endDate,
+              isActive: hasActiveAccess,
+              classesUsed: 0,
+              payAmount: 0,
+              isRecurring: true,
             });
-
-            if (!existingMembership) {
-              const startDate = startDateValue;
-              const endDate = endDateValue || new Date(startDate);
-
-              await this.memberMembershipRepository.save({
-                id: uuidv4(),
-                memberId: memberRecordId,
-                membershipId: baseMembership.id,
+            this.logger.log(`Asignada membresía Access Sync a member ${memberRecordId} desde ${startDate.toISOString().split('T')[0]} hasta ${endDate.toISOString().split('T')[0]}`);
+          } else {
+             // Si ya existe, actualizamos su estado y fechas por si cambiaron en access
+             await this.memberMembershipRepository.update(existingMembership.id, {
                 startDate,
                 endDate,
-                isActive: true,
-                classesUsed: 0,
-                payAmount: 0,
-                isRecurring: true,
-              });
-              this.logger.log(`Asignada membresía Access Sync a member ${memberRecordId} desde ${startDate.toISOString().split('T')[0]} hasta ${endDate.toISOString().split('T')[0]}`);
-            }
+                isActive: hasActiveAccess
+             });
           }
         }
 

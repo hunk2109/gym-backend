@@ -78,7 +78,7 @@ export class CampaignsService {
       attachedCouponCode: dto.couponCode,
       status: isScheduled ? CampaignStatus.SCHEDULED : CampaignStatus.IN_PROGRESS,
       scheduledAt: dto.scheduledAt,
-      customMemberIdsJson: dto.customMemberIds ? JSON.stringify(dto.customMemberIds) : null,
+      customMemberIdsJson: dto.customMemberIds ? JSON.stringify(dto.customMemberIds) : undefined,
     });
     const savedCampaign = await this.campaignRepo.save(campaign);
 

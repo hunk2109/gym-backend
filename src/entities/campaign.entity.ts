@@ -40,16 +40,16 @@ export class Campaign {
   messageTemplate: string;
 
   @Column({ type: 'varchar', length: 255, nullable: true })
-  attachedCouponCode: string;
+  attachedCouponCode?: string;
 
   @Column({ type: 'enum', enum: CampaignStatus, default: CampaignStatus.COMPLETED })
   status: CampaignStatus;
 
   @Column({ type: 'datetime', nullable: true })
-  scheduledAt: Date;
+  scheduledAt?: Date;
 
   @Column({ type: 'text', nullable: true })
-  customMemberIdsJson: string; // Used to store selected members if scheduled for later
+  customMemberIdsJson?: string; // Used to store selected members if scheduled for later
 
   @Column({ type: 'int', default: 0 })
   recipientsCount: number;
