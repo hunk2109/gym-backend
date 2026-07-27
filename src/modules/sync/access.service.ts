@@ -115,7 +115,7 @@ export class AccessService {
     try {
       const { stdout, stderr } = await execPromise(
         `python "${scriptPath}" "${dbPath}" "${encodeURIComponent(query)}"`,
-        { maxBuffer: 1024 * 1024 * 10, cwd: process.cwd() }
+        { maxBuffer: 1024 * 1024 * 10, cwd: process.cwd(), windowsHide: true }
       );
 
       if (stderr && stderr.trim()) {
@@ -149,7 +149,7 @@ export class AccessService {
       const dataStr = encodeURIComponent(JSON.stringify(userData));
       const { stdout, stderr } = await execPromise(
         `python "${scriptPath}" "${dbPath}" "${dataStr}"`,
-        { cwd: process.cwd() }
+        { cwd: process.cwd(), windowsHide: true }
       );
 
       if (stderr && stderr.trim()) {
