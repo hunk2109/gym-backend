@@ -524,8 +524,9 @@ export class MembershipsService {
     // Obtener la configuración del gimnasio para los días de suspensión
     let suspensionDays = 15; // default
     let notificationDaysBefore = 3; // default
+    let gymSettings: any = null;
     try {
-      const gymSettings = await this.gymSettingsService.getSettings();
+      gymSettings = await this.gymSettingsService.getSettings();
       if (gymSettings && gymSettings.membershipSuspensionDays) {
         suspensionDays = gymSettings.membershipSuspensionDays;
       }
