@@ -97,6 +97,13 @@ export class PaymentReminderService {
     try {
       this.logger.log('Iniciando proceso de envío de recordatorios de pago...');
 
+      const gymSettings = await this.gymSettingsService.getSettings();
+      if (gymSettings?.enablePaymentReminders === false) {
+        this.logger.log('Payment reminders are disabled in gym settings');
+        await this.cronLoggingService.logCronSuccess(logId, 0, Date.now() - startTime);
+        return;
+      }
+
       const reminders = await this.reminderRepository.find({
         where: {
           isActive: true,

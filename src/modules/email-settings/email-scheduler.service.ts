@@ -69,11 +69,17 @@ export class EmailSchedulerService {
         return;
       }
 
-      // Obtener nombre del gimnasio
       let gymName = 'GYM Manager';
       let notificationChannel = 'both';
       try {
         const gymSettings = await this.gymSettingsService.getSettings();
+        
+        if (gymSettings?.enableBirthdayEmails === false) {
+          this.logger.log('Birthday emails are disabled in gym settings');
+          await this.cronLoggingService.logCronSuccess(logId, 0, Date.now() - startTime);
+          return;
+        }
+
         if (gymSettings?.gymName) {
           gymName = gymSettings.gymName;
         }

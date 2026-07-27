@@ -61,6 +61,16 @@ export class GymSettings {
   @Column({ type: 'int', default: 15 })
   membershipSuspensionDays: number; // Días para suspender membresía con pago pendiente
 
+  // Envíos automáticos (Cron Jobs)
+  @Column({ type: 'boolean', default: true })
+  enableBirthdayEmails: boolean;
+
+  @Column({ type: 'boolean', default: true })
+  enableExpirationWarnings: boolean;
+
+  @Column({ type: 'boolean', default: true })
+  enablePaymentReminders: boolean;
+
   @Column({ type: 'longblob', nullable: true })
   logoImage: Buffer; // Logo/imagen para facturas (BLOB)
 

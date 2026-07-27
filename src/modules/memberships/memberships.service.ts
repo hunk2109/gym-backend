@@ -686,7 +686,11 @@ export class MembershipsService {
 
           // Enviar notificación 3 días antes de la suspensión
           const daysUntilSuspension = suspensionDays - daysSinceDue;
-          if (daysUntilSuspension === notificationDaysBefore && currentMembership.member?.user) {
+          if (
+            daysUntilSuspension === notificationDaysBefore && 
+            currentMembership.member?.user &&
+            gymSettings?.enableExpirationWarnings !== false
+          ) {
             try {
               await this.emailService.sendEmailDirect({
                 to: currentMembership.member.user.email,

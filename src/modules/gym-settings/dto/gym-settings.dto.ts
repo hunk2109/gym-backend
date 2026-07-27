@@ -52,6 +52,34 @@ export class CreateGymSettingsDto {
   @IsString()
   policies?: string;
 
+  // Envíos automáticos
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (value === 'true') return true;
+    if (value === 'false') return false;
+    return value;
+  })
+  @IsBoolean()
+  enableBirthdayEmails?: boolean;
+
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (value === 'true') return true;
+    if (value === 'false') return false;
+    return value;
+  })
+  @IsBoolean()
+  enableExpirationWarnings?: boolean;
+
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (value === 'true') return true;
+    if (value === 'false') return false;
+    return value;
+  })
+  @IsBoolean()
+  enablePaymentReminders?: boolean;
+
   @IsOptional()
   @IsString()
   logoImage?: string; // Base64 encoded image para logo de facturas
