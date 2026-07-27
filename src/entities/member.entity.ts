@@ -70,6 +70,8 @@ export class Member {
   @Column({ type: 'date', nullable: true })
   lastVisit: Date;
 
+
+
   @Column({ type: 'longtext', nullable: true })
   fingerprints?: string; // JSON con información de huellas dactilares
 
@@ -78,6 +80,9 @@ export class Member {
 
   @OneToMany(() => MemberMembership, (membership) => membership.member)
   memberships: MemberMembership[];
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
+  creditBalance: number;
 
   @CreateDateColumn()
   createdAt: Date;

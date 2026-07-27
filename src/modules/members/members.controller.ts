@@ -17,6 +17,7 @@ import { MembersService } from './members.service';
 import { CreateMemberDto, UpdateMemberDto } from './dto/create-member.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { MembershipValidationService } from '../../services/membership-validation.service';
+import { PaymentMethod } from '../../entities/payment.entity';
 
 @Controller('members')
 export class MembersController {
@@ -151,5 +152,23 @@ export class MembersController {
   @HttpCode(HttpStatus.OK)
   async removeMemberships(@Param('id') id: string) {
     return this.membersService.removeMemberships(id);
+  }
+
+  @Post(':id/credit')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(JwtAuthGuard)
+  async addCredit(
+    @Param('id') id: string,
+    @Body() body: { amount: number; paymentMethod: PaymentMethod; notes?: string },
+    @Req() req: any
+  ) {
+    const userId = req.user?.userId;
+    return this.membersService.addCredit(
+      id,
+      body.amount,
+      body.paymentMethod,
+      body.notes,
+      userId
+    );
   }
 }

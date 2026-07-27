@@ -901,4 +901,40 @@ export class MembersService {
       .orderBy('member.joinDate', 'DESC')
       .getMany();
   }
+
+  /**
+   * Adds credit to a member and creates a corresponding payment record
+   */
+  async addCredit(memberId: string, amount: number, paymentMethod: PaymentMethod, notes?: string, userId?: string): Promise<Member> {
+    if (amount <= 0) {
+      throw new BadRequestException('El monto debe ser mayor a cero');
+    }
+
+    const member = await this.memberRepository.findOne({ where: { id: memberId } });
+    if (!member) {
+      throw new NotFoundException(`Member ${memberId} not found`);
+    }
+
+    // Convert to number to ensure proper addition
+    const currentBalance = Number(member.creditBalance) || 0;
+    member.creditBalance = currentBalance + Number(amount);
+    
+    await this.memberRepository.save(member);
+
+    // Create a payment record for the added credit
+    const payment = new Payment();
+    payment.id = uuidv4();
+    payment.amount = amount;
+    payment.paymentMethod = paymentMethod;
+    payment.paymentType = PaymentType.ADD_CREDIT;
+    payment.status = PaymentStatus.COMPLETED;
+    payment.paymentDate = new Date();
+    payment.notes = notes || 'Agregado a saldo a favor';
+    payment.createdBy = userId || null;
+    payment.updatedBy = userId || null;
+
+    await this.paymentRepository.save(payment);
+
+    return member;
+  }
 }

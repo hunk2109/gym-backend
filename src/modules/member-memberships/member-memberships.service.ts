@@ -271,12 +271,25 @@ export class MemberMembershipsService {
     payment.amount = finalAmount; // Monto con descuento aplicado
     payment.dueDate = endDate;
     
-    // Si el monto es $0, marcar automáticamente como completado
-    const isAutoCompleted = payment.amount === 0;
+    let isAutoCompleted = false;
+    let paymentMethod = PaymentMethod.CASH;
+
+    // Verificar saldo a favor (Crédito)
+    if (finalAmount > 0 && Number(member.creditBalance) >= finalAmount) {
+      // Usar saldo a favor porque cubre el monto total
+      member.creditBalance = Number(member.creditBalance) - finalAmount;
+      await this.memberRepository.save(member);
+      isAutoCompleted = true;
+      paymentMethod = PaymentMethod.CREDIT_BALANCE;
+      console.log(`[MemberMembershipsService] 💰 Pagado con Saldo a Favor. Nuevo saldo: ${member.creditBalance}`);
+    } else if (finalAmount === 0) {
+      isAutoCompleted = true;
+    }
+
     if (isAutoCompleted) {
       payment.status = PaymentStatus.COMPLETED;
       payment.paymentDate = new Date();
-      console.log(`[MemberMembershipsService] 💰 Payment AUTO-COMPLETED ($0) - paymentDate: ${payment.paymentDate}`);
+      console.log(`[MemberMembershipsService] 💰 Payment AUTO-COMPLETED ($${payment.amount}) - paymentDate: ${payment.paymentDate}`);
     } else {
       // Si el monto es > 0, es pendiente (sin paymentDate hasta que se pague)
       payment.status = PaymentStatus.PENDING;
@@ -284,7 +297,7 @@ export class MemberMembershipsService {
       console.log(`[MemberMembershipsService] 💳 Payment PENDING ($${payment.amount})`);
     }
     
-    payment.paymentMethod = PaymentMethod.CASH;
+    payment.paymentMethod = paymentMethod;
     payment.paymentType = PaymentType.MEMBERSHIP;
     payment.createdBy = userId || null;
     payment.updatedBy = userId || null;
@@ -414,6 +427,9 @@ export class MemberMembershipsService {
         const discountText = finalDiscountPercentage > 0 
           ? `\n<p><strong>Descuento aplicado:</strong> ${finalDiscountPercentage}% (${appliedPromotionCode ? `Cupón: ${appliedPromotionCode}` : 'Descuento manual'})</p>`
           : '';
+        const paidWithCreditText = paymentMethod === PaymentMethod.CREDIT_BALANCE
+          ? `\n<p style="color: green; font-weight: bold;">✅ Pagado automáticamente con tu saldo a favor.</p>`
+          : '';
 
         const htmlContent = `
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
@@ -445,6 +461,7 @@ export class MemberMembershipsService {
                 </td>
               </tr>` : ''}
             </table>
+            ${paidWithCreditText}
             
             <p style="margin-top: 20px;">Si tienes alguna pregunta sobre tu membresía, por favor contacta a nuestro equipo.</p>
             
@@ -455,13 +472,15 @@ export class MemberMembershipsService {
         if (memberWithUser.user.phone) {
           try {
             console.log(`[MemberMembershipsService] 💬 Enviando WhatsApp a: ${memberWithUser.user.phone}`);
+            const waPaidText = paymentMethod === PaymentMethod.CREDIT_BALANCE ? `\n✅ *Pagado automáticamente con tu saldo a favor*\n` : '';
             const waMessage = `Hola *${memberName}*,\n\n` +
               `Tu membresía ha sido asignada exitosamente. Aquí están los detalles:\n\n` +
               `📌 *Plan:* ${membershipName}\n` +
               `📅 *Inicio:* ${startDateFormatted}\n` +
               `⏳ *Vencimiento:* ${endDateFormatted}\n` +
-              `💰 *Monto a Pagar:* RD$ ${parseFloat(finalAmount as any).toFixed(2)}\n\n` +
-              `¡Gracias por confiar en nosotros!`;
+              `💰 *Monto a Pagar:* RD$ ${parseFloat(finalAmount as any).toFixed(2)}\n` +
+              waPaidText +
+              `\n¡Gracias por confiar en nosotros!`;
             await this.whatsappService.sendMessage(memberWithUser.user.phone, waMessage);
             console.log(`[MemberMembershipsService] ✅ WhatsApp enviado exitosamente.`);
           } catch (waError) {

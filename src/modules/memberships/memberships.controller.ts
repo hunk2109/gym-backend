@@ -83,6 +83,20 @@ export class MembershipsController {
     return this.membershipsService.syncPendingMembershipsToPayments();
   }
 
+  // Activar manualmente la comprobación de expiración
+  @Post('trigger-auto-renew')
+  @Roles(UserRole.ADMIN)
+  @HttpCode(HttpStatus.OK)
+  async triggerAutoRenew() {
+    const result = await this.membershipsService.autoRenewExpiredMemberships();
+    return {
+      statusCode: 200,
+      success: true,
+      message: 'Renovación y suspensión automática ejecutada exitosamente',
+      data: result,
+    };
+  }
+
   // Membership endpoints - Ver todas las membresías
   @Get()
   @UseGuards(JwtAuthGuard, RolesGuard)

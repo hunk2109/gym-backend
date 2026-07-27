@@ -11,6 +11,7 @@ export enum PaymentMethod {
   CARD = 'card',
   TRANSFER = 'transfer',
   CHECK = 'check',
+  CREDIT_BALANCE = 'credit_balance',
 }
 
 export enum PaymentStatus {
@@ -27,6 +28,7 @@ export enum PaymentType {
   CLASS = 'class',
   PRODUCT = 'product',
   SERVICE = 'service',
+  ADD_CREDIT = 'add_credit',
   OTHER = 'other',
 }
 

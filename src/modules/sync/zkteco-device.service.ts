@@ -147,7 +147,9 @@ export class ZktecoDeviceService {
     });
 
     if (!activeMembership && !options.allowWithoutActiveMembership) {
-      return this.deleteMemberById(memberId);
+      // NO eliminar al usuario para no perder sus huellas.
+      // Delegamos la suspensión a ZKAccess (access.service.ts) que bloquea por fecha (acc_enddate).
+      return { success: true, message: 'Membresia inactiva - Se delega la suspension a ZKAccess para mantener huellas' };
     }
 
     const config = await this.getDeviceConfig();
