@@ -130,7 +130,7 @@ export class CashRegisterService {
       // Obtener total de ventas del día para esta caja (incluyendo las ya asignadas)
       const salesQuery = await this.saleRepository.query(
         `SELECT COALESCE(SUM(totalAmount - discount), 0) as total FROM sales 
-         WHERE createdAt >= ? AND createdAt <= ? AND status = 'completed' AND (cashRegisterId = ? OR cashRegisterId IS NULL)`,
+         WHERE createdAt >= ? AND createdAt <= ? AND status = 'completed' AND paymentMethod NOT IN ('credit', 'credit_balance') AND (cashRegisterId = ? OR cashRegisterId IS NULL)`,
         [startOfDay, endOfDay, cashRegister.id]
       );
       
@@ -138,9 +138,10 @@ export class CashRegisterService {
       console.log('[CashRegisterService] Total sales for the day:', totalSales);
 
       // Obtener total de pagos (inscripciones, membresias) del día
+      // EXCLUIMOS pagos automáticos (credit_balance) y solo consideramos los creados por este usuario
       const paymentsQuery = await this.paymentRepository.query(
         `SELECT COALESCE(SUM(amount), 0) as total FROM payments
-         WHERE createdAt >= ? AND createdAt <= ? AND status = 'completed' AND (createdBy = ? OR createdBy IS NULL)`,
+         WHERE createdAt >= ? AND createdAt <= ? AND status = 'completed' AND paymentMethod NOT IN ('credit', 'credit_balance') AND createdBy = ?`,
         [startOfDay, endOfDay, userId]
       );
       
