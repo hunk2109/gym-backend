@@ -138,7 +138,7 @@ export class MembershipsController {
 
   // Crear membresía
   @Post()
-  @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO)
+  @Roles(UserRole.ADMIN, UserRole.ENCARGADO)
   @HttpCode(HttpStatus.CREATED)
   async createMembership(@Body() createMembershipDto: CreateMembershipDto, @Req() req: any) {
     console.log('[CONTROLLER_CREATE] Received body:', JSON.stringify(createMembershipDto, null, 2));
@@ -152,7 +152,7 @@ export class MembershipsController {
 
   // Editar membresía
   @Put(':id')
-  @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO)
+  @Roles(UserRole.ADMIN, UserRole.ENCARGADO)
   @HttpCode(HttpStatus.OK)
   async updateMembership(
     @Param('id') id: string,

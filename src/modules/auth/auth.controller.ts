@@ -84,7 +84,7 @@ export class AuthController {
   @Post('admin/create-user')
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO)
   async createUserByAdmin(
     @Body('email') email: string,
     @Body('password') password: string,
