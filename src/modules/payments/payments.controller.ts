@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, HttpCode, HttpStatus, Patch, Req } from '@nestjs/common';
+﻿import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, HttpCode, HttpStatus, Patch, Req } from '@nestjs/common';
 import { PaymentsService } from './payments.service';
 import { CreatePaymentDto, UpdatePaymentDto, PaymentResponseDto } from './dto/create-payment.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -18,7 +18,7 @@ export class PaymentsController {
   async create(@Body() createPaymentDto: CreatePaymentDto, @Req() req: any): Promise<PaymentResponseDto> {
     const userId = req.user?.userId;
     console.log(`[PAYMENTS_CONTROLLER] req.user:`, JSON.stringify(req.user, null, 2));
-    console.log(`[PAYMENTS_CONTROLLER] userId extraído:`, userId);
+    console.log(`[PAYMENTS_CONTROLLER] userId extraÃ­do:`, userId);
     const result = await this.paymentsService.createPayment(createPaymentDto, userId);
     console.log(`[PAYMENTS_CONTROLLER] Payment guardado con createdBy:`, result.createdBy);
     return result;
@@ -84,6 +84,12 @@ export class PaymentsController {
     };
   }
 
+  @Get('member/:memberId')
+  @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO)
+  async getMemberPaymentHistory(@Param('memberId') memberId: string): Promise<any> {
+    return this.paymentsService.getMemberPaymentHistory(memberId);
+  }
+
   @Post(':id/pay')
   @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO)
   @HttpCode(HttpStatus.OK)
@@ -106,7 +112,7 @@ export class PaymentsController {
     @Req() req: any,
   ): Promise<PaymentResponseDto> {
     const userId = req.user?.userId;
-    console.log(`[PAYMENTS_CONTROLLER] PATCH /payments/:id/status - userId extraído:`, userId);
+    console.log(`[PAYMENTS_CONTROLLER] PATCH /payments/:id/status - userId extraÃ­do:`, userId);
     // Usar fecha actual si no se proporciona
     const paymentDate = body.paymentDate ? new Date(body.paymentDate) : new Date();
     return this.paymentsService.updatePaymentStatus(id, body.status, paymentDate, userId);
@@ -119,3 +125,4 @@ export class PaymentsController {
     await this.paymentsService.deletePayment(id);
   }
 }
+

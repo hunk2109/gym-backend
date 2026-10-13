@@ -24,18 +24,21 @@ export class ProductService {
   ) {}
 
   async getAllProducts(page = 1, limit = 10) {
-    const skip = (page - 1) * limit;
+    const pageNum = Number(page) || 1;
+    const limitNum = Number(limit) || 10;
+    const skip = (pageNum - 1) * limitNum;
     const [products, total] = await this.productRepository.findAndCount({
       skip,
-      take: limit,
+      take: limitNum,
       order: { createdAt: 'DESC' },
     });
     this.logger.debug(`[Products] Retrieved ${products.length} products, total: ${total}`);
     return {
       products,
+      data: products,
       total,
       page,
-      lastPage: Math.ceil(total / limit),
+      lastPage: Math.ceil(total / limitNum),
     };
   }
 

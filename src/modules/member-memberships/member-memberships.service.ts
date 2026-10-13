@@ -100,7 +100,7 @@ export class MemberMembershipsService {
   async assignMembership(
     dto: CreateMemberMembershipDto,
     userId?: string,
-  ): Promise<MemberMembership> {
+  ): Promise<any> {
     try {
       console.log(`[MEMBER_MEMBERSHIPS_SERVICE] assignMembership called with userId:`, userId);
       const memberId = dto.memberId;
@@ -144,13 +144,7 @@ export class MemberMembershipsService {
 
     // Validar fechas
     const startDate = new Date(dto.startDate);
-    let endDate = new Date(dto.endDate);
-
-    if (endDate <= startDate) {
-      throw new BadRequestException(
-        'La fecha de fin debe ser posterior a la fecha de inicio',
-      );
-    }
+    let endDate: Date;
 
     // IMPORTANTE: Recalcular endDate según si es recurrente o no
     // Si es NO recurrente (isRecurring = false), usar durationDays
@@ -175,6 +169,12 @@ export class MemberMembershipsService {
       );
     }
     console.log(`[MemberMembershipsService] endDate RECALCULADA: ${endDate.toISOString()}`);
+
+    if (endDate <= startDate) {
+      throw new BadRequestException(
+        'La fecha de fin debe ser posterior a la fecha de inicio',
+      );
+    }
 
     // Procesar cupón de promoción si se proporciona
     let discountAmount = 0;
@@ -518,6 +518,7 @@ export class MemberMembershipsService {
     // No duplicar aquí
 
     // SINCRONIZAR A ZKACCESS: Actualizar endDate
+    let syncWarning: string | null = null;
     try {
       console.log(`[MemberMembershipsService] 🔄 Sincronizando nueva fecha de membresía a ZKAccess...`);
       // Obtener el memberCode
@@ -557,13 +558,28 @@ export class MemberMembershipsService {
         await this.accessService.pushMemberToAccess(payload);
         console.log(`[MemberMembershipsService] ✅ Sincronización a ZKAccess exitosa.`);
       }
-    } catch (accessError) {
+    } catch (accessError: any) {
       console.error(`[MemberMembershipsService] ❌ Error sincronizando a ZKAccess:`, accessError.message);
+      syncWarning = `ZKAccess: ${accessError.message}`;
     }
 
-    await this.syncMemberToDeviceSafe(memberId, 'assign-membership');
+    try {
+      const zkPromise = this.syncMemberToDeviceSafe(memberId, 'assign-membership');
+      const timeoutPromise = new Promise<string>((resolve) =>
+        setTimeout(() => resolve('Equipo biométrico no respondió a tiempo (fuera de red)'), 2000),
+      );
+      const zkWarning = await Promise.race([zkPromise, timeoutPromise]);
+      if (zkWarning) {
+        syncWarning = syncWarning ? `${syncWarning} | ${zkWarning}` : zkWarning;
+      }
+    } catch (e: any) {
+      console.warn(`[MemberMembershipsService] Advertencia en sync ZKTeco:`, e?.message || e);
+    }
 
-    return savedMemberMembership;
+    return {
+      ...savedMemberMembership,
+      warning: syncWarning || null,
+    };
     } catch (error) {
       console.error('[ASSIGN MEMBERSHIP] ❌ ERROR COMPLETO:', error);
       console.error('[ASSIGN MEMBERSHIP] Mensaje:', error.message);
@@ -694,16 +710,20 @@ export class MemberMembershipsService {
     console.log(`[REMOVE MEMBERSHIP] ✓ Membresía removida para: ${memberId}\n`);
   }
 
-  private async syncMemberToDeviceSafe(memberId: string, reason: string): Promise<void> {
+  private async syncMemberToDeviceSafe(memberId: string, reason: string): Promise<string | null> {
     try {
       const result = await this.zktecoDeviceService.syncMemberById(memberId);
       if (result?.success === false) {
-        console.warn(`[MemberMembershipsService] Miembro ${memberId} no fue sincronizado con equipo ZKTeco (${reason}): ${result.message || 'sin detalle'}`);
-        return;
+        const msg = result.message || 'Equipo biométrico no sincronizado';
+        console.warn(`[MemberMembershipsService] Miembro ${memberId} no fue sincronizado con equipo ZKTeco (${reason}): ${msg}`);
+        return msg;
       }
       console.log(`[MemberMembershipsService] Miembro ${memberId} sincronizado con equipo ZKTeco (${reason})`);
-    } catch (error) {
-      console.warn(`[MemberMembershipsService] No se pudo sincronizar miembro ${memberId} con equipo ZKTeco (${reason}): ${error.message}`);
+      return null;
+    } catch (error: any) {
+      const errStr = this.formatZkError(error);
+      console.warn(`[MemberMembershipsService] No se pudo sincronizar miembro ${memberId} con equipo ZKTeco (${reason}): ${errStr}`);
+      return `Biométrico no conectado (${errStr})`;
     }
   }
 
@@ -711,9 +731,17 @@ export class MemberMembershipsService {
     try {
       await this.zktecoDeviceService.deleteMemberById(memberId);
       console.log(`[MemberMembershipsService] Miembro ${memberId} removido del equipo ZKTeco (${reason})`);
-    } catch (error) {
-      console.warn(`[MemberMembershipsService] No se pudo remover miembro ${memberId} del equipo ZKTeco (${reason}): ${error.message}`);
+    } catch (error: any) {
+      console.warn(`[MemberMembershipsService] No se pudo remover miembro ${memberId} del equipo ZKTeco (${reason}): ${this.formatZkError(error)}`);
     }
+  }
+
+  private formatZkError(error: any): string {
+    if (!error) return 'Equipo no alcanzable en la red';
+    const toast = typeof error.toast === 'function' ? error.toast() : null;
+    const detail = error.err?.code || error.err?.message || error.code || error.message || '';
+    const mainMsg = (toast && toast !== 'undefined') ? toast : (detail || 'Equipo biométrico no respondió (fuera de red)');
+    return `${mainMsg}${error.ip ? ` (IP: ${error.ip})` : ''}`;
   }
 
   /**

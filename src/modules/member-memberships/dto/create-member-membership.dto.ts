@@ -11,7 +11,12 @@ export class CreateMemberMembershipDto {
   startDate: string | Date;
 
   @IsDateString()
-  endDate: string | Date;
+  @IsOptional()
+  endDate?: string | Date;
+
+  @IsString()
+  @IsOptional()
+  paymentMethod?: string;
 
   @IsString()
   @IsOptional()

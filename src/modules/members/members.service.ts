@@ -430,6 +430,7 @@ export class MembersService {
       .createQueryBuilder('member')
       .leftJoinAndSelect('member.user', 'user')
       .leftJoinAndSelect('member.memberships', 'memberships')
+      .leftJoinAndSelect('memberships.membership', 'plan')
       .select([
         'member.id',
         'member.userId',
@@ -449,6 +450,7 @@ export class MembersService {
         'member.updatedAt',
         'user',
         'memberships',
+        'plan',
       ])
       .orderBy('member.createdAt', 'DESC')
       .skip(skip)
@@ -626,7 +628,9 @@ export class MembersService {
           ...member,
           memberships: sortedMemberships,
           currentMembership: mostRecent,
-          hasMembership: mostRecent.isActive,
+          activeMembership: mostRecent,
+          membership: mostRecent?.membership || null,
+          hasMembership: Boolean(mostRecent.isActive),
           membershipType: mostRecent.membershipType,
           membershipStatusLabel,
           isMembershipSuspended,
@@ -860,32 +864,53 @@ export class MembersService {
     return Number.isFinite(sequence) ? sequence : 0;
   }
 
-  async search(query: string, page: number = 1, limit: number = 10): Promise<{ data: Member[]; pagination: any }> {
-    const skip = (page - 1) * limit;
-    const searchQuery = `%${query.toLowerCase()}%`;
+  async search(query: string = '', page: number = 1, limit: number = 10): Promise<{ data: Member[]; pagination: any }> {
+    const pageNum = Number(page) || 1;
+    const limitNum = Number(limit) || 10;
+    const skip = (pageNum - 1) * limitNum;
+    const searchQuery = `%${(query || '').trim().toLowerCase()}%`;
 
     // Search in user email, firstName, lastName, member code or documentId.
     // MySQL does not support ILIKE, so use LOWER(...) LIKE for case-insensitive search.
     const [data, total] = await this.memberRepository
       .createQueryBuilder('member')
       .leftJoinAndSelect('member.user', 'user')
+      .leftJoinAndSelect('member.memberships', 'memberships')
+      .leftJoinAndSelect('memberships.membership', 'plan')
       .where('LOWER(user.email) LIKE :query', { query: searchQuery })
       .orWhere('LOWER(user.firstName) LIKE :query', { query: searchQuery })
       .orWhere('LOWER(user.lastName) LIKE :query', { query: searchQuery })
       .orWhere('LOWER(member.memberCode) LIKE :query', { query: searchQuery })
       .orWhere('LOWER(member.documentId) LIKE :query', { query: searchQuery })
+      .orWhere('user.phone LIKE :query', { query: searchQuery })
+      .orWhere('member.emergencyPhone LIKE :query', { query: searchQuery })
       .skip(skip)
-      .take(limit)
+      .take(limitNum)
       .orderBy('member.createdAt', 'DESC')
       .getManyAndCount();
 
+    const mappedData = data.map((member) => {
+      const sorted = (member.memberships || []).sort(
+        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+      );
+      const mostRecent = sorted[0] || null;
+      return {
+        ...member,
+        memberships: sorted,
+        currentMembership: mostRecent,
+        activeMembership: mostRecent,
+        membership: mostRecent?.membership || null,
+        hasMembership: mostRecent ? Boolean(mostRecent.isActive) : false,
+      };
+    });
+
     return {
-      data,
+      data: mappedData,
       pagination: {
-        page,
-        limit,
+        page: pageNum,
+        limit: limitNum,
         total,
-        pages: Math.ceil(total / limit),
+        pages: Math.ceil(total / limitNum),
       },
     };
   }

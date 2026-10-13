@@ -238,7 +238,7 @@ export class ZktecoDeviceService {
     return {
       ip: String(machine.ip),
       port: Number(machine.port) || 4370,
-      timeoutMs: 10000,
+      timeoutMs: 3000,
       inport: 5000,
     };
   }
