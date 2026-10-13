@@ -284,6 +284,10 @@ export class MemberMembershipsService {
       console.log(`[MemberMembershipsService] 💰 Pagado con Saldo a Favor. Nuevo saldo: ${member.creditBalance}`);
     } else if (finalAmount === 0) {
       isAutoCompleted = true;
+    } else if (dto.paymentMethod && dto.paymentMethod !== 'pending') {
+      isAutoCompleted = true;
+      paymentMethod = dto.paymentMethod as any;
+      console.log(`[MemberMembershipsService] 💰 Pago recibido inmediatamente vía: ${paymentMethod}`);
     }
 
     if (isAutoCompleted) {
