@@ -3,10 +3,12 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User, UserRole } from '../../entities/user.entity';
 import { EmployeeRole } from '../../entities/employee.entity';
+import { RolePermission } from '../../entities/role-permission.entity';
 import { PermissionsService } from '../auth/services/permissions.service';
 import { EmployeeService } from '../employees/employee.service';
 import { AccessService } from '../sync/access.service';
 import { Member } from '../../entities/member.entity';
+import { SYSTEM_PERMISSIONS, DEFAULT_ROLE_PERMISSIONS, PermissionDefinition } from './permissions-catalog';
 
 @Injectable()
 export class UserRolesService {
@@ -17,6 +19,8 @@ export class UserRolesService {
     private userRepository: Repository<User>,
     @InjectRepository(Member)
     private memberRepository: Repository<Member>,
+    @InjectRepository(RolePermission)
+    private rolePermissionRepository: Repository<RolePermission>,
     private readonly permissionsService: PermissionsService,
     @Inject(forwardRef(() => EmployeeService))
     private readonly employeeService: EmployeeService,
@@ -38,10 +42,6 @@ export class UserRolesService {
   }
 
   async assignRole(userId: string, newRole: UserRole, requestingUserId: string): Promise<User> {
-    // El RolesGuard ya verificó que el usuario tiene rol ADMIN
-    // Confiar en el token JWT validado
-    
-    // Buscar al usuario cuyo rol será cambiado
     const user = await this.userRepository.findOne({
       where: { id: userId },
     });
@@ -50,7 +50,6 @@ export class UserRolesService {
       throw new NotFoundException('User not found');
     }
 
-    // Validar que el nuevo rol sea válido
     const validRoles = Object.values(UserRole);
     if (!validRoles.includes(newRole)) {
       throw new BadRequestException(`Invalid role: ${newRole}`);
@@ -58,13 +57,10 @@ export class UserRolesService {
 
     const oldRole = user.role;
     user.role = newRole;
-    
-    // Siempre asegurar que el usuario esté activo si se cambia a cliente o si se está cambiando de rol
     user.isActive = true;
     
     const updatedUser = await this.userRepository.save(user);
 
-    // Log de acción sensible
     this.permissionsService.logSensitiveAction(
       requestingUserId,
       UserRole.ADMIN,
@@ -73,21 +69,16 @@ export class UserRolesService {
       { oldRole, newRole },
     );
 
-    // Automatización de Empleado y ZKAccess basado en el rol
     try {
       if (oldRole === UserRole.CLIENTE && newRole !== UserRole.CLIENTE) {
-        // Promoción: Cliente -> Empleado
-        // Buscamos si ya tiene registro de empleado por su email
         const existingEmployee = await this.employeeService.findByEmail(user.email);
         if (existingEmployee) {
-          // Reactivar empleado si existe
           if (!existingEmployee.isActive) {
             existingEmployee.isActive = true;
             existingEmployee.role = this.mapUserRoleToEmployeeRole(newRole);
             await this.employeeService.update(existingEmployee.id, existingEmployee);
             this.logger.log(`[UserRolesService] Empleado ${existingEmployee.id} reactivado tras cambio de rol a ${newRole}.`);
             
-            // Empujar a ZKAccess
             if (existingEmployee.accessCode) {
               try {
                 await this.accessService.pushMemberToAccess({
@@ -103,19 +94,13 @@ export class UserRolesService {
               }
             }
             
-            // Enviar credenciales
             await this.employeeService.resetPasswordAndSendCredentials(user, existingEmployee);
           } else {
-             // Solo actualizar el rol si ya estaba activo
              existingEmployee.role = this.mapUserRoleToEmployeeRole(newRole);
              await this.employeeService.update(existingEmployee.id, existingEmployee);
-             
-             // Opcional: si ya estaba activo, podríamos no reenviar contraseñas
-             // Pero el usuario pidió que se manden las credenciales "cuando pase eso" (cuando se cambie el rol)
              await this.employeeService.resetPasswordAndSendCredentials(user, existingEmployee);
           }
         } else {
-          // Crear empleado nuevo (salario 0)
           const createdEmployee = await this.employeeService.create({
             firstName: user.firstName,
             lastName: user.lastName,
@@ -131,17 +116,14 @@ export class UserRolesService {
           await this.employeeService.resetPasswordAndSendCredentials(user, createdEmployee);
         }
       } else if (oldRole !== UserRole.CLIENTE && newRole === UserRole.CLIENTE) {
-        // Degradación: Empleado -> Cliente
         const existingEmployee = await this.employeeService.findByEmail(user.email);
         if (existingEmployee && existingEmployee.isActive) {
            await this.employeeService.delete(existingEmployee.id, { id: requestingUserId, skipUserDeactivation: true });
            this.logger.log(`[UserRolesService] Empleado ${existingEmployee.id} desactivado tras cambio de rol a ${newRole}.`);
         }
         
-        // Asegurarnos de que exista como Miembro para que salga en la pantalla
         const existingMember = await this.memberRepository.findOne({ where: { userId: user.id } });
         if (!existingMember) {
-          // Generar código de miembro
           const year = new Date().getFullYear();
           const lastMember = await this.memberRepository
             .createQueryBuilder('member')
@@ -214,7 +196,6 @@ export class UserRolesService {
       throw new NotFoundException('Requesting user not found');
     }
 
-    // Verificación doble: Solo ADMIN/ENCARGADO puede cambiar estado
     this.permissionsService.requireAdminOrManager(
       requestingUser.role,
       requestingUserId,
@@ -233,7 +214,6 @@ export class UserRolesService {
     user.isActive = !user.isActive;
     const updatedUser = await this.userRepository.save(user);
 
-    // Log de acción sensible
     this.permissionsService.logSensitiveAction(
       requestingUserId,
       requestingUser.role,
@@ -243,5 +223,86 @@ export class UserRolesService {
     );
 
     return updatedUser;
+  }
+
+  // ================= PERMISOS DINÁMICOS POR ROL =================
+
+  getPermissionsCatalog(): PermissionDefinition[] {
+    return SYSTEM_PERMISSIONS;
+  }
+
+  async getAllRolePermissions(): Promise<Record<string, string[]>> {
+    const saved = await this.rolePermissionRepository.find();
+    const savedMap = new Map<string, string[]>();
+    for (const r of saved) {
+      savedMap.set(r.role, Array.isArray(r.permissions) ? r.permissions : []);
+    }
+
+    const result: Record<string, string[]> = {};
+    const roles = [
+      UserRole.ADMIN,
+      UserRole.ENCARGADO,
+      UserRole.EMPLEADO_CAJERO,
+      UserRole.EMPLEADO_ENTRENADOR,
+    ];
+
+    for (const role of roles) {
+      if (savedMap.has(role)) {
+        result[role] = savedMap.get(role)!;
+      } else {
+        result[role] = DEFAULT_ROLE_PERMISSIONS[role] || [];
+      }
+    }
+
+    return result;
+  }
+
+  async getPermissionsForRole(role: string): Promise<string[]> {
+    const saved = await this.rolePermissionRepository.findOne({
+      where: { role },
+    });
+
+    if (saved && Array.isArray(saved.permissions)) {
+      return saved.permissions;
+    }
+
+    return DEFAULT_ROLE_PERMISSIONS[role] || [];
+  }
+
+  async updateRolePermissions(
+    role: string,
+    permissions: string[],
+    requestingUserId: string,
+  ): Promise<string[]> {
+    let rolePerm = await this.rolePermissionRepository.findOne({
+      where: { role },
+    });
+
+    if (!rolePerm) {
+      rolePerm = this.rolePermissionRepository.create({
+        role,
+        permissions,
+      });
+    } else {
+      rolePerm.permissions = permissions;
+    }
+
+    await this.rolePermissionRepository.save(rolePerm);
+
+    this.permissionsService.logSensitiveAction(
+      requestingUserId,
+      UserRole.ADMIN,
+      'Update Role Permissions',
+      role,
+      { count: permissions.length },
+    );
+
+    return rolePerm.permissions;
+  }
+
+  async getUserPermissions(userId: string): Promise<string[]> {
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user) return [];
+    return this.getPermissionsForRole(user.role);
   }
 }

@@ -53,7 +53,6 @@ export class UserRolesController {
     const limitNum = limit ? parseInt(limit, 10) : undefined;
     const clients = await this.userRolesService.getActiveClients(limitNum, search);
     
-    // Mapear a objetos simples sin campos sensibles
     const clientsData = clients.map(client => ({
       id: client.id,
       email: client.email,
@@ -75,6 +74,85 @@ export class UserRolesController {
       path: req.path,
     };
   }
+
+  // ================= PERMISOS DINÁMICOS =================
+
+  @Get('permissions/catalog')
+  async getPermissionsCatalog(@Req() req: any) {
+    const catalog = this.userRolesService.getPermissionsCatalog();
+    return {
+      statusCode: 200,
+      success: true,
+      data: catalog,
+      timestamp: new Date().toISOString(),
+      path: req.path,
+    };
+  }
+
+  @Get('permissions/all')
+  @Roles(UserRole.ADMIN, UserRole.ENCARGADO)
+  async getAllRolePermissions(@Req() req: any) {
+    const permissions = await this.userRolesService.getAllRolePermissions();
+    return {
+      statusCode: 200,
+      success: true,
+      data: permissions,
+      timestamp: new Date().toISOString(),
+      path: req.path,
+    };
+  }
+
+  @Get('permissions/my-permissions')
+  async getMyPermissions(@Req() req: any) {
+    const userId = req.user?.userId || req.user?.sub || req.user?.id;
+    const permissions = await this.userRolesService.getUserPermissions(userId);
+    return {
+      statusCode: 200,
+      success: true,
+      data: permissions,
+      timestamp: new Date().toISOString(),
+      path: req.path,
+    };
+  }
+
+  @Get('permissions/:role')
+  @Roles(UserRole.ADMIN, UserRole.ENCARGADO)
+  async getRolePermissions(@Param('role') role: string, @Req() req: any) {
+    const permissions = await this.userRolesService.getPermissionsForRole(role);
+    return {
+      statusCode: 200,
+      success: true,
+      data: permissions,
+      timestamp: new Date().toISOString(),
+      path: req.path,
+    };
+  }
+
+  @Post('permissions/:role')
+  @Roles(UserRole.ADMIN)
+  @HttpCode(HttpStatus.OK)
+  async updateRolePermissions(
+    @Param('role') role: string,
+    @Body('permissions') permissions: string[],
+    @Req() req: any,
+  ) {
+    const requestingUserId = req.user?.userId || req.user?.sub || req.user?.id;
+    const updated = await this.userRolesService.updateRolePermissions(
+      role,
+      permissions || [],
+      requestingUserId,
+    );
+    return {
+      statusCode: 200,
+      success: true,
+      message: `Permissions updated for role ${role}`,
+      data: updated,
+      timestamp: new Date().toISOString(),
+      path: req.path,
+    };
+  }
+
+  // ================= OTROS ENDPOINTS =================
 
   @Get('by-role/:role')
   @Roles(UserRole.ADMIN, UserRole.ENCARGADO)
