@@ -624,6 +624,8 @@ export class MembersService {
           .andWhere('payment.status = :status', { status: PaymentStatus.PENDING })
           .getOne();
 
+        const hasPending = Boolean(isPending || pendingMembershipPayment);
+
         const mapped = {
           ...member,
           memberships: sortedMemberships,
@@ -631,6 +633,8 @@ export class MembersService {
           activeMembership: mostRecent,
           membership: mostRecent?.membership || null,
           hasMembership: Boolean(mostRecent.isActive),
+          hasPendingPayment: hasPending,
+          isPaid: !hasPending,
           membershipType: mostRecent.membershipType,
           membershipStatusLabel,
           isMembershipSuspended,
@@ -655,6 +659,7 @@ export class MembersService {
       .createQueryBuilder('member')
       .leftJoinAndSelect('member.user', 'user')
       .leftJoinAndSelect('member.memberships', 'memberships')
+      .leftJoinAndSelect('memberships.membership', 'plan')
       .where('member.id = :id', { id })
       .getOne();
 
@@ -662,17 +667,28 @@ export class MembersService {
       throw new NotFoundException('Member not found');
     }
 
-    // Calcular hasRegistrationPaymentPending y hasMembershipPaymentPending
-    const pendingRegistrationPayment = await this.paymentRepository
+    const sortedMemberships = (member.memberships || []).sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    );
+    const activeMembership = sortedMemberships.find((m) => m.isActive) || sortedMemberships[0] || null;
+
+    // Verificar si hay pago de membresía pendiente
+    const pendingMembershipPayment = await this.paymentRepository
       .createQueryBuilder('payment')
       .innerJoin(MemberMembership, 'mm', 'mm.paymentId = payment.id')
       .where('mm.memberId = :memberId', { memberId: id })
-      .andWhere('payment.paymentType = :paymentType', { paymentType: PaymentType.REGISTRATION })
+      .andWhere('payment.paymentType = :paymentType', { paymentType: PaymentType.MEMBERSHIP })
       .andWhere('payment.status = :status', { status: PaymentStatus.PENDING })
       .getOne();
 
     const result = {
       ...member,
+      memberships: sortedMemberships,
+      activeMembership: activeMembership,
+      currentMembership: activeMembership,
+      membership: activeMembership?.membership || null,
+      hasMembership: Boolean(activeMembership?.isActive),
+      hasPendingPayment: Boolean(pendingMembershipPayment),
     };
 
     return result as unknown as Member;

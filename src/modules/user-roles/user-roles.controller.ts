@@ -18,7 +18,7 @@ export class UserRolesController {
     @Body('role') role: UserRole,
     @Req() req: any,
   ) {
-    const requestingUserId = req.user.sub;
+    const requestingUserId = req.user?.userId || req.user?.sub || req.user?.id;
     const updatedUser = await this.userRolesService.assignRole(userId, role, requestingUserId);
     
     const userData = {
@@ -97,7 +97,7 @@ export class UserRolesController {
     @Param('userId') userId: string,
     @Req() req: any,
   ) {
-    const requestingUserId = req.user.sub;
+    const requestingUserId = req.user?.userId || req.user?.sub || req.user?.id;
     const updatedUser = await this.userRolesService.toggleUserActive(userId, requestingUserId);
     return {
       statusCode: 200,

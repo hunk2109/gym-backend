@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, In } from 'typeorm';
 import { MemberMembership } from '../../entities/member-membership.entity';
 import { Member } from '../../entities/member.entity';
 import { Membership, MembershipType } from '../../entities/membership.entity';
@@ -316,6 +316,15 @@ export class MemberMembershipsService {
 
     const savedMemberMembership = await this.memberMembershipRepository.save(memberMembership);
 
+    // Incrementar el contador de uso de la promoción si se aplicó
+    if (appliedPromotionCode) {
+      try {
+        await this.promotionsService.applyPromotion(appliedPromotionCode);
+      } catch (err) {
+        console.error(`[MemberMembershipsService] Error incrementing promotion usage:`, err);
+      }
+    }
+
     // 🆕 Si es membresía de tipo "group", crear automáticamente un grupo
     console.log(`[MemberMembershipsService] 📋 membership.type: "${membership.type}" (typeof: ${typeof membership.type})`);
     console.log(`[MemberMembershipsService] 📋 ¿Es 'group'? ${membership.type === 'group'}`);
@@ -602,8 +611,11 @@ export class MemberMembershipsService {
   /**
    * Remover la membresía activa de un miembro
    */
-  async removeMembership(memberId: string): Promise<void> {
-    console.log(`\n[REMOVE MEMBERSHIP] 🗑️ Intentando remover membresía para memberId: "${memberId}"`);
+  async removeMembership(
+    memberId: string,
+    refundAction?: 'credit_balance' | 'refund' | 'revoke_only',
+  ): Promise<{ success: boolean; message: string; refundAction?: string; amount?: number }> {
+    console.log(`\n[REMOVE MEMBERSHIP] 🗑️ Intentando remover membresía para memberId: "${memberId}", action: "${refundAction}"`);
     
     // Buscar la membresía MÁS RECIENTE (por createdAt descendente) del miembro
     // No importa si está activa o no, remover la más reciente
@@ -628,7 +640,7 @@ export class MemberMembershipsService {
       );
     }
 
-    // PRIMERO: Marcar todos los pagos pendientes como CANCELLED
+    // PRIMERO: Marcar todos los pagos pendientes como CANCELLED (cancelar deuda)
     console.log(`[REMOVE MEMBERSHIP] 📋 Marcando pagos pendientes como CANCELLED...`);
     const pendingPayments = await this.paymentRepository
       .createQueryBuilder('payment')
@@ -637,19 +649,75 @@ export class MemberMembershipsService {
       .andWhere('payment.status = :status', { status: PaymentStatus.PENDING })
       .getMany();
     
-    console.log(`[REMOVE MEMBERSHIP] Pagos pendientes encontrados: ${pendingPayments.length}`);
-    if (pendingPayments.length > 0) {
-      const paymentIds = pendingPayments.map(p => p.id);
+    const paymentIdsToCancel: string[] = pendingPayments.map(p => p.id);
+    if (memberMembership.paymentId) {
+      const directPending = await this.paymentRepository.findOne({
+        where: { id: memberMembership.paymentId, status: PaymentStatus.PENDING },
+      });
+      if (directPending && !paymentIdsToCancel.includes(directPending.id)) {
+        paymentIdsToCancel.push(directPending.id);
+      }
+    }
+
+    if (paymentIdsToCancel.length > 0) {
       await this.paymentRepository.update(
-        { id: paymentIds.length === 1 ? paymentIds[0] : undefined },
+        { id: In(paymentIdsToCancel) },
         {
           status: PaymentStatus.CANCELLED,
         },
       );
-      console.log(`[REMOVE MEMBERSHIP] ✓ ${pendingPayments.length} pago(s) marcado(s) como CANCELLED`);
+      console.log(`[REMOVE MEMBERSHIP] ✓ ${paymentIdsToCancel.length} pago(s) pendiente(s) marcado(s) como CANCELLED`);
     }
 
-    // SEGUNDO: Eliminar al miembro de group_companions si es acompañante
+    // SEGUNDO: Gestionar pagos completados si existieran
+    let refundMessage = '';
+    let processedAmount = 0;
+
+    let completedPayment: Payment | null = null;
+    if (memberMembership.paymentId) {
+      completedPayment = await this.paymentRepository.findOne({
+        where: { id: memberMembership.paymentId, status: PaymentStatus.COMPLETED },
+      });
+    }
+    if (!completedPayment) {
+      completedPayment = await this.paymentRepository
+        .createQueryBuilder('payment')
+        .innerJoin(MemberMembership, 'mm', 'mm.paymentId = payment.id')
+        .where('mm.id = :mmId', { mmId: memberMembership.id })
+        .andWhere('payment.status = :status', { status: PaymentStatus.COMPLETED })
+        .getOne();
+    }
+
+    if (completedPayment) {
+      processedAmount = Number(completedPayment.amount) || 0;
+      console.log(`[REMOVE MEMBERSHIP] Pago completado detectado: ${completedPayment.id}, monto: ${processedAmount}`);
+
+      const member = await this.memberRepository.findOne({ where: { id: memberId } });
+
+      if (refundAction === 'credit_balance') {
+        if (member) {
+          const currentCredit = Number(member.creditBalance) || 0;
+          member.creditBalance = currentCredit + processedAmount;
+          await this.memberRepository.save(member);
+          console.log(`[REMOVE MEMBERSHIP] 💰 Saldo a favor acreditado: ${processedAmount}. Nuevo saldo: ${member.creditBalance}`);
+        }
+        completedPayment.status = PaymentStatus.REFUNDED;
+        completedPayment.notes = (completedPayment.notes ? completedPayment.notes + ' | ' : '') +
+          `Acreditado a saldo a favor ($${processedAmount}) por cancelación de membresía`;
+        await this.paymentRepository.save(completedPayment);
+        refundMessage = `Pago de RD$ ${processedAmount.toFixed(2)} transferido a Saldo a Favor del socio.`;
+      } else if (refundAction === 'refund') {
+        completedPayment.status = PaymentStatus.REFUNDED;
+        completedPayment.notes = (completedPayment.notes ? completedPayment.notes + ' | ' : '') +
+          `Reembolsado ($${processedAmount}) por cancelación de membresía`;
+        await this.paymentRepository.save(completedPayment);
+        refundMessage = `Pago de RD$ ${processedAmount.toFixed(2)} marcado como Reembolsado.`;
+      } else {
+        refundMessage = `Membresía revocada sin reembolso del pago previo (RD$ ${processedAmount.toFixed(2)}).`;
+      }
+    }
+
+    // TERCERO: Eliminar al miembro de group_companions si es acompañante
     console.log(`[REMOVE MEMBERSHIP] 🗑️ Eliminando de group_companions si existe...`);
     
     // Si es acompañante, obtener el groupId ANTES de eliminarlo
@@ -680,17 +748,14 @@ export class MemberMembershipsService {
       console.log(`[REMOVE MEMBERSHIP] ✓ Contador de acompañantes decrementado - filas actualizadas: ${updateResult.affected}`);
     }
 
-    // SEGUNDO: ELIMINAR COMPLETAMENTE el registro de MemberMembership de la BD (no solo desactivar)
+    // CUARTO: ELIMINAR COMPLETAMENTE el registro de MemberMembership de la BD
     const deleteResult = await this.memberMembershipRepository.delete({
       id: memberMembership.id,
     });
     
     console.log(`[REMOVE MEMBERSHIP] ✓ Membresía eliminada de la BD: ${memberMembership.id} - Registros eliminados: ${deleteResult.affected}`);
 
-    // TERCERO: Actualizar el miembro local solo si es necesario según lógica de negocio
-    // El estado de membresía se calcula dinámicamente desde member_memberships.
-    
-    // SINCRONIZAR A ZKACCESS: Remover fecha de vencimiento
+    // QUINTO: SINCRONIZAR A ZKACCESS: Remover fecha de vencimiento
     try {
       console.log(`[MemberMembershipsService] 🔄 Removiendo fecha de membresía en ZKAccess...`);
       const memberDetails = await this.memberRepository.findOne({ where: { id: memberId }, relations: ['user'] });
@@ -712,6 +777,13 @@ export class MemberMembershipsService {
     await this.deleteMemberFromDeviceSafe(memberId, 'remove-membership');
 
     console.log(`[REMOVE MEMBERSHIP] ✓ Membresía removida para: ${memberId}\n`);
+
+    return {
+      success: true,
+      message: `Membresía cancelada exitosamente. ${refundMessage}`.trim(),
+      refundAction,
+      amount: processedAmount,
+    };
   }
 
   private async syncMemberToDeviceSafe(memberId: string, reason: string): Promise<string | null> {

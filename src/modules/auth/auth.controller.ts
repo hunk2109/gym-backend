@@ -1,4 +1,4 @@
-import { Controller, Post, Body, HttpCode, HttpStatus, UseGuards, Req, Patch, Get } from '@nestjs/common';
+import { Controller, Post, Body, HttpCode, HttpStatus, UseGuards, Req, Patch, Put, Get } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { RolesGuard } from './guards/roles.guard';
@@ -43,7 +43,7 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @UseGuards(JwtAuthGuard)
   async getProfile(@Req() req: any) {
-    const userId = req.user.sub;
+    const userId = req.user?.userId || req.user?.sub || req.user?.id;
     return this.authService.getProfile(userId);
   }
 
@@ -54,7 +54,18 @@ export class AuthController {
     @Req() req: any,
     @Body() updateProfileDto: UpdateProfileDto,
   ) {
-    const userId = req.user.sub;
+    const userId = req.user?.userId || req.user?.sub || req.user?.id;
+    return this.authService.updateProfile(userId, updateProfileDto);
+  }
+
+  @Put('profile')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(JwtAuthGuard)
+  async updateProfilePut(
+    @Req() req: any,
+    @Body() updateProfileDto: UpdateProfileDto,
+  ) {
+    const userId = req.user?.userId || req.user?.sub || req.user?.id;
     return this.authService.updateProfile(userId, updateProfileDto);
   }
 
@@ -65,7 +76,7 @@ export class AuthController {
     @Req() req: any,
     @Body() changePasswordDto: ChangePasswordDto,
   ) {
-    const userId = req.user.sub;
+    const userId = req.user?.userId || req.user?.sub || req.user?.id;
     return this.authService.changePassword(userId, changePasswordDto);
   }
 

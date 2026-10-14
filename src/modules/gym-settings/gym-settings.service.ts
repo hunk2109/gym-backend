@@ -59,6 +59,7 @@ export class GymSettingsService {
         closingTime: '22:00',
         membershipPrice: 0,
         policies: '',
+        ticketPaperSize: '80mm',
       });
       settings = await this.gymSettingsRepository.save(defaultSettings);
       this.logger.log('[GET] Default gym settings created');

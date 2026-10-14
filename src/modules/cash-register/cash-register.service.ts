@@ -262,17 +262,33 @@ export class CashRegisterService {
     }
   }
 
+  async getRegisterById(id: string): Promise<CashRegister | null> {
+    return this.cashRegisterRepository.findOne({ where: { id } });
+  }
+
   async getTodayRegister(userId: string): Promise<CashRegister | null> {
     try {
       console.log('[🟢 getTodayRegister] Called for user:', userId);
 
-      const register = await this.cashRegisterRepository.findOne({
+      let register = await this.cashRegisterRepository.findOne({
         where: {
           userId,
           isOpen: true,
         },
         order: { createdAt: 'DESC' },
       });
+
+      if (!register) {
+        register = await this.cashRegisterRepository.findOne({
+          where: {
+            isOpen: true,
+          },
+          order: { createdAt: 'DESC' },
+        });
+        if (register) {
+          console.log('[🟢 getTodayRegister] Found active OPEN register from another user:', register.id, 'opened by:', register.userId);
+        }
+      }
 
       console.log('[🟢 getTodayRegister] Query result:', register);
       

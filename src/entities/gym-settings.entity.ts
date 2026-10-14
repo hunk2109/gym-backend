@@ -114,6 +114,9 @@ export class GymSettings {
   @Column({ type: 'varchar', default: 'both' })
   notificationChannel: string; // 'email', 'whatsapp', or 'both'
 
+  @Column({ type: 'varchar', default: '80mm' })
+  ticketPaperSize: string; // '80mm', '70mm', '58mm', 'a4'
+
   @CreateDateColumn()
   createdAt: Date;
 

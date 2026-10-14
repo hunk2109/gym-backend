@@ -25,6 +25,9 @@ export class AccessService {
   private readonly DEFAULT_DB_PATH = 'c:\\develop\\gym-backend\\dowtown.mdb';
   private readonly CONFIG_KEY = 'ACCESS_DB_PATH';
 
+  private successfulMachineQuery: string | null = null;
+  private cachedDashboard: { data: any; expiresAt: number } | null = null;
+
   constructor(
     @InjectRepository(User)
     private userRepository: Repository<User>,
@@ -48,6 +51,8 @@ export class AccessService {
    */
   async setAccessDbPath(path: string): Promise<void> {
     this.accessDbPath = path;
+    this.cachedDashboard = null;
+    this.successfulMachineQuery = null;
     try {
       await this.configService.setConfig(
         this.CONFIG_KEY,
@@ -222,23 +227,36 @@ export class AccessService {
   }
 
   async getAccessDashboard(limit: number = 30): Promise<any> {
+    const now = Date.now();
+    if (this.cachedDashboard && this.cachedDashboard.expiresAt > now) {
+      return this.cachedDashboard.data;
+    }
+
     await this.validateAccessDbPath();
     const dbPath = await this.getAccessDbPath();
     const safeLimit = Math.min(Math.max(Number(limit) || 30, 1), 100);
 
-    const machines = await this.executeFirstSuccessfulAccessQuery([
-      'SELECT * FROM [Machines] ORDER BY [ID]',
-      'SELECT * FROM [Machines]',
-      'SELECT * FROM Machines',
-      'SELECT * FROM [machines] ORDER BY [ID]',
-      'SELECT * FROM [machines]',
-      'SELECT * FROM machines',
-      'SELECT * FROM Machines',
-      'SELECT * FROM [machine] ORDER BY [ID]',
-      'SELECT * FROM [machine]',
-      'SELECT * FROM machine',
-      'SELECT * FROM Machine',
-    ]);
+    const machineCandidates = this.successfulMachineQuery
+      ? [this.successfulMachineQuery]
+      : [
+          'SELECT * FROM [Machines] ORDER BY [ID]',
+          'SELECT * FROM [Machines]',
+          'SELECT * FROM Machines',
+          'SELECT * FROM [machines] ORDER BY [ID]',
+          'SELECT * FROM [machines]',
+          'SELECT * FROM machines',
+        ];
+
+    let machines: any[] = [];
+    for (const q of machineCandidates) {
+      const rows = await this.executeOptionalAccessQuery(q);
+      if (rows.length > 0) {
+        this.successfulMachineQuery = q;
+        machines = rows;
+        break;
+      }
+    }
+
     const availableTables = machines.length === 0 ? await this.executeAccessTables() : [];
 
     const recentLogs = await this.executeOptionalAccessQuery(`
@@ -263,7 +281,7 @@ export class AccessService {
       'total',
     );
 
-    return {
+    const result = {
       success: true,
       dbPath,
       machines: machines.map((machine) => ({
@@ -296,6 +314,13 @@ export class AccessService {
       })),
       timestamp: new Date().toISOString(),
     };
+
+    this.cachedDashboard = {
+      data: result,
+      expiresAt: Date.now() + 15 * 1000, // Cachear 15 segundos
+    };
+
+    return result;
   }
 
   async testAccessMachineConnection(machineId?: number): Promise<any> {

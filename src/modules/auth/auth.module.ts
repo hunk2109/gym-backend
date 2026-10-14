@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { User } from '../../entities/user.entity';
+import { Employee } from '../../entities/employee.entity';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { JwtStrategy } from './jwt.strategy';
@@ -15,7 +16,7 @@ import { AttendancesModule } from '../attendances/attendances.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([User]),
+    TypeOrmModule.forFeature([User, Employee]),
     PassportModule,
     JwtModule.register({
       secret: process.env.JWT_SECRET || 'muerete66',

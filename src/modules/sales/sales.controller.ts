@@ -60,8 +60,12 @@ export class SalesController {
 
   @Get()
   @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO)
-  async getAllSales(@Query('page') page = 1, @Query('limit') limit = 10) {
-    return this.salesService.getAllSales(page, limit);
+  async getAllSales(
+    @Query('page') page = 1,
+    @Query('limit') limit = 50,
+    @Query('cashRegisterId') cashRegisterId?: string,
+  ) {
+    return this.salesService.getAllSales(Number(page) || 1, Number(limit) || 50, cashRegisterId);
   }
 
   @Get('statistics')
@@ -146,9 +150,14 @@ export class SalesController {
   }
 
   @Delete(':id')
-  @Roles(UserRole.ADMIN)
-  @HttpCode(HttpStatus.NO_CONTENT)
-  async deleteSale(@Param('id') id: string) {
-    return this.salesService.deleteSale(id);
+  @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO)
+  async deleteSale(
+    @Param('id') id: string,
+    @Body('reason') bodyReason?: string,
+    @Query('reason') queryReason?: string,
+    @Request() req?: any,
+  ) {
+    const reason = bodyReason || queryReason;
+    return this.salesService.deleteSale(id, reason, req?.user);
   }
 }

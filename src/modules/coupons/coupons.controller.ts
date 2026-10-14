@@ -14,7 +14,7 @@ import { CouponsService } from './coupons.service';
 import { CreateCouponDto, UpdateCouponDto } from './dto/coupon.dto';
 import { Coupon } from '../../entities/coupon.entity';
 
-@Controller('api/coupons')
+@Controller('coupons')
 export class CouponsController {
   constructor(private readonly couponsService: CouponsService) {}
 

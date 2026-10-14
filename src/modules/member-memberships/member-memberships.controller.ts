@@ -131,12 +131,15 @@ export class MemberMembershipsController {
 
   /**
    * DELETE /api/member-memberships/:memberId
-   * Remover la membresía de un miembro
+   * Remover la membresía de un miembro (con opción de saldo a favor, reembolso o solo revocar)
    */
   @Delete(':memberId')
-  @HttpCode(HttpStatus.NO_CONTENT)
-  async removeMembership(@Param('memberId') memberId: string) {
-    await this.memberMembershipsService.removeMembership(memberId);
+  @HttpCode(HttpStatus.OK)
+  async removeMembership(
+    @Param('memberId') memberId: string,
+    @Query('action') action?: 'credit_balance' | 'refund' | 'revoke_only',
+  ) {
+    return this.memberMembershipsService.removeMembership(memberId, action);
   }
 
   /**

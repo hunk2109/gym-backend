@@ -85,4 +85,29 @@ export class EmployeeController {
   async toggleActive(@Param('id') id: string, @Request() req: any) {
     return this.employeeService.toggleActive(id, req.user);
   }
+
+  @Post(':id/send-credentials')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  async sendCredentials(@Param('id') id: string) {
+    return this.employeeService.sendCredentials(id);
+  }
+
+  @Post('convert-client')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  async convertClientToEmployee(
+    @Body() body: {
+      memberId?: string;
+      userId?: string;
+      email?: string;
+      role: EmployeeRole;
+      salary?: number;
+      specialization?: string;
+      hireDate?: string;
+    },
+    @Request() req: any,
+  ) {
+    return this.employeeService.convertClientToEmployee(body, req.user);
+  }
 }

@@ -129,6 +129,10 @@ export class CreateGymSettingsDto {
   @IsOptional()
   @IsString()
   notificationChannel?: string;
+
+  @IsOptional()
+  @IsString()
+  ticketPaperSize?: string;
 }
 
 export class UpdateGymSettingsDto {
@@ -231,4 +235,8 @@ export class UpdateGymSettingsDto {
   @IsOptional()
   @IsString()
   notificationChannel?: string;
+
+  @IsOptional()
+  @IsString()
+  ticketPaperSize?: string;
 }

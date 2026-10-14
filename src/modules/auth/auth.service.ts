@@ -17,6 +17,8 @@ export class AuthService {
   constructor(
     @InjectRepository(User)
     private userRepository: Repository<User>,
+    @InjectRepository(Employee)
+    private employeeRepository: Repository<Employee>,
     private jwtService: JwtService,
     private emailService: EmailService,
     private gymSettingsService: GymSettingsService,
@@ -157,6 +159,8 @@ export class AuthService {
       throw new BadRequestException('User not found');
     }
 
+    const oldEmail = user.email;
+
     // Si intenta cambiar email, verificar que no esté en uso
     if (updateProfileDto.email && updateProfileDto.email !== user.email) {
       const existingUser = await this.userRepository.findOne({
@@ -168,18 +172,41 @@ export class AuthService {
       user.email = updateProfileDto.email;
     }
 
-    if (updateProfileDto.firstName) {
+    if (updateProfileDto.firstName !== undefined) {
       user.firstName = updateProfileDto.firstName;
     }
-    if (updateProfileDto.lastName) {
+    if (updateProfileDto.lastName !== undefined) {
       user.lastName = updateProfileDto.lastName;
     }
-    if (updateProfileDto.phone) {
+    if (updateProfileDto.phone !== undefined) {
       user.phone = updateProfileDto.phone;
     }
 
     await this.userRepository.save(user);
-    return this.generateToken(user);
+
+    // Sincronizar en la tabla Employee si el usuario está registrado como empleado
+    try {
+      const employee = await this.employeeRepository.findOne({
+        where: [{ email: oldEmail }, { email: user.email }],
+      });
+      if (employee) {
+        employee.firstName = user.firstName;
+        employee.lastName = user.lastName;
+        employee.phone = user.phone;
+        employee.email = user.email;
+        await this.employeeRepository.save(employee);
+        this.logger.log(`[AuthService] Sincronizados datos del empleado ${employee.id} desde perfil`);
+      }
+    } catch (empErr) {
+      this.logger.warn(`[AuthService] No se pudo sincronizar empleado con perfil: ${empErr.message}`);
+    }
+
+    const tokenData = this.generateToken(user);
+    return {
+      ...tokenData,
+      message: 'Perfil actualizado exitosamente',
+      success: true,
+    };
   }
 
   async changePassword(userId: string, changePasswordDto: any) {
@@ -230,6 +257,23 @@ export class AuthService {
       throw new BadRequestException('User not found');
     }
 
+    // Si es un empleado, incluir datos adicionales del empleado
+    let employeeData: any = null;
+    try {
+      const employee = await this.employeeRepository.findOne({
+        where: { email: user.email },
+      });
+      if (employee) {
+        employeeData = {
+          id: employee.id,
+          accessCode: employee.accessCode,
+          role: employee.role,
+          hireDate: employee.hireDate,
+          salary: employee.salary,
+        };
+      }
+    } catch (e) {}
+
     return {
       id: user.id,
       email: user.email,
@@ -240,6 +284,7 @@ export class AuthService {
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
       isActive: user.isActive,
+      employee: employeeData,
     };
   }
 

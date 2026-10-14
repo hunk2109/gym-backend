@@ -7,6 +7,7 @@ import { Employee, EmployeeRole } from '../../entities/employee.entity';
 import { CreateEmployeeDto, UpdateEmployeeDto } from './dto/employee.dto';
 import { AuditLogService } from '../audit-logs/audit-log.service';
 import { User, UserRole } from '../../entities/user.entity';
+import { Member } from '../../entities/member.entity';
 import { EmailService } from '../email-settings/email.service';
 import { ModulesManagementService } from '../modules-management/modules-management.service';
 import { GymSettingsService } from '../gym-settings/gym-settings.service';
@@ -23,6 +24,8 @@ export class EmployeeService {
     private employeeRepository: Repository<Employee>,
     @InjectRepository(User)
     private userRepository: Repository<User>,
+    @InjectRepository(Member)
+    private memberRepository: Repository<Member>,
     private auditLogService: AuditLogService,
     private emailService: EmailService,
     private modulesManagementService: ModulesManagementService,
@@ -42,21 +45,7 @@ export class EmployeeService {
     }
 
     // Generar accessCode (ej: 900001)
-    const lastEmployeeWithCode = await this.employeeRepository
-      .createQueryBuilder('employee')
-      .where('employee.accessCode IS NOT NULL')
-      .orderBy('employee.accessCode', 'DESC')
-      .limit(1)
-      .getOne();
-    
-    let nextCode = 900001;
-    if (lastEmployeeWithCode && lastEmployeeWithCode.accessCode) {
-      const parsed = parseInt(lastEmployeeWithCode.accessCode, 10);
-      if (!isNaN(parsed)) {
-        nextCode = parsed + 1;
-      }
-    }
-    const accessCode = nextCode.toString();
+    const accessCode = await this.generateNextAccessCode();
 
     const employee = this.employeeRepository.create({
       ...createDto,
@@ -91,48 +80,11 @@ export class EmployeeService {
       await this.userRepository.save(user);
       this.logger.log(`User created for employee ${createdEmployee.email}`);
 
-      // Verificar si está habilitado enviar email de bienvenida
+      // Enviar credenciales tanto por correo como por WhatsApp
       try {
-        const sendWelcomeEmail = await this.modulesManagementService.getModuleSetting(
-          'employees',
-          'sendWelcomeEmailToEmployees',
-        );
-
-        if (!sendWelcomeEmail) {
-          this.logger.log(`Welcome email disabled for employees, skipping email for ${createdEmployee.email}`);
-        } else {
-          // Enviar email con contraseña temporal
-          try {
-            // Obtener nombre del gimnasio
-            let gymName = 'GYM Manager';
-            try {
-              const gymSettings = await this.gymSettingsService.getSettings();
-              if (gymSettings?.gymName) {
-                gymName = gymSettings.gymName;
-              }
-            } catch (gymError) {
-              this.logger.warn(`Failed to get gym settings: ${gymError.message}, using default gym name`);
-            }
-
-            await this.emailService.sendEmail({
-              recipientEmail: createdEmployee.email,
-              recipientName: `${createdEmployee.firstName} ${createdEmployee.lastName}`,
-              subject: `¡Bienvenido a ${gymName}! - Acceso de Empleado`,
-              htmlContent: this.generateEmployeeWelcomeEmailHTML(
-                createdEmployee.firstName,
-                createdEmployee.email,
-                tempPassword,
-                gymName,
-              ),
-            });
-            
-            this.logger.log(`Welcome email sent to employee ${createdEmployee.email}`);
-          } catch (emailError) {
-            this.logger.error(`Failed to send welcome email to employee ${createdEmployee.email}`, emailError);
-          }
-        }
-      } catch (settingError) {
-        this.logger.warn(`Failed to check email setting: ${settingError.message}, proceeding with email`);
+        await this.sendEmployeeCredentialsNotifications(createdEmployee, user, tempPassword);
+      } catch (notifyError) {
+        this.logger.error(`Error sending credentials to ${createdEmployee.email}:`, notifyError);
       }
     } catch (userError) {
       this.logger.error(`Failed to create user for employee ${createdEmployee.email}`, userError);
@@ -527,50 +479,335 @@ export class EmployeeService {
     return undefined;
   }
 
+  /**
+   * Envía las credenciales de empleado tanto por correo electrónico como por WhatsApp
+   */
+  async sendEmployeeCredentialsNotifications(
+    employee: Employee,
+    user: User,
+    tempPassword: string,
+  ): Promise<{ emailSent: boolean; whatsappSent: boolean; errors: string[] }> {
+    let emailSent = false;
+    let whatsappSent = false;
+    const errors: string[] = [];
+
+    // Obtener nombre del gimnasio
+    let gymName = 'GYM Manager';
+    try {
+      const gymSettings = await this.gymSettingsService.getSettings();
+      if (gymSettings?.gymName) {
+        gymName = gymSettings.gymName;
+      }
+    } catch (e) {
+      this.logger.warn(`Failed to get gym settings: ${e.message}`);
+    }
+
+    // 1. Envío por Correo Electrónico
+    try {
+      const sendWelcomeEmail = await this.modulesManagementService.getModuleSetting(
+        'employees',
+        'sendWelcomeEmailToEmployees',
+      );
+
+      // Si no está explícitamente desactivado (false), procedemos a enviar
+      if (sendWelcomeEmail !== false) {
+        await this.emailService.sendEmail({
+          recipientEmail: employee.email,
+          recipientName: `${employee.firstName} ${employee.lastName}`,
+          subject: `¡Bienvenido a ${gymName}! - Acceso de Empleado`,
+          htmlContent: this.generateEmployeeWelcomeEmailHTML(
+            employee.firstName,
+            employee.email,
+            tempPassword,
+            gymName,
+          ),
+        });
+        emailSent = true;
+        this.logger.log(`Credentials email sent to ${employee.email}`);
+      } else {
+        this.logger.log(`Welcome email is explicitly disabled in settings for employees.`);
+      }
+    } catch (emailError) {
+      const msg = `Email error: ${emailError.message || emailError}`;
+      errors.push(msg);
+      this.logger.error(`Failed to send credentials email to ${employee.email}`, emailError);
+    }
+
+    // 2. Envío por WhatsApp
+    const targetPhone = employee.phone || user.phone;
+    if (targetPhone) {
+      try {
+        const statusInfo = this.whatsappService.getStatus();
+        if (statusInfo && statusInfo.status === WhatsappStatus.CONNECTED) {
+          const accessInfo = employee.accessCode ? `\n🏢 *Código de Acceso / Biométrico:* ${employee.accessCode}` : '';
+          const waMessage = `🏋️ *¡Bienvenido al equipo de ${gymName}!*\n\nHola *${employee.firstName}*, aquí tienes tus credenciales de acceso al sistema:\n\n📧 *Email:* ${employee.email}\n🔑 *Contraseña temporal:* ${tempPassword}${accessInfo}\n\n⚠️ *Importante:* Al iniciar sesión te recomendamos cambiar tu contraseña desde tu perfil.\nPor seguridad no compartas estos datos con nadie.`;
+          await this.whatsappService.sendMessage(targetPhone, waMessage);
+          whatsappSent = true;
+          this.logger.log(`Credentials WhatsApp sent to ${targetPhone}`);
+        } else {
+          const msg = `WhatsApp no está conectado (estado actual: ${statusInfo?.status || 'DESCONECTADO'})`;
+          errors.push(msg);
+          this.logger.warn(`Cannot send WhatsApp credentials to ${targetPhone}: ${msg}`);
+        }
+      } catch (waError) {
+        const msg = `WhatsApp error: ${waError.message || waError}`;
+        errors.push(msg);
+        this.logger.error(`Failed to send credentials WhatsApp to ${targetPhone}`, waError);
+      }
+    } else {
+      errors.push('El empleado no posee número de teléfono registrado');
+    }
+
+    return { emailSent, whatsappSent, errors };
+  }
+
   async resetPasswordAndSendCredentials(user: User, employee: Employee) {
     try {
       const tempPassword = this.generateTemporaryPassword();
       user.passwordHash = await bcrypt.hash(tempPassword, 10);
       await this.userRepository.save(user);
 
-      // Obtener nombre del gimnasio
-      let gymName = 'GYM Manager';
-      try {
-        const gymSettings = await this.gymSettingsService.getSettings();
-        if (gymSettings?.gymName) {
-          gymName = gymSettings.gymName;
-        }
-      } catch (e) {}
-
-      // Enviar correo si está habilitado
-      try {
-        const sendWelcomeEmail = await this.modulesManagementService.getModuleSetting('employees', 'sendWelcomeEmailToEmployees');
-        if (sendWelcomeEmail) {
-          await this.emailService.sendEmail({
-            recipientEmail: user.email,
-            recipientName: `${user.firstName} ${user.lastName}`,
-            subject: `¡Bienvenido a ${gymName}! - Acceso de Empleado`,
-            htmlContent: this.generateEmployeeWelcomeEmailHTML(user.firstName, user.email, tempPassword, gymName),
-          });
-          this.logger.log(`Credentials email sent to ${user.email}`);
-        }
-      } catch (e) {
-        this.logger.error(`Failed to send credentials email to ${user.email}`, e);
-      }
-
-      // Enviar WhatsApp si está activo
-      try {
-        const statusInfo = this.whatsappService.getStatus();
-        if (statusInfo && statusInfo.status === WhatsappStatus.CONNECTED) {
-          const waMessage = `🏋️ *¡Bienvenido a tu cuenta de empleado en ${gymName}!*\n\nHola *${user.firstName}*, tu rol ha sido actualizado. Aquí tienes tus nuevas credenciales de acceso:\n\n📧 *Email:* ${user.email}\n🔑 *Contraseña temporal:* ${tempPassword}\n\n⚠️ Por favor, cambia tu contraseña al ingresar.\nNo compartas estos datos con nadie.`;
-          await this.whatsappService.sendMessage(user.phone || employee.phone, waMessage);
-          this.logger.log(`Credentials WhatsApp sent to ${user.phone || employee.phone}`);
-        }
-      } catch (e) {
-        this.logger.error(`Failed to send credentials WhatsApp to ${user.email}`, e);
-      }
+      return await this.sendEmployeeCredentialsNotifications(employee, user, tempPassword);
     } catch (e) {
       this.logger.error(`Error in resetPasswordAndSendCredentials for ${user.email}`, e);
     }
+  }
+
+  /**
+   * Endpoint / servicio para reenviar o regenerar credenciales a un empleado
+   */
+  async sendCredentials(employeeId: string): Promise<{
+    success: boolean;
+    message: string;
+    emailSent: boolean;
+    whatsappSent: boolean;
+    errors: string[];
+  }> {
+    const employee = await this.employeeRepository.findOne({
+      where: { id: employeeId },
+    });
+    if (!employee) {
+      throw new NotFoundException(`Empleado con ID ${employeeId} no encontrado`);
+    }
+
+    let user = await this.userRepository.findOne({
+      where: { email: employee.email },
+    });
+
+    const tempPassword = this.generateTemporaryPassword();
+    const hashedPassword = await bcrypt.hash(tempPassword, 10);
+
+    if (!user) {
+      // Crear el usuario si aún no existía
+      const userRole = this.mapEmployeeRoleToUserRole(employee.role);
+      user = this.userRepository.create({
+        id: uuidv4(),
+        email: employee.email,
+        passwordHash: hashedPassword,
+        firstName: employee.firstName,
+        lastName: employee.lastName,
+        phone: employee.phone,
+        role: userRole,
+        isActive: employee.isActive,
+      });
+      await this.userRepository.save(user);
+      this.logger.log(`Usuario creado al reenviar credenciales para ${employee.email}`);
+    } else {
+      user.passwordHash = hashedPassword;
+      await this.userRepository.save(user);
+      this.logger.log(`Contraseña temporal actualizada para usuario ${employee.email}`);
+    }
+
+    const { emailSent, whatsappSent, errors } = await this.sendEmployeeCredentialsNotifications(
+      employee,
+      user,
+      tempPassword,
+    );
+
+    let message = 'Credenciales procesadas.';
+    if (emailSent && whatsappSent) {
+      message = 'Credenciales enviadas correctamente por Correo y WhatsApp.';
+    } else if (emailSent) {
+      message = 'Credenciales enviadas por Correo electrónico (WhatsApp no conectado o sin enviar).';
+    } else if (whatsappSent) {
+      message = 'Credenciales enviadas por WhatsApp (Correo electrónico no enviado).';
+    } else {
+      message = 'No se pudo enviar las credenciales: ' + (errors.length ? errors.join('; ') : 'Verifique configuración');
+    }
+
+    return {
+      success: emailSent || whatsappSent,
+      message,
+      emailSent,
+      whatsappSent,
+      errors,
+    };
+  }
+
+  private async generateNextAccessCode(): Promise<string> {
+    const lastEmployeeWithCode = await this.employeeRepository
+      .createQueryBuilder('employee')
+      .where('employee.accessCode IS NOT NULL')
+      .orderBy('employee.accessCode', 'DESC')
+      .limit(1)
+      .getOne();
+    
+    let nextCode = 900001;
+    if (lastEmployeeWithCode && lastEmployeeWithCode.accessCode) {
+      const parsed = parseInt(lastEmployeeWithCode.accessCode, 10);
+      if (!isNaN(parsed)) {
+        nextCode = parsed + 1;
+      }
+    }
+    return nextCode.toString();
+  }
+
+  /**
+   * Convierte un Cliente / Socio a Empleado:
+   * - Actualiza el rol de usuario
+   * - Crea o reactiva su registro en la tabla employees
+   * - Sincroniza acceso biométrico ilimitado en ZKAccess
+   * - Envía nuevas credenciales por Correo y WhatsApp
+   */
+  async convertClientToEmployee(dto: {
+    memberId?: string;
+    userId?: string;
+    email?: string;
+    role: EmployeeRole;
+    salary?: number;
+    specialization?: string;
+    hireDate?: string;
+  }, authUser?: any): Promise<{
+    success: boolean;
+    message: string;
+    employee: Employee;
+    user: User;
+    emailSent: boolean;
+    whatsappSent: boolean;
+  }> {
+    let user: User | null = null;
+    let member: Member | null = null;
+
+    if (dto.memberId) {
+      member = await this.memberRepository.findOne({
+        where: { id: dto.memberId },
+        relations: ['user'],
+      });
+      if (member) {
+        user = member.user || (member.userId ? await this.userRepository.findOne({ where: { id: member.userId } }) : null);
+      }
+    }
+
+    if (!user && dto.userId) {
+      user = await this.userRepository.findOne({ where: { id: dto.userId } });
+    }
+
+    if (!user && dto.email) {
+      user = await this.userRepository.findOne({ where: { email: dto.email } });
+    }
+
+    if (!user) {
+      throw new NotFoundException('Cliente/Socio no encontrado para convertir a empleado.');
+    }
+
+    // Mapear rol de empleado a rol de usuario
+    const userRole = this.mapEmployeeRoleToUserRole(dto.role);
+    user.role = userRole;
+    user.isActive = true;
+
+    // Generar o refrescar contraseña temporal
+    const tempPassword = this.generateTemporaryPassword();
+    user.passwordHash = await bcrypt.hash(tempPassword, 10);
+    await this.userRepository.save(user);
+
+    // Buscar si ya existe registro de empleado por email
+    let employee = await this.employeeRepository.findOne({ where: { email: user.email } });
+
+    if (employee) {
+      employee.isActive = true;
+      employee.role = dto.role;
+      if (dto.salary !== undefined) employee.salary = dto.salary;
+      if (dto.specialization !== undefined) employee.specialization = dto.specialization;
+      if (dto.hireDate) employee.hireDate = new Date(dto.hireDate);
+      if (!employee.accessCode) {
+        employee.accessCode = await this.generateNextAccessCode();
+      }
+      await this.employeeRepository.save(employee);
+      this.logger.log(`[EmployeeService] Empleado existente reactivado y actualizado para ${user.email}`);
+    } else {
+      const accessCode = await this.generateNextAccessCode();
+      employee = this.employeeRepository.create({
+        id: uuidv4(),
+        firstName: user.firstName,
+        lastName: user.lastName,
+        email: user.email,
+        phone: user.phone || '',
+        role: dto.role,
+        salary: dto.salary ?? 0,
+        specialization: dto.specialization || 'General',
+        accessCode,
+        isActive: true,
+        hireDate: dto.hireDate ? new Date(dto.hireDate) : new Date(),
+      });
+      await this.employeeRepository.save(employee);
+      this.logger.log(`[EmployeeService] Nuevo empleado creado a partir de cliente ${user.email}`);
+    }
+
+    // Sincronizar en ZKAccess (Empleado sin límite de tiempo)
+    try {
+      this.logger.log(`[EmployeeService] 🔄 Empujando empleado promovido a ZKAccess...`);
+      await this.accessService.pushMemberToAccess({
+        Badgenumber: employee.accessCode,
+        name: employee.firstName,
+        lastname: employee.lastName,
+        email: employee.email,
+        acc_startdate: new Date().toISOString().split('T')[0],
+        acc_enddate: '2099-12-31',
+      });
+    } catch (accessError) {
+      this.logger.error(`[EmployeeService] ❌ Falló la sincronización a Access del empleado promovido: ${accessError.message}`);
+    }
+
+    // Enviar credenciales tanto por correo como por WhatsApp
+    const { emailSent, whatsappSent } = await this.sendEmployeeCredentialsNotifications(
+      employee,
+      user,
+      tempPassword,
+    );
+
+    // Auditoría
+    try {
+      const operatorId = authUser?.userId || authUser?.id || authUser?.sub;
+      const userName = await this.getUserName(operatorId);
+      await this.auditLogService.create({
+        action: 'CLIENT_CONVERTED_TO_EMPLOYEE',
+        module: 'EMPLOYEES',
+        description: `Cliente ${user.firstName} ${user.lastName} (${user.email}) promovido a empleado con rol ${dto.role}`,
+        userId: operatorId,
+        userName,
+        newValue: {
+          clientUserId: user.id,
+          employeeId: employee.id,
+          employeeRole: dto.role,
+          userRole,
+          emailSent,
+          whatsappSent,
+        },
+      });
+    } catch (e) {}
+
+    let channelText = 'sistema';
+    if (emailSent && whatsappSent) channelText = 'Correo y WhatsApp';
+    else if (emailSent) channelText = 'Correo electrónico';
+    else if (whatsappSent) channelText = 'WhatsApp';
+
+    return {
+      success: true,
+      message: `Cliente ${user.firstName} ${user.lastName} convertido a empleado exitosamente. Credenciales enviadas por ${channelText}.`,
+      employee,
+      user,
+      emailSent,
+      whatsappSent,
+    };
   }
 }

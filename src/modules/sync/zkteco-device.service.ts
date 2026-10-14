@@ -227,7 +227,15 @@ export class ZktecoDeviceService {
     return this.deleteUserByUid(deviceUid);
   }
 
+  private cachedDeviceConfig: ZkDeviceConfig | null = null;
+  private cachedDeviceConfigExpiresAt: number = 0;
+
   private async getDeviceConfig(): Promise<ZkDeviceConfig> {
+    const now = Date.now();
+    if (this.cachedDeviceConfig && this.cachedDeviceConfigExpiresAt > now) {
+      return this.cachedDeviceConfig;
+    }
+
     const dashboard = await this.accessService.getAccessDashboard(1);
     const machine = dashboard.machines?.[0];
 
@@ -235,12 +243,14 @@ export class ZktecoDeviceService {
       throw new Error('No se encontro IP/puerto del equipo en la tabla machines de Access');
     }
 
-    return {
+    this.cachedDeviceConfig = {
       ip: String(machine.ip),
       port: Number(machine.port) || 4370,
       timeoutMs: 3000,
       inport: 5000,
     };
+    this.cachedDeviceConfigExpiresAt = now + 10 * 60 * 1000; // Cachear por 10 minutos
+    return this.cachedDeviceConfig;
   }
 
   private async withDevice<T>(

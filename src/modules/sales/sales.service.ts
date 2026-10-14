@@ -23,9 +23,14 @@ export class SalesService {
     private readonly permissionsService: PermissionsService,
   ) {}
 
-  async getAllSales(page = 1, limit = 10) {
+  async getAllSales(page = 1, limit = 50, cashRegisterId?: string) {
     const skip = (page - 1) * limit;
+    const where: any = {};
+    if (cashRegisterId) {
+      where.cashRegisterId = cashRegisterId;
+    }
     const [sales, total] = await this.saleRepository.findAndCount({
+      where,
       relations: ['items', 'items.product', 'member'],
       skip,
       take: limit,
@@ -78,14 +83,49 @@ export class SalesService {
     
     console.log(`[🔴 SalesService.createSale] ✓ Final totalAmount: ${totalAmount}`);
 
-    // Obtener el cash register abierto para este usuario
+    // Validar que exista una caja abierta antes de permitir la venta
     const openCashRegister = await this.cashRegisterService.getTodayRegister(userId);
-    const cashRegisterId = openCashRegister?.id || null;
-    console.log('[🔴 SalesService.createSale] Open cash register:', cashRegisterId);
+    if (!openCashRegister || !openCashRegister.isOpen) {
+      throw new BadRequestException(
+        'No se pueden realizar ventas porque no hay una caja abierta en el sistema. Por favor, abre un turno de caja primero en el módulo de Caja & Arqueo.',
+      );
+    }
+    const cashRegisterId = openCashRegister.id;
+    console.log('[🔴 SalesService.createSale] Open cash register confirmed:', cashRegisterId);
+
+    // Resolver memberId válido para la tabla users (evitar fallo de clave foránea FK_d59c60263801450032c9f9e7a6f)
+    let validUserId: string | null = null;
+    if (createSaleDto.memberId) {
+      try {
+        const userRows = await this.saleRepository.manager.query(
+          'SELECT id FROM users WHERE id = ? LIMIT 1',
+          [createSaleDto.memberId]
+        );
+        if (userRows && userRows.length > 0) {
+          validUserId = createSaleDto.memberId;
+        } else {
+          const memberRows = await this.saleRepository.manager.query(
+            'SELECT userId FROM members WHERE id = ? LIMIT 1',
+            [createSaleDto.memberId]
+          );
+          if (memberRows && memberRows.length > 0 && memberRows[0].userId) {
+            const checkUser = await this.saleRepository.manager.query(
+              'SELECT id FROM users WHERE id = ? LIMIT 1',
+              [memberRows[0].userId]
+            );
+            if (checkUser && checkUser.length > 0) {
+              validUserId = memberRows[0].userId;
+            }
+          }
+        }
+      } catch (err: any) {
+        this.logger.warn(`Error resolving memberId to userId: ${err.message}`);
+      }
+    }
 
     // Create sale
     const sale = this.saleRepository.create({
-      memberId: createSaleDto.memberId || null,
+      memberId: validUserId,
       customerName: createSaleDto.customerName || null,
       totalAmount,
       discount: createSaleDto.discount || 0,
@@ -127,12 +167,20 @@ export class SalesService {
     return this.getSaleById(id);
   }
 
-  async deleteSale(id: string) {
+  async deleteSale(id: string, reason?: string, user?: any) {
     const sale = await this.getSaleById(id);
 
     // Solo anular si no está ya anulada
     if (sale.status === SaleStatus.CANCELLED) {
       throw new BadRequestException('Esta venta ya ha sido anulada');
+    }
+
+    // Si la venta está asociada a un turno de caja, verificar que esté abierto
+    if (sale.cashRegisterId) {
+      const register = await this.cashRegisterService.getRegisterById(sale.cashRegisterId);
+      if (register && !register.isOpen) {
+        throw new BadRequestException('No se puede anular una venta de un turno de caja que ya ha sido cerrado');
+      }
     }
 
     // Restore stock
@@ -143,9 +191,21 @@ export class SalesService {
       );
     }
 
+    // Registrar motivo y usuario en las notas
+    const cancelInfo = `[ANULADA por ${user?.name || user?.email || 'Usuario'}${reason ? ': ' + reason : ''}]`;
+    const updatedNotes = sale.notes ? `${sale.notes} | ${cancelInfo}` : cancelInfo;
+
     // Cambiar estado a 'cancelled' en lugar de eliminar
-    await this.saleRepository.update(id, { status: SaleStatus.CANCELLED });
-    this.logger.warn(`[SENSITIVE] Sale cancelled: ${id}, Amount: ${sale.totalAmount}`);
+    await this.saleRepository.update(id, { 
+      status: SaleStatus.CANCELLED,
+      notes: updatedNotes,
+    });
+    this.logger.warn(`[SENSITIVE] Sale cancelled: ${id}, Amount: ${sale.totalAmount}, By: ${user?.userId || 'N/A'}, Reason: ${reason || 'N/A'}`);
+
+    return {
+      success: true,
+      message: 'Venta anulada correctamente y productos devueltos al inventario',
+    };
   }
 
   async getSalesByMember(memberId: string, page = 1, limit = 10) {
