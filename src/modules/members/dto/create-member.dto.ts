@@ -1,4 +1,5 @@
 import { IsString, IsEmail, IsOptional, IsDate, IsBoolean, IsEnum, IsNumber } from 'class-validator';
+import { Transform } from 'class-transformer';
 import { MemberGender } from '../../../entities/member.entity';
 
 export class CreateMemberDto {
@@ -37,6 +38,14 @@ export class CreateMemberDto {
   dateOfBirth?: string | Date;
 
   @IsOptional()
+  @Transform(({ value }) => {
+    if (!value) return undefined;
+    const v = String(value).trim().toLowerCase();
+    if (v === 'm' || v === 'male' || v === 'masculino') return MemberGender.MALE;
+    if (v === 'f' || v === 'female' || v === 'femenino') return MemberGender.FEMALE;
+    if (v === 'other' || v === 'otro') return MemberGender.OTHER;
+    return value;
+  })
   gender?: string;
 
   @IsOptional()
@@ -112,10 +121,22 @@ export class UpdateMemberDto {
   emergencyPhone?: string;
 
   @IsOptional()
-  @IsDate()
+  @Transform(({ value }) => {
+    if (!value || value === '' || value === 'null') return undefined;
+    const d = new Date(value);
+    return isNaN(d.getTime()) ? undefined : d;
+  })
   dateOfBirth?: Date;
 
   @IsOptional()
+  @Transform(({ value }) => {
+    if (!value) return undefined;
+    const v = String(value).trim().toLowerCase();
+    if (v === 'm' || v === 'male' || v === 'masculino') return MemberGender.MALE;
+    if (v === 'f' || v === 'female' || v === 'femenino') return MemberGender.FEMALE;
+    if (v === 'other' || v === 'otro') return MemberGender.OTHER;
+    return value;
+  })
   @IsEnum(MemberGender)
   gender?: MemberGender;
 
@@ -132,7 +153,11 @@ export class UpdateMemberDto {
   zipCode?: string;
 
   @IsOptional()
-  @IsDate()
+  @Transform(({ value }) => {
+    if (!value || value === '' || value === 'null') return undefined;
+    const d = new Date(value);
+    return isNaN(d.getTime()) ? undefined : d;
+  })
   lastVisit?: Date;
 
   @IsOptional()
