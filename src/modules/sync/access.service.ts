@@ -281,24 +281,47 @@ export class AccessService {
       'total',
     );
 
+    const configIp = await this.configService.getConfig('ZK_DEVICE_IP');
+    const configPort = await this.configService.getConfig('ZK_DEVICE_PORT');
+
+    let machineList = machines.map((machine) => ({
+      id: machine.ID,
+      alias: machine.MachineAlias || machine.alias || machine.device_name || 'Equipo ZKTeco',
+      ip: configIp || machine.IP || machine.ipaddress || null,
+      port: this.parseAccessNumber(configPort || machine.Port || 4370),
+      serialNumber: machine.sn || null,
+      deviceName: machine.device_name || machine.ProductType || null,
+      firmwareVersion: machine.FirmwareVersion || null,
+      enabled: machine.Enabled === true || machine.Enabled === -1 || machine.Enabled === 1,
+      realtime: machine.realtime === true || machine.realtime === -1 || machine.realtime === 1 || machine.realtime === 'Si' || machine.realtime === 'Sí',
+      userCount: this.parseAccessNumber(machine.usercount),
+      fingerCount: this.parseAccessNumber(machine.fingercount),
+      transactionCount: this.parseAccessNumber(machine.transaction_count),
+      lastActivity: machine.last_activity || null,
+    }));
+
+    if (machineList.length === 0 && configIp) {
+      machineList = [{
+        id: 1,
+        alias: 'Equipo Biométrico ZKTeco',
+        ip: configIp,
+        port: Number(configPort) || 4370,
+        serialNumber: null,
+        deviceName: 'ZKTeco',
+        firmwareVersion: null,
+        enabled: true,
+        realtime: true,
+        userCount: 0,
+        fingerCount: 0,
+        transactionCount: 0,
+        lastActivity: null,
+      }];
+    }
+
     const result = {
       success: true,
       dbPath,
-      machines: machines.map((machine) => ({
-        id: machine.ID,
-        alias: machine.MachineAlias || machine.alias || machine.device_name || 'Equipo ZKTeco',
-        ip: machine.IP || machine.ipaddress || null,
-        port: this.parseAccessNumber(machine.Port || 4370),
-        serialNumber: machine.sn || null,
-        deviceName: machine.device_name || machine.ProductType || null,
-        firmwareVersion: machine.FirmwareVersion || null,
-        enabled: machine.Enabled === true || machine.Enabled === -1 || machine.Enabled === 1,
-        realtime: machine.realtime === true || machine.realtime === -1 || machine.realtime === 1 || machine.realtime === 'Si' || machine.realtime === 'Sí',
-        userCount: this.parseAccessNumber(machine.usercount),
-        fingerCount: this.parseAccessNumber(machine.fingercount),
-        transactionCount: this.parseAccessNumber(machine.transaction_count),
-        lastActivity: machine.last_activity || null,
-      })),
+      machines: machineList,
       summary: {
         users: usersCount,
         activeAccess: activeAccessCount,
@@ -306,7 +329,7 @@ export class AccessService {
         recentLogs: recentLogs.length,
       },
       availableTables,
-      machineTableFound: machines.length > 0,
+      machineTableFound: machineList.length > 0,
       recentLogs: recentLogs.map((log) => ({
         pin: log.pin ?? null,
         time: log.time ?? null,
@@ -323,29 +346,18 @@ export class AccessService {
     return result;
   }
 
-  async testAccessMachineConnection(machineId?: number): Promise<any> {
+  async testAccessMachineConnection(machineId?: number, customIp?: string, customPort?: number): Promise<any> {
     const dashboard = await this.getAccessDashboard(5);
     const machines = dashboard.machines || [];
     const machine = machineId
       ? machines.find((item) => Number(item.id) === Number(machineId))
       : machines[0];
 
-    if (!machine) {
-      const tables = dashboard.availableTables?.length
-        ? ` Tablas encontradas: ${dashboard.availableTables.slice(0, 12).join(', ')}`
-        : '';
-      const hasMachinesTable = dashboard.availableTables?.some((table: string) =>
-        String(table).toLowerCase() === 'machines' || String(table).toLowerCase() === 'machine',
-      );
-      throw new Error(
-        hasMachinesTable
-          ? `La tabla Machines existe, pero no tiene equipos en la base Access seleccionada.${tables}`
-          : `No se encontro la tabla machine/machines o no hay equipos en la base Access seleccionada.${tables}`,
-      );
-    }
+    const ip = customIp || machine?.ip;
+    const port = customPort || machine?.port || 4370;
 
-    if (!machine.ip || !machine.port) {
-      throw new Error('El equipo no tiene IP o puerto configurado');
+    if (!ip) {
+      throw new Error('El equipo no tiene IP configurada. Por favor especifique una IP.');
     }
 
     const startedAt = Date.now();
@@ -353,10 +365,10 @@ export class AccessService {
       const socket = new net.Socket();
       const timer = setTimeout(() => {
         socket.destroy();
-        reject(new Error('Conexion expirada'));
+        reject(new Error('Tiempo de espera agotado al conectar al equipo (5s)'));
       }, 5000);
 
-      socket.connect(machine.port, machine.ip, () => {
+      socket.connect(port, ip, () => {
         clearTimeout(timer);
         socket.destroy();
         resolve();
@@ -370,11 +382,80 @@ export class AccessService {
 
     return {
       success: true,
-      message: `Equipo ${machine.alias} disponible en ${machine.ip}:${machine.port}`,
-      machine,
+      message: `Equipo ${machine?.alias || 'ZKTeco'} disponible en ${ip}:${port}`,
+      machine: machine || { ip, port, alias: 'Equipo ZKTeco' },
       latencyMs: Date.now() - startedAt,
       timestamp: new Date().toISOString(),
     };
+  }
+
+  async updateMachineIp(ip: string, port: number = 4370, machineId?: number): Promise<any> {
+    const cleanIp = ip.trim();
+    if (!cleanIp) {
+      throw new Error('La dirección IP es requerida');
+    }
+
+    // 1. Guardar en configuración MySQL
+    await this.configService.setConfig('ZK_DEVICE_IP', cleanIp, 'IP del equipo biométrico');
+    await this.configService.setConfig('ZK_DEVICE_PORT', String(port), 'Puerto del equipo biométrico');
+
+    // 2. Intentar actualizar en Access
+    try {
+      const dbPath = await this.getAccessDbPath();
+      const scriptPath = join(process.cwd(), 'src', 'modules', 'sync', 'scripts', 'access-update-machine.py');
+      const payload = JSON.stringify({ ip: cleanIp, port, machineId });
+      const { stdout } = await execPromise(
+        `python "${scriptPath}" "${dbPath}" "${encodeURIComponent(payload)}"`,
+        { maxBuffer: 1024 * 1024 * 2, cwd: process.cwd(), windowsHide: true },
+      );
+      this.logger.log(`Actualización de máquina en Access: ${stdout}`);
+    } catch (error) {
+      this.logger.warn(`No se pudo actualizar IP directamente en archivo Access: ${error.message}`);
+    }
+
+    // Limpiar caché
+    this.cachedDashboard = null;
+
+    // 3. Probar conexión TCP con la nueva IP
+    const test = await this.testTcpConnection(cleanIp, port);
+
+    return {
+      success: true,
+      ip: cleanIp,
+      port,
+      reachable: test.success,
+      latencyMs: test.latencyMs,
+      message: test.success
+        ? `IP ${cleanIp}:${port} guardada exitosamente y equipo conectado (${test.latencyMs}ms)`
+        : `IP ${cleanIp}:${port} guardada. El equipo no responde actualmente en la red local.`,
+    };
+  }
+
+  async testTcpConnection(ip: string, port: number = 4370): Promise<{ success: boolean; latencyMs?: number; error?: string }> {
+    const startedAt = Date.now();
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const socket = new net.Socket();
+        const timer = setTimeout(() => {
+          socket.destroy();
+          reject(new Error('Tiempo de espera agotado'));
+        }, 3500);
+
+        socket.connect(port, ip, () => {
+          clearTimeout(timer);
+          socket.destroy();
+          resolve();
+        });
+
+        socket.on('error', (err) => {
+          clearTimeout(timer);
+          reject(err);
+        });
+      });
+      return { success: true, latencyMs: Date.now() - startedAt };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
   }
 
   /**

@@ -7,6 +7,7 @@ import { Membership, MembershipType, PriceType } from '../../entities/membership
 import { MemberMembership } from '../../entities/member-membership.entity';
 import { Member } from '../../entities/member.entity';
 import { Payment, PaymentStatus, PaymentMethod, PaymentType } from '../../entities/payment.entity';
+import { CashRegister } from '../../entities/cash-register.entity';
 import { CronExecutionLog } from '../../entities/cron-execution-log.entity';
 import { MembershipAccessSchedule, DayOfWeek } from '../../entities/membership-access-schedule.entity';
 import { CreateMembershipDto, UpdateMembershipDto, AssignMembershipDto, RenewMembershipDto } from './dto/create-membership.dto';
@@ -27,6 +28,8 @@ export class MembershipsService {
     private memberRepository: Repository<Member>,
     @InjectRepository(Payment)
     private paymentRepository: Repository<Payment>,
+    @InjectRepository(CashRegister)
+    private cashRegisterRepository: Repository<CashRegister>,
     @InjectRepository(CronExecutionLog)
     private cronExecutionLogRepository: Repository<CronExecutionLog>,
     @InjectRepository(MembershipAccessSchedule)
@@ -37,6 +40,21 @@ export class MembershipsService {
     private accessService: AccessService,
     private zktecoDeviceService: ZktecoDeviceService,
   ) {}
+
+  private async getActiveCashRegisterId(userId?: string): Promise<string | null> {
+    try {
+      const reg = await this.cashRegisterRepository.findOne({
+        where: [
+          ...(userId ? [{ userId, isOpen: true }] : []),
+          { isOpen: true },
+        ],
+        order: { createdAt: 'DESC' },
+      });
+      return reg ? reg.id : null;
+    } catch (e) {
+      return null;
+    }
+  }
 
   // Membership CRUD
   async createMembership(createMembershipDto: CreateMembershipDto, userId?: string): Promise<Membership> {
@@ -308,9 +326,11 @@ export class MembershipsService {
     if (payAmount && parsedPaymentDate) {
       payment.status = PaymentStatus.COMPLETED;
       payment.paymentDate = parsedPaymentDate;
+      payment.cashRegisterId = await this.getActiveCashRegisterId(userId);
     } else {
       payment.status = PaymentStatus.PENDING;
       payment.paymentDate = null;
+      payment.cashRegisterId = null;
     }
     payment.paymentMethod = PaymentMethod.CASH;
     payment.paymentType = PaymentType.MEMBERSHIP;
@@ -439,9 +459,11 @@ export class MembershipsService {
     if (renewMembershipDto.paymentDate) {
       renewalPayment.status = PaymentStatus.COMPLETED;
       renewalPayment.paymentDate = renewMembershipDto.paymentDate;
+      renewalPayment.cashRegisterId = await this.getActiveCashRegisterId(userId);
     } else {
       renewalPayment.status = PaymentStatus.PENDING;
       renewalPayment.paymentDate = null;
+      renewalPayment.cashRegisterId = null;
     }
     renewalPayment.paymentMethod = PaymentMethod.CASH;
     renewalPayment.paymentType = PaymentType.MEMBERSHIP;

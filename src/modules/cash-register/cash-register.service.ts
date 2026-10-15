@@ -127,26 +127,23 @@ export class CashRegisterService {
       const startOfDay = new Date(year, month - 1, day, 0, 0, 0, 0);
       const endOfDay = new Date(year, month - 1, day, 23, 59, 59, 999);
       
-      // Obtener total de ventas del día para esta caja (incluyendo las ya asignadas)
-      const salesQuery = await this.saleRepository.query(
+      // Obtener total de ventas en efectivo del turno para esta caja
+      const cashSalesQuery = await this.saleRepository.query(
         `SELECT COALESCE(SUM(totalAmount - discount), 0) as total FROM sales 
-         WHERE createdAt >= ? AND createdAt <= ? AND status = 'completed' AND paymentMethod NOT IN ('credit', 'credit_balance') AND (cashRegisterId = ? OR cashRegisterId IS NULL)`,
-        [startOfDay, endOfDay, cashRegister.id]
+         WHERE status = 'completed' AND (paymentMethod = 'cash' OR paymentMethod = '' OR paymentMethod IS NULL) AND (cashRegisterId = ? OR (cashRegisterId IS NULL AND createdAt >= ? AND createdAt <= ?))`,
+        [cashRegister.id, startOfDay, endOfDay]
       );
-      
-      const totalSales = Number(salesQuery[0]?.total || 0);
-      console.log('[CashRegisterService] Total sales for the day:', totalSales);
+      const totalCashSales = Number(cashSalesQuery[0]?.total || 0);
+      console.log('[CashRegisterService] Total cash sales for shift:', totalCashSales);
 
-      // Obtener total de pagos (inscripciones, membresias) del día
-      // EXCLUIMOS pagos automáticos (credit_balance) y solo consideramos los creados por este usuario
-      const paymentsQuery = await this.paymentRepository.query(
+      // Obtener total de pagos de membresías en efectivo del turno para esta caja
+      const cashPaymentsQuery = await this.paymentRepository.query(
         `SELECT COALESCE(SUM(amount), 0) as total FROM payments
-         WHERE createdAt >= ? AND createdAt <= ? AND status = 'completed' AND paymentMethod NOT IN ('credit', 'credit_balance') AND createdBy = ?`,
-        [startOfDay, endOfDay, userId]
+         WHERE status = 'completed' AND (paymentMethod = 'cash' OR paymentMethod = '' OR paymentMethod IS NULL) AND (cashRegisterId = ? OR (cashRegisterId IS NULL AND createdAt >= ? AND createdAt <= ?))`,
+        [cashRegister.id, startOfDay, endOfDay]
       );
-      
-      const totalPayments = Number(paymentsQuery[0]?.total || 0);
-      console.log('[CashRegisterService] Total payments for the day:', totalPayments);
+      const totalCashPayments = Number(cashPaymentsQuery[0]?.total || 0);
+      console.log('[CashRegisterService] Total cash membership payments for shift:', totalCashPayments);
 
       // Obtener total de transacciones manuales (entradas y salidas de caja)
       const transactionsQuery = await this.cashRegisterRepository.query(
@@ -158,9 +155,9 @@ export class CashRegisterService {
       const totalTransactions = Number(transactionsQuery[0]?.total || 0);
       console.log('[CashRegisterService] Total manual transactions:', totalTransactions);
 
-      // Calcular lo que debería haber: Apertura + Ventas + Pagos + Transacciones
-      const expectedClosure = Number(cashRegister.openingAmount) + totalSales + totalPayments + totalTransactions;
-      console.log('[CashRegisterService] Opening amount:', cashRegister.openingAmount, '+ Sales:', totalSales, '+ Payments:', totalPayments, '+ Tx:', totalTransactions, '= Expected:', expectedClosure);
+      // Calcular lo que debería haber en la gaveta física: Apertura + Ventas Efectivo + Pagos Membresía Efectivo + Transacciones
+      const expectedClosure = Number(cashRegister.openingAmount) + totalCashSales + totalCashPayments + totalTransactions;
+      console.log('[CashRegisterService] Opening:', cashRegister.openingAmount, '+ Cash Sales:', totalCashSales, '+ Cash Payments:', totalCashPayments, '+ Tx:', totalTransactions, '= Expected Cash:', expectedClosure);
 
       // Calcular diferencia
       const difference = Number(dto.closingAmount) - expectedClosure;
@@ -181,17 +178,17 @@ export class CashRegisterService {
       const saved = await this.cashRegisterRepository.save(cashRegister);
       
       // Vincular ventas del día a este cierre de caja
-      console.log('[CashRegisterService] Linking sales to this cash register...');
-      console.log('[CashRegisterService] Register ID:', saved.id);
-      console.log('[CashRegisterService] Date range:', startOfDay.toISOString(), 'to', endOfDay.toISOString());
-      
-      // Usar query SQL directa para actualizar
-      const result = await this.saleRepository.query(
-        `UPDATE sales SET cashRegisterId = ? WHERE createdAt >= ? AND createdAt <= ? AND cashRegisterId IS NULL`,
-        [saved.id, startOfDay, endOfDay]
+      console.log('[CashRegisterService] Linking sales and payments to this cash register...');
+      await this.saleRepository.query(
+        `UPDATE sales SET cashRegisterId = ? WHERE (cashRegisterId = ? OR (cashRegisterId IS NULL AND createdAt >= ? AND createdAt <= ?))`,
+        [saved.id, saved.id, startOfDay, endOfDay]
       );
-      
-      console.log('[CashRegisterService] Updated sales result:', result);
+
+      // Vincular pagos de membresías a este cierre de caja
+      await this.paymentRepository.query(
+        `UPDATE payments SET cashRegisterId = ? WHERE (cashRegisterId = ? OR (cashRegisterId IS NULL AND createdAt >= ? AND createdAt <= ?))`,
+        [saved.id, saved.id, startOfDay, endOfDay]
+      );
 
       // Registrar en auditoría
       await this.auditLogService.create({
@@ -611,5 +608,76 @@ export class CashRegisterService {
 
   exportToJSON(registers: CashRegister[]): string {
     return JSON.stringify({ registers }, null, 2);
+  }
+
+  async getShiftPayments(cashRegisterId: string): Promise<any[]> {
+    const cashRegister = await this.cashRegisterRepository.findOne({
+      where: { id: cashRegisterId },
+    });
+
+    if (!cashRegister) {
+      return [];
+    }
+
+    const dateStr = typeof cashRegister.registerDate === 'string'
+      ? cashRegister.registerDate
+      : (cashRegister.registerDate as Date).toISOString().split('T')[0];
+    const [year, month, day] = dateStr.split('-').map(Number);
+    const startOfDay = new Date(year, month - 1, day, 0, 0, 0, 0);
+    const endOfDay = cashRegister.closedAt
+      ? new Date(cashRegister.closedAt)
+      : new Date(year, month - 1, day, 23, 59, 59, 999);
+
+    const payments = await this.paymentRepository
+      .createQueryBuilder('p')
+      .where(
+        cashRegister.isOpen
+          ? '(p.cashRegisterId = :regId OR (p.cashRegisterId IS NULL AND p.createdAt >= :start AND p.createdAt <= :end))'
+          : 'p.cashRegisterId = :regId',
+        { regId: cashRegisterId, start: startOfDay, end: endOfDay },
+      )
+      .andWhere("p.status = 'completed'")
+      .orderBy('p.createdAt', 'DESC')
+      .getMany();
+
+    const enriched = await Promise.all(
+      payments.map(async (payment) => {
+        let memberName = 'Socio';
+        let memberCode = '';
+        let planName = payment.description || 'Membresía';
+
+        const mm = await this.cashRegisterRepository.query(
+          `SELECT mm.id, m.memberCode, u.firstName, u.lastName, mem.name as planName
+           FROM member_memberships mm
+           LEFT JOIN members m ON mm.memberId = m.id
+           LEFT JOIN users u ON m.userId = u.id
+           LEFT JOIN memberships mem ON mm.membershipId = mem.id
+           WHERE mm.paymentId = ? LIMIT 1`,
+          [payment.id],
+        );
+
+        if (mm && mm.length > 0) {
+          const row = mm[0];
+          memberName = `${row.firstName || ''} ${row.lastName || ''}`.trim() || 'Socio';
+          memberCode = row.memberCode || '';
+          if (row.planName) planName = row.planName;
+        }
+
+        return {
+          id: payment.id,
+          amount: Number(payment.amount),
+          paymentMethod: payment.paymentMethod,
+          paymentType: payment.paymentType,
+          status: payment.status,
+          concept: planName,
+          memberName,
+          memberCode,
+          paymentDate: payment.paymentDate || payment.createdAt,
+          createdAt: payment.createdAt,
+        };
+      }),
+    );
+
+    return enriched;
   }
 }

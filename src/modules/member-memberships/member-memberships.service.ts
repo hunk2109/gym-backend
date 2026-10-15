@@ -5,6 +5,7 @@ import { MemberMembership } from '../../entities/member-membership.entity';
 import { Member } from '../../entities/member.entity';
 import { Membership, MembershipType } from '../../entities/membership.entity';
 import { Payment, PaymentMethod, PaymentType, PaymentStatus } from '../../entities/payment.entity';
+import { CashRegister } from '../../entities/cash-register.entity';
 import { CreateMemberMembershipDto } from './dto/create-member-membership.dto';
 import { v4 as uuidv4 } from 'uuid';
 import { PromotionsService } from '../promotions/promotions.service';
@@ -26,6 +27,8 @@ export class MemberMembershipsService {
     private readonly membershipRepository: Repository<Membership>,
     @InjectRepository(Payment)
     private readonly paymentRepository: Repository<Payment>,
+    @InjectRepository(CashRegister)
+    private readonly cashRegisterRepository: Repository<CashRegister>,
     private readonly promotionsService: PromotionsService,
     private readonly emailService: EmailService,
     private readonly groupsService: GroupsService,
@@ -34,6 +37,21 @@ export class MemberMembershipsService {
     private readonly whatsappService: WhatsappService,
     private readonly gymSettingsService: GymSettingsService,
   ) {}
+
+  private async getActiveCashRegisterId(userId?: string): Promise<string | null> {
+    try {
+      const reg = await this.cashRegisterRepository.findOne({
+        where: [
+          ...(userId ? [{ userId, isOpen: true }] : []),
+          { isOpen: true },
+        ],
+        order: { createdAt: 'DESC' },
+      });
+      return reg ? reg.id : null;
+    } catch (e) {
+      return null;
+    }
+  }
 
   /**
    * Calcular dinámicamente el estado de pago desde la tabla Payment
@@ -293,11 +311,13 @@ export class MemberMembershipsService {
     if (isAutoCompleted) {
       payment.status = PaymentStatus.COMPLETED;
       payment.paymentDate = new Date();
-      console.log(`[MemberMembershipsService] 💰 Payment AUTO-COMPLETED ($${payment.amount}) - paymentDate: ${payment.paymentDate}`);
+      payment.cashRegisterId = await this.getActiveCashRegisterId(userId);
+      console.log(`[MemberMembershipsService] 💰 Payment AUTO-COMPLETED ($${payment.amount}) - cashRegisterId: ${payment.cashRegisterId} - paymentDate: ${payment.paymentDate}`);
     } else {
       // Si el monto es > 0, es pendiente (sin paymentDate hasta que se pague)
       payment.status = PaymentStatus.PENDING;
       payment.paymentDate = null;
+      payment.cashRegisterId = null;
       console.log(`[MemberMembershipsService] 💳 Payment PENDING ($${payment.amount})`);
     }
     
@@ -930,14 +950,16 @@ export class MemberMembershipsService {
 
     // Actualizar el Payment asociado en la tabla payments (por paymentId)
     if (memberMembership.paymentId) {
+      const activeRegisterId = await this.getActiveCashRegisterId();
       await this.paymentRepository.update(
         { id: memberMembership.paymentId },
         { 
           status: PaymentStatus.COMPLETED,
           paymentDate: paymentDate,
+          cashRegisterId: activeRegisterId,
         },
       );
-      console.log(`[MemberMembershipsService] ✓ Payment actualizado a COMPLETED para paymentId: ${memberMembership.paymentId}`);
+      console.log(`[MemberMembershipsService] ✓ Payment actualizado a COMPLETED con cashRegisterId: ${activeRegisterId} para paymentId: ${memberMembership.paymentId}`);
     }
 
     // Enviar email de confirmación de pago

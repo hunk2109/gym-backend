@@ -6,6 +6,7 @@ import { MemberMembership } from '../../entities/member-membership.entity';
 import { Member } from '../../entities/member.entity';
 import { Membership } from '../../entities/membership.entity';
 import { Payment } from '../../entities/payment.entity';
+import { CashRegister } from '../../entities/cash-register.entity';
 import { PromotionsModule } from '../promotions/promotions.module';
 import { EmailSettingsModule } from '../email-settings/email-settings.module';
 import { GroupsModule } from '../groups/groups.module';
@@ -15,7 +16,7 @@ import { GymSettingsModule } from '../gym-settings/gym-settings.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([MemberMembership, Member, Membership, Payment]),
+    TypeOrmModule.forFeature([MemberMembership, Member, Membership, Payment, CashRegister]),
     PromotionsModule,
     EmailSettingsModule,
     GroupsModule,

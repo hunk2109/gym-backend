@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, BadRequestException, Logger } from '@nes
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Between, IsNull } from 'typeorm';
 import { Payment, PaymentStatus, PaymentType } from '../../entities/payment.entity';
+import { CashRegister } from '../../entities/cash-register.entity';
 import { Member } from '../../entities/member.entity';
 import { MemberMembership } from '../../entities/member-membership.entity';
 import { CreatePaymentDto, UpdatePaymentDto } from './dto/create-payment.dto';
@@ -18,6 +19,8 @@ export class PaymentsService {
   constructor(
     @InjectRepository(Payment)
     private paymentRepository: Repository<Payment>,
+    @InjectRepository(CashRegister)
+    private cashRegisterRepository: Repository<CashRegister>,
     @InjectRepository(Member)
     private memberRepository: Repository<Member>,
     @InjectRepository(MemberMembership)
@@ -27,6 +30,21 @@ export class PaymentsService {
     private readonly whatsappService: WhatsappService,
     private readonly promotionsService: PromotionsService,
   ) {}
+
+  private async getActiveCashRegisterId(userId?: string): Promise<string | null> {
+    try {
+      const reg = await this.cashRegisterRepository.findOne({
+        where: [
+          ...(userId ? [{ userId, isOpen: true }] : []),
+          { isOpen: true },
+        ],
+        order: { createdAt: 'DESC' },
+      });
+      return reg ? reg.id : null;
+    } catch (e) {
+      return null;
+    }
+  }
 
   async createPayment(createPaymentDto: CreatePaymentDto, userId?: string): Promise<Payment> {
     console.log(`[PAYMENTS_SERVICE] createPayment called with userId:`, userId);
@@ -50,10 +68,15 @@ export class PaymentsService {
       this.logger.log(`[Payment] Auto-completing $0 payment with paymentDate`);
     }
     
-    // Asignar paymentDate si no está ya asignada y está en COMPLETED
-    if (!payment.paymentDate && payment.status === PaymentStatus.COMPLETED) {
-      payment.paymentDate = new Date();
-      console.log(`[PAYMENTS_SERVICE] Setting paymentDate for COMPLETED status: ${payment.paymentDate}`);
+    // Asignar paymentDate y cashRegisterId si está en COMPLETED
+    if (payment.status === PaymentStatus.COMPLETED) {
+      if (!payment.paymentDate) {
+        payment.paymentDate = new Date();
+      }
+      if (!payment.cashRegisterId) {
+        payment.cashRegisterId = await this.getActiveCashRegisterId(userId);
+      }
+      console.log(`[PAYMENTS_SERVICE] Setting paymentDate and cashRegisterId for COMPLETED status:`, { date: payment.paymentDate, registerId: payment.cashRegisterId });
     }
     
     console.log(`[PAYMENTS_SERVICE] Before save - payment:`, { id: payment.id, createdBy: payment.createdBy, updatedBy: payment.updatedBy, amount: payment.amount, status: payment.status, paymentDate: payment.paymentDate });
@@ -150,11 +173,14 @@ export class PaymentsService {
       console.log(`[PAYMENTS_SERVICE] Assigned userId to updatedBy:`, userId);
     }
     
-    // Si se está marcando como completado, asignar paymentDate
+    // Si se está marcando como completado, asignar paymentDate y cashRegisterId
     if (status === PaymentStatus.COMPLETED) {
       const dateToSet = paymentDate || new Date();
       payment.paymentDate = dateToSet;
-      console.log(`[PAYMENTS_SERVICE] Payment marked as COMPLETED with paymentDate:`, dateToSet);
+      if (!payment.cashRegisterId) {
+        payment.cashRegisterId = await this.getActiveCashRegisterId(userId);
+      }
+      console.log(`[PAYMENTS_SERVICE] Payment marked as COMPLETED with paymentDate:`, dateToSet, 'cashRegisterId:', payment.cashRegisterId);
       this.logger.log(`[Payment] Payment completed. ID: ${id}, Amount: ${payment.amount}, Payment Date: ${dateToSet}`);
     } else {
       this.logger.log(`[Payment] Payment status updated. ID: ${id}, Status: ${status}`);
@@ -493,8 +519,8 @@ export class PaymentsService {
    * Pagar un pago por su ID
    * Verifica que esté PENDING y procesa según el tipo de pago
    */
-  async payPayment(paymentId: string, paymentMethod: string = 'cash', userId?: string, discountCode?: string, paymentDate?: Date): Promise<any> {
-    console.log(`[PAYMENTS_SERVICE] payPayment called - paymentId: ${paymentId}, paymentMethod: ${paymentMethod}, discountCode: ${discountCode}`);
+  async payPayment(paymentId: string, paymentMethod: string = 'cash', userId?: string, discountCode?: string, paymentDate?: Date, discountAmount?: number): Promise<any> {
+    console.log(`[PAYMENTS_SERVICE] payPayment called - paymentId: ${paymentId}, paymentMethod: ${paymentMethod}, discountCode: ${discountCode}, discountAmount: ${discountAmount}`);
 
     // 1. Obtener el pago
     const payment = await this.paymentRepository.findOne({
@@ -516,10 +542,10 @@ export class PaymentsService {
     let result: any;
     switch (payment.paymentType) {
       case PaymentType.REGISTRATION:
-        result = await this.payRegistrationPayment(payment, paymentMethod, userId, discountCode, paymentDate);
+        result = await this.payRegistrationPayment(payment, paymentMethod, userId, discountCode, paymentDate, discountAmount);
         break;
       case PaymentType.MEMBERSHIP:
-        result = await this.payMembershipPayment(payment, paymentMethod, userId, discountCode, paymentDate);
+        result = await this.payMembershipPayment(payment, paymentMethod, userId, discountCode, paymentDate, discountAmount);
         break;
       default:
         // Otros tipos de pago también se completan igual (sin descuentos soportados por ahora)
@@ -532,10 +558,10 @@ export class PaymentsService {
   /**
    * Procesar pago de inscripción
    */
-  private async payRegistrationPayment(payment: Payment, paymentMethod: string, userId?: string, discountCode?: string, paymentDate?: Date): Promise<any> {
+  private async payRegistrationPayment(payment: Payment, paymentMethod: string, userId?: string, discountCode?: string, paymentDate?: Date, discountAmountParam?: number): Promise<any> {
     console.log(`[PAYMENTS_SERVICE] Processing REGISTRATION payment: ID=${payment.id}, Amount=${payment.amount}`);
 
-    let finalAmount = payment.amount;
+    let finalAmount = Number(payment.amount);
 
     if (discountCode) {
       const validation = await this.promotionsService.validatePromoCode({
@@ -546,11 +572,13 @@ export class PaymentsService {
         throw new BadRequestException(`Código de descuento inválido: ${validation.message}`);
       }
 
-      const discountAmount = payment.amount * (validation.discount / 100);
-      finalAmount = payment.amount - discountAmount;
+      const discountAmount = finalAmount * (validation.discount / 100);
+      finalAmount = Math.max(0, finalAmount - discountAmount);
       
       // Actualizar el uso del cupón
       await this.promotionsService.applyPromotion(discountCode);
+    } else if (discountAmountParam && discountAmountParam > 0) {
+      finalAmount = Math.max(0, finalAmount - discountAmountParam);
     }
 
     // Actualizar estado a COMPLETED y nuevo monto
@@ -560,6 +588,9 @@ export class PaymentsService {
     payment.paymentDate = paymentDate || new Date();
     if (userId) {
       payment.updatedBy = userId;
+    }
+    if (!payment.cashRegisterId && userId) {
+      payment.cashRegisterId = await this.getActiveCashRegisterId(userId);
     }
 
     const updatedPayment = await this.paymentRepository.save(payment);
@@ -579,10 +610,10 @@ export class PaymentsService {
   /**
    * Procesar pago de membresía
    */
-  private async payMembershipPayment(payment: Payment, paymentMethod: string, userId?: string, discountCode?: string, paymentDate?: Date): Promise<any> {
+  private async payMembershipPayment(payment: Payment, paymentMethod: string, userId?: string, discountCode?: string, paymentDate?: Date, discountAmountParam?: number): Promise<any> {
     console.log(`[PAYMENTS_SERVICE] Processing MEMBERSHIP payment: ID=${payment.id}, Amount=${payment.amount}`);
 
-    let finalAmount = payment.amount;
+    let finalAmount = Number(payment.amount);
     let appliedDiscountPercentage = 0;
 
     if (discountCode) {
@@ -595,11 +626,13 @@ export class PaymentsService {
       }
 
       appliedDiscountPercentage = validation.discount;
-      const discountAmount = payment.amount * (validation.discount / 100);
-      finalAmount = payment.amount - discountAmount;
+      const discountAmount = finalAmount * (validation.discount / 100);
+      finalAmount = Math.max(0, finalAmount - discountAmount);
       
       // Actualizar el uso del cupón
       await this.promotionsService.applyPromotion(discountCode);
+    } else if (discountAmountParam && discountAmountParam > 0) {
+      finalAmount = Math.max(0, finalAmount - discountAmountParam);
     }
 
     // Actualizar estado a COMPLETED y el nuevo monto
@@ -610,8 +643,31 @@ export class PaymentsService {
     if (userId) {
       payment.updatedBy = userId;
     }
+    if (!payment.cashRegisterId && userId) {
+      payment.cashRegisterId = await this.getActiveCashRegisterId(userId);
+    }
 
     const updatedPayment = await this.paymentRepository.save(payment);
+
+    // Actualizar también el registro de member_membership asociado
+    try {
+      const mm = await this.memberMembershipRepository.findOne({
+        where: { paymentId: payment.id },
+      });
+      if (mm) {
+        if (discountCode) {
+          mm.appliedPromotionCode = discountCode;
+          mm.discountPercentage = appliedDiscountPercentage;
+        }
+        if (discountAmountParam && discountAmountParam > 0) {
+          mm.discountAmount = discountAmountParam;
+        }
+        mm.payAmount = finalAmount;
+        await this.memberMembershipRepository.save(mm);
+      }
+    } catch (e) {
+      console.warn('[PAYMENTS_SERVICE] Could not update associated memberMembership:', e);
+    }
 
     console.log(`[PAYMENTS_SERVICE] ✅ Membership payment saved: ID=${updatedPayment.id}, Status=${updatedPayment.status}, FinalAmount=${finalAmount}`);
     this.logger.log(`[Membership Payment] ✅ Payment completed. Amount: $${finalAmount}`);
@@ -637,6 +693,9 @@ export class PaymentsService {
     payment.paymentDate = paymentDate || new Date();
     if (userId) {
       payment.updatedBy = userId;
+    }
+    if (!payment.cashRegisterId && userId) {
+      payment.cashRegisterId = await this.getActiveCashRegisterId(userId);
     }
 
     const updatedPayment = await this.paymentRepository.save(payment);

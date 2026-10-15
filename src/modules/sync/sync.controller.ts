@@ -95,13 +95,39 @@ export class SyncController {
   @Post('access-machine/test')
   @Public()
   @HttpCode(200)
-  async testAccessMachineConnection(@Body() body: { machineId?: number }) {
+  async testAccessMachineConnection(@Body() body: { machineId?: number; ip?: string; port?: number }) {
     try {
-      return await this.accessService.testAccessMachineConnection(body?.machineId);
+      return await this.accessService.testAccessMachineConnection(body?.machineId, body?.ip, body?.port);
     } catch (error) {
       return {
         success: false,
         error: error.message || 'No se pudo conectar al equipo',
+      };
+    }
+  }
+
+  /**
+   * PUT /api/sync/machine-ip
+   * Actualiza la IP y puerto del equipo biométrico tanto en Access como en MySQL
+   */
+  @Put('machine-ip')
+  @Public()
+  @HttpCode(200)
+  async updateMachineIp(
+    @Body() body: { ip: string; port?: number; machineId?: number },
+  ) {
+    this.logger.log(`Endpoint: Actualizar IP de equipo biométrico a: ${body.ip}:${body.port || 4370}`);
+    try {
+      this.zktecoDeviceService.clearConfigCache();
+      return await this.accessService.updateMachineIp(
+        body.ip,
+        Number(body.port) || 4370,
+        body.machineId,
+      );
+    } catch (error) {
+      return {
+        success: false,
+        error: error.message || 'Error actualizando la IP del equipo',
       };
     }
   }

@@ -1,4 +1,4 @@
-﻿import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, HttpCode, HttpStatus, Patch, Req } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, HttpCode, HttpStatus, Patch, Req } from '@nestjs/common';
 import { PaymentsService } from './payments.service';
 import { CreatePaymentDto, UpdatePaymentDto, PaymentResponseDto } from './dto/create-payment.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -95,13 +95,13 @@ export class PaymentsController {
   @HttpCode(HttpStatus.OK)
   async payPayment(
     @Param('id') paymentId: string,
-    @Body() body: { paymentMethod?: string; discountCode?: string; paymentDate?: string },
+    @Body() body: { paymentMethod?: string; discountCode?: string; discountAmount?: number; paymentDate?: string },
     @Req() req: any,
   ): Promise<any> {
     const userId = req.user?.userId;
-    console.log(`[PAYMENTS_CONTROLLER] POST /payments/:id/pay - paymentId: ${paymentId}, paymentMethod: ${body.paymentMethod || 'cash'}, discountCode: ${body.discountCode || 'None'}, paymentDate: ${body.paymentDate || 'now'}`);
+    console.log(`[PAYMENTS_CONTROLLER] POST /payments/:id/pay - paymentId: ${paymentId}, paymentMethod: ${body.paymentMethod || 'cash'}, discountCode: ${body.discountCode || 'None'}, discountAmount: ${body.discountAmount || 0}, paymentDate: ${body.paymentDate || 'now'}`);
     const date = body.paymentDate ? new Date(body.paymentDate) : undefined;
-    return this.paymentsService.payPayment(paymentId, body.paymentMethod || 'cash', userId, body.discountCode, date);
+    return this.paymentsService.payPayment(paymentId, body.paymentMethod || 'cash', userId, body.discountCode, date, body.discountAmount);
   }
 
   @Patch(':id/status')

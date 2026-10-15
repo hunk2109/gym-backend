@@ -8,6 +8,9 @@ import { Member } from '../../entities/member.entity';
 import { MemberMembership } from '../../entities/member-membership.entity';
 import { Membership } from '../../entities/membership.entity';
 import { Payment, PaymentStatus, PaymentType } from '../../entities/payment.entity';
+import { Attendance } from '../../entities/attendance.entity';
+import { CashRegister } from '../../entities/cash-register.entity';
+import { AppConfig } from '../../entities/app-config.entity';
 
 @Injectable()
 export class DashboardService {
@@ -26,7 +29,173 @@ export class DashboardService {
     private membershipRepository: Repository<Membership>,
     @InjectRepository(Payment)
     private paymentRepository: Repository<Payment>,
+    @InjectRepository(Attendance)
+    private attendanceRepository: Repository<Attendance>,
+    @InjectRepository(CashRegister)
+    private cashRegisterRepository: Repository<CashRegister>,
+    @InjectRepository(AppConfig)
+    private appConfigRepository: Repository<AppConfig>,
   ) {}
+
+  async getOverview() {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const in7Days = new Date(today);
+    in7Days.setDate(in7Days.getDate() + 7);
+    in7Days.setHours(23, 59, 59, 999);
+
+    // 1. Ventas de Hoy (sales + payments de membresía)
+    const [todaySalesRow, todayMembershipPaymentsRow, todaySalesCount] = await Promise.all([
+      this.saleRepository
+        .createQueryBuilder('sale')
+        .select('SUM(sale.totalAmount)', 'total')
+        .where('sale.status = :status', { status: SaleStatus.COMPLETED })
+        .andWhere('sale.createdAt >= :today', { today })
+        .getRawOne(),
+      this.paymentRepository
+        .createQueryBuilder('payment')
+        .select('SUM(payment.amount)', 'total')
+        .where('payment.paymentType = :type', { type: PaymentType.MEMBERSHIP })
+        .andWhere('payment.status = :status', { status: PaymentStatus.COMPLETED })
+        .andWhere('payment.paymentDate >= :today OR payment.createdAt >= :today', { today })
+        .getRawOne(),
+      this.saleRepository
+        .createQueryBuilder('sale')
+        .where('sale.status = :status', { status: SaleStatus.COMPLETED })
+        .andWhere('sale.createdAt >= :today', { today })
+        .getCount(),
+    ]);
+
+    const todaySales = parseFloat(todaySalesRow?.total || 0);
+    const todayMemberships = parseFloat(todayMembershipPaymentsRow?.total || 0);
+    const todayTotalRevenue = todaySales + todayMemberships;
+
+    // 2. Check-ins de Hoy
+    const todayCheckinsCount = await this.attendanceRepository
+      .createQueryBuilder('att')
+      .where('att.visitDate >= :today OR att.createdAt >= :today', { today })
+      .getCount();
+
+    // 3. Socios (Total y Activos)
+    const [totalMembers, activeMembers, expiringCount] = await Promise.all([
+      this.memberRepository.count(),
+      this.memberMembershipRepository
+        .createQueryBuilder('mm')
+        .where('mm.isActive = :active', { active: true })
+        .andWhere('mm.endDate >= :today', { today })
+        .select('COUNT(DISTINCT mm.memberId)', 'count')
+        .getRawOne()
+        .then((r) => parseInt(r?.count || '0')),
+      this.memberMembershipRepository
+        .createQueryBuilder('mm')
+        .where('mm.isActive = :active', { active: true })
+        .andWhere('mm.endDate BETWEEN :today AND :in7Days', { today, in7Days })
+        .select('COUNT(DISTINCT mm.memberId)', 'count')
+        .getRawOne()
+        .then((r) => parseInt(r?.count || '0')),
+    ]);
+
+    // 4. Turno de Caja Abierto
+    const openShift = await this.cashRegisterRepository.findOne({
+      where: { isOpen: true },
+      relations: ['user'],
+      order: { createdAt: 'DESC' },
+    });
+
+    // 5. Estado de Sincronización
+    const accessPathConfig = await this.appConfigRepository.findOne({
+      where: { key: 'ACCESS_DB_PATH' },
+    });
+    const deviceIpConfig = await this.appConfigRepository.findOne({
+      where: { key: 'ZK_DEVICE_IP' },
+    });
+
+    // 6. Últimos 6 meses de ventas
+    const monthlySales = await this.getMonthlySalesStats();
+
+    // 7. Comparación de ingresos (Membresías vs Ventas)
+    const revenueComp = await this.getRevenueComparison();
+
+    // 8. Top Productos del mes
+    const topProducts = await this.getTopProducts(5);
+
+    // 9. Asistencias recientes
+    const recentAttendances = await this.attendanceRepository.find({
+      order: { visitDate: 'DESC' },
+      take: 6,
+      relations: ['member', 'member.user', 'employee'],
+    });
+
+    // 10. Ventas recientes
+    const recentSales = await this.saleRepository.find({
+      where: { status: SaleStatus.COMPLETED },
+      order: { createdAt: 'DESC' },
+      take: 6,
+    });
+
+    return {
+      today: {
+        totalRevenue: todayTotalRevenue,
+        salesRevenue: todaySales,
+        membershipRevenue: todayMemberships,
+        salesCount: todaySalesCount,
+        checkinsCount: todayCheckinsCount,
+        expiringMembershipsCount: expiringCount,
+      },
+      members: {
+        total: totalMembers,
+        active: activeMembers,
+        inactive: Math.max(0, totalMembers - activeMembers),
+      },
+      cashShift: {
+        isOpen: !!openShift,
+        id: openShift?.id || null,
+        cashierName: openShift?.user
+          ? `${openShift.user.firstName || ''} ${openShift.user.lastName || ''}`.trim()
+          : null,
+        openingAmount: openShift ? Number(openShift.openingAmount) : 0,
+        openedAt: openShift?.createdAt || null,
+      },
+      syncStatus: {
+        isConfigured: !!(accessPathConfig?.value),
+        dbPath: accessPathConfig?.value || null,
+        deviceIp: deviceIpConfig?.value || null,
+      },
+      monthlySales,
+      revenueComparison: revenueComp,
+      topProducts,
+      recentAttendances: recentAttendances.map((a) => {
+        let name = 'Socio';
+        let memberCode = '';
+        if (a.member) {
+          name = a.member.user
+            ? `${a.member.user.firstName || ''} ${a.member.user.lastName || ''}`.trim()
+            : (a.member.memberCode || 'Socio');
+          memberCode = a.member.memberCode || '';
+        } else if (a.employee) {
+          name = `${a.employee.firstName || ''} ${a.employee.lastName || ''}`.trim();
+        }
+        return {
+          id: a.id,
+          name: name || 'Socio',
+          memberCode,
+          type: a.attendanceType,
+          status: a.status,
+          time: a.visitDate || a.createdAt,
+        };
+      }),
+      recentSales: recentSales.map((s) => ({
+        id: s.id,
+        invoiceNumber: `FAC-${s.id.substring(0, 6).toUpperCase()}`,
+        clientName: s.customerName || (s.member ? `${s.member.firstName || ''} ${s.member.lastName || ''}`.trim() : 'Cliente mostrador'),
+        amount: Number(s.totalAmount),
+        paymentMethod: s.paymentMethod,
+        time: s.createdAt,
+      })),
+      timestamp: new Date().toISOString(),
+    };
+  }
 
   async getMembersCount(): Promise<{ count: number }> {
     const count = await this.memberRepository.count();

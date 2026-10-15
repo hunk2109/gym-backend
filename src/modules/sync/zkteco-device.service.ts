@@ -230,6 +230,11 @@ export class ZktecoDeviceService {
   private cachedDeviceConfig: ZkDeviceConfig | null = null;
   private cachedDeviceConfigExpiresAt: number = 0;
 
+  clearConfigCache(): void {
+    this.cachedDeviceConfig = null;
+    this.cachedDeviceConfigExpiresAt = 0;
+  }
+
   private async getDeviceConfig(): Promise<ZkDeviceConfig> {
     const now = Date.now();
     if (this.cachedDeviceConfig && this.cachedDeviceConfigExpiresAt > now) {

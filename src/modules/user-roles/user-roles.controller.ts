@@ -78,54 +78,26 @@ export class UserRolesController {
   // ================= PERMISOS DINÁMICOS =================
 
   @Get('permissions/catalog')
-  async getPermissionsCatalog(@Req() req: any) {
-    const catalog = this.userRolesService.getPermissionsCatalog();
-    return {
-      statusCode: 200,
-      success: true,
-      data: catalog,
-      timestamp: new Date().toISOString(),
-      path: req.path,
-    };
+  getPermissionsCatalog() {
+    return this.userRolesService.getPermissionsCatalog();
   }
 
   @Get('permissions/all')
   @Roles(UserRole.ADMIN, UserRole.ENCARGADO)
-  async getAllRolePermissions(@Req() req: any) {
-    const permissions = await this.userRolesService.getAllRolePermissions();
-    return {
-      statusCode: 200,
-      success: true,
-      data: permissions,
-      timestamp: new Date().toISOString(),
-      path: req.path,
-    };
+  async getAllRolePermissions() {
+    return await this.userRolesService.getAllRolePermissions();
   }
 
   @Get('permissions/my-permissions')
   async getMyPermissions(@Req() req: any) {
     const userId = req.user?.userId || req.user?.sub || req.user?.id;
-    const permissions = await this.userRolesService.getUserPermissions(userId);
-    return {
-      statusCode: 200,
-      success: true,
-      data: permissions,
-      timestamp: new Date().toISOString(),
-      path: req.path,
-    };
+    return await this.userRolesService.getUserPermissions(userId);
   }
 
   @Get('permissions/:role')
   @Roles(UserRole.ADMIN, UserRole.ENCARGADO)
-  async getRolePermissions(@Param('role') role: string, @Req() req: any) {
-    const permissions = await this.userRolesService.getPermissionsForRole(role);
-    return {
-      statusCode: 200,
-      success: true,
-      data: permissions,
-      timestamp: new Date().toISOString(),
-      path: req.path,
-    };
+  async getRolePermissions(@Param('role') role: string) {
+    return await this.userRolesService.getPermissionsForRole(role);
   }
 
   @Post('permissions/:role')
@@ -137,19 +109,11 @@ export class UserRolesController {
     @Req() req: any,
   ) {
     const requestingUserId = req.user?.userId || req.user?.sub || req.user?.id;
-    const updated = await this.userRolesService.updateRolePermissions(
+    return await this.userRolesService.updateRolePermissions(
       role,
       permissions || [],
       requestingUserId,
     );
-    return {
-      statusCode: 200,
-      success: true,
-      message: `Permissions updated for role ${role}`,
-      data: updated,
-      timestamp: new Date().toISOString(),
-      path: req.path,
-    };
   }
 
   // ================= OTROS ENDPOINTS =================

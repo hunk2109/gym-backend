@@ -91,6 +91,9 @@ export class Payment {
   @Column({ type: 'varchar', nullable: true })
   updatedBy: string | null; // userId de quien actualizó la transacción (null si desconocido)
 
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  cashRegisterId: string | null; // ID del turno de caja donde se procesó el pago
+
   @CreateDateColumn()
   createdAt: Date;
 

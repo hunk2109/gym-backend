@@ -116,6 +116,18 @@ export class CashRegisterController {
     }
   }
 
+  @Get(':id/payments')
+  @Roles(UserRole.ADMIN, UserRole.EMPLEADO_CAJERO, UserRole.ENCARGADO)
+  async getShiftPayments(@Param('id') registerId: string) {
+    try {
+      const payments = await this.cashRegisterService.getShiftPayments(registerId);
+      return payments;
+    } catch (error) {
+      console.error('[CashRegister] Error getting shift payments:', error);
+      throw error;
+    }
+  }
+
   @Get('statistics')
   @Roles(UserRole.ADMIN, UserRole.ENCARGADO)
   async getStatistics(

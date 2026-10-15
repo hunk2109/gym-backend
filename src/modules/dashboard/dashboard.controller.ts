@@ -10,6 +10,18 @@ import { UserRole } from '../../entities/user.entity';
 export class DashboardController {
   constructor(private readonly dashboardService: DashboardService) {}
 
+  @Get('overview')
+  @Roles(
+    UserRole.ADMIN,
+    UserRole.ENCARGADO,
+    UserRole.EMPLEADO_CAJERO,
+    UserRole.EMPLEADO_ENTRENADOR,
+  )
+  @HttpCode(HttpStatus.OK)
+  async getOverview() {
+    return this.dashboardService.getOverview();
+  }
+
   @Get('stats')
   @Roles(UserRole.ADMIN, UserRole.ENCARGADO)
   @HttpCode(HttpStatus.OK)
