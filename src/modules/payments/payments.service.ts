@@ -9,8 +9,9 @@ import { CreatePaymentDto, UpdatePaymentDto } from './dto/create-payment.dto';
 import { PermissionsService } from '../auth/services/permissions.service';
 import { EmailService } from '../email-settings/email.service';
 import { WhatsappService } from '../whatsapp-settings/whatsapp.service';
-
 import { PromotionsService } from '../promotions/promotions.service';
+import { OutboxService } from '../outbox/outbox.service';
+import { NotificationPriority } from '../outbox/entities/notification-outbox.entity';
 
 @Injectable()
 export class PaymentsService {
@@ -29,6 +30,7 @@ export class PaymentsService {
     private readonly emailService: EmailService,
     private readonly whatsappService: WhatsappService,
     private readonly promotionsService: PromotionsService,
+    private readonly outboxService: OutboxService,
   ) {}
 
   private async getActiveCashRegisterId(userId?: string): Promise<string | null> {
@@ -762,25 +764,33 @@ export class PaymentsService {
 
       if (user.phone) {
         try {
-          await this.whatsappService.sendMessage(user.phone, plainText);
-          this.logger.log(`[Payments] Confirmacion WhatsApp enviada a ${user.phone}`);
+          await this.outboxService.enqueueWhatsapp({
+            recipient: user.phone,
+            recipientName: memberName,
+            content: plainText,
+            priority: NotificationPriority.URGENT,
+            metadata: { source: 'payment_received', paymentId: payment.id, memberId: member.id },
+          });
+          this.logger.log(`[Payments] Confirmacion WhatsApp encolada en Outbox para ${user.phone}`);
         } catch (error) {
-          this.logger.warn(`[Payments] No se pudo enviar WhatsApp de pago ${payment.id}: ${error.message}`);
+          this.logger.warn(`[Payments] Error encolando WhatsApp de pago ${payment.id}: ${error.message}`);
         }
       }
 
       if (user.email) {
         try {
-          await this.emailService.sendEmail({
-            recipientEmail: user.email,
+          await this.outboxService.enqueueEmail({
+            recipient: user.email,
             recipientName: memberName,
             subject: `Pago de ${paymentLabel} recibido`,
             htmlContent,
-            plainTextContent: plainText,
+            content: plainText,
+            priority: NotificationPriority.URGENT,
+            metadata: { source: 'payment_received', paymentId: payment.id, memberId: member.id },
           });
-          this.logger.log(`[Payments] Confirmacion email enviada a ${user.email}`);
+          this.logger.log(`[Payments] Confirmacion email encolada en Outbox para ${user.email}`);
         } catch (error) {
-          this.logger.warn(`[Payments] No se pudo enviar email de pago ${payment.id}: ${error.message}`);
+          this.logger.warn(`[Payments] Error encolando email de pago ${payment.id}: ${error.message}`);
         }
       }
     } catch (error) {

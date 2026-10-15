@@ -102,18 +102,13 @@ export class MembershipsController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO, UserRole.CLIENTE)
   @HttpCode(HttpStatus.OK)
-  async getAllMemberships(@Query('page') page: string = '1', @Query('limit') limit: string = '10') {
-    const result = await this.membershipsService.getAllMemberships(parseInt(page), parseInt(limit));
-    return {
-      statusCode: 200,
-      success: true,
-      message: 'Membresías obtenidas correctamente',
-      data: result,
-    };
+  async getAllMemberships(@Query('page') page: string = '1', @Query('limit') limit: string = '50') {
+    return this.membershipsService.getAllMemberships(parseInt(page), parseInt(limit));
   }
 
   // Ver membresías activas
   @Get('active')
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO, UserRole.CLIENTE)
   @HttpCode(HttpStatus.OK)
   async getActiveMemberships() {
@@ -126,6 +121,7 @@ export class MembershipsController {
 
   // Ver membresía por ID
   @Get(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO, UserRole.CLIENTE)
   @HttpCode(HttpStatus.OK)
   async getMembershipById(@Param('id') id: string) {
@@ -138,6 +134,7 @@ export class MembershipsController {
 
   // Crear membresía
   @Post()
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN, UserRole.ENCARGADO)
   @HttpCode(HttpStatus.CREATED)
   async createMembership(@Body() createMembershipDto: CreateMembershipDto, @Req() req: any) {
@@ -152,6 +149,7 @@ export class MembershipsController {
 
   // Editar membresía
   @Put(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN, UserRole.ENCARGADO)
   @HttpCode(HttpStatus.OK)
   async updateMembership(
@@ -169,7 +167,8 @@ export class MembershipsController {
 
   // Eliminar membresía - Solo ADMIN
   @Delete(':id')
-  @Roles(UserRole.ADMIN)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.ENCARGADO)
   @HttpCode(HttpStatus.NO_CONTENT)
   async deleteMembership(@Param('id') id: string) {
     return this.membershipsService.deleteMembership(id);

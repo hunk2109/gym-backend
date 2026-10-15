@@ -15,6 +15,8 @@ import { AccessService } from '../sync/access.service';
 import { ZktecoDeviceService } from '../sync/zkteco-device.service';
 import { WhatsappService } from '../whatsapp-settings/whatsapp.service';
 import { GymSettingsService } from '../gym-settings/gym-settings.service';
+import { OutboxService } from '../outbox/outbox.service';
+import { NotificationPriority } from '../outbox/entities/notification-outbox.entity';
 
 @Injectable()
 export class MemberMembershipsService {
@@ -36,6 +38,7 @@ export class MemberMembershipsService {
     private readonly zktecoDeviceService: ZktecoDeviceService,
     private readonly whatsappService: WhatsappService,
     private readonly gymSettingsService: GymSettingsService,
+    private readonly outboxService: OutboxService,
   ) {}
 
   private async getActiveCashRegisterId(userId?: string): Promise<string | null> {
@@ -504,7 +507,6 @@ export class MemberMembershipsService {
 
         if (memberWithUser.user.phone) {
           try {
-            console.log(`[MemberMembershipsService] 💬 Enviando WhatsApp a: ${memberWithUser.user.phone}`);
             const waPaidText = paymentMethod === PaymentMethod.CREDIT_BALANCE ? `\n✅ *Pagado automáticamente con tu saldo a favor*\n` : '';
             const waMessage = `Hola *${memberName}*,\n\n` +
               `Tu membresía ha sido asignada exitosamente. Aquí están los detalles:\n\n` +
@@ -514,23 +516,33 @@ export class MemberMembershipsService {
               `💰 *Monto a Pagar:* RD$ ${parseFloat(finalAmount as any).toFixed(2)}\n` +
               waPaidText +
               `\n¡Gracias por confiar en nosotros!`;
-            await this.whatsappService.sendMessage(memberWithUser.user.phone, waMessage);
-            console.log(`[MemberMembershipsService] ✅ WhatsApp enviado exitosamente.`);
+
+            await this.outboxService.enqueueWhatsapp({
+              recipient: memberWithUser.user.phone,
+              recipientName: memberName,
+              content: waMessage,
+              priority: NotificationPriority.URGENT,
+              metadata: { source: 'membership_assigned', memberId: memberWithUser.id },
+            });
+            console.log(`[MemberMembershipsService] ✅ WhatsApp encolado en Outbox.`);
           } catch (waError) {
-            console.error(`[MemberMembershipsService] ❌ Error al enviar WhatsApp:`, waError.message);
+            console.error(`[MemberMembershipsService] ❌ Error al encolar WhatsApp:`, waError.message);
           }
         }
 
-        console.log(`[MemberMembershipsService] 📧 Enviando email a: ${memberEmail}`);
+        console.log(`[MemberMembershipsService] 📧 Encolando email a: ${memberEmail}`);
         
-        const emailResult = await this.emailService.sendEmail({
-          recipientEmail: memberEmail,
+        await this.outboxService.enqueueEmail({
+          recipient: memberEmail,
           recipientName: memberName,
           subject: `✓ Membresía Asignada - ${membershipName}`,
           htmlContent,
+          content: `Membresía Asignada - ${membershipName}. Inicio: ${startDateFormatted}, Vence: ${endDateFormatted}. ¡Gracias por confiar en nosotros!`,
+          priority: NotificationPriority.URGENT,
+          metadata: { source: 'membership_assigned', memberId: memberWithUser.id },
         });
         
-        console.log(`[MemberMembershipsService] ✅ Email enviado exitosamente. Log ID: ${emailResult?.id}`);
+        console.log(`[MemberMembershipsService] ✅ Email encolado en Outbox exitosamente.`);
       } else {
         console.log(`[MemberMembershipsService] ⚠️  No se pudo enviar email - Usuario sin email o no encontrado`);
         console.log(`[MemberMembershipsService] - memberWithUser existe: ${!!memberWithUser}`);

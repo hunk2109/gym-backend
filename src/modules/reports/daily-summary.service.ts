@@ -8,6 +8,8 @@ import { Attendance } from '../../entities/attendance.entity';
 import { GymSettings } from '../../entities/gym-settings.entity';
 import { EmailService } from '../email-settings/email.service';
 import { WhatsappService } from '../whatsapp-settings/whatsapp.service';
+import { OutboxService } from '../outbox/outbox.service';
+import { NotificationPriority } from '../outbox/entities/notification-outbox.entity';
 import * as puppeteer from 'puppeteer';
 
 @Injectable()
@@ -21,23 +23,41 @@ export class DailySummaryService {
     @InjectRepository(GymSettings) private gymSettingsRepository: Repository<GymSettings>,
     private emailService: EmailService,
     private whatsappService: WhatsappService,
+    private outboxService: OutboxService,
   ) {}
+
+  private isGenerating = false;
+  private lastSentDateMap: Record<string, string> = {};
 
   @Cron(CronExpression.EVERY_MINUTE)
   async handleDailySummaryCron() {
+    if (this.isGenerating) {
+      return;
+    }
+
     try {
+      const now = new Date();
+      const timeString = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+      const todayKey = `${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, '0')}-${now.getDate().toString().padStart(2, '0')}`;
+
+      // Si ya se envió hoy para este horario, no re-procesar
+      if (this.lastSentDateMap[timeString] === todayKey) {
+        return;
+      }
+
       const settingsList = await this.gymSettingsRepository.find({ order: { updatedAt: 'DESC' }, take: 1 });
       if (!settingsList.length) return;
       
       const settings = settingsList[0];
+      if (settings.enableDailySummaryReport === false) {
+        return;
+      }
       const time1 = settings.closingReportTime1 || '12:00';
       const time2 = settings.closingReportTime2 || '21:00';
 
-      const now = new Date();
-      const timeString = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
-
       if (timeString === time1 || timeString === time2) {
         this.logger.log(`Es la hora programada (${timeString}) para el reporte diario...`);
+        this.lastSentDateMap[timeString] = todayKey;
         await this.generateAndSendDailySummary(settings);
       }
     } catch (error) {
@@ -46,7 +66,9 @@ export class DailySummaryService {
   }
 
   async generateAndSendDailySummary(passedSettings?: GymSettings) {
-    const today = new Date();
+    this.isGenerating = true;
+    try {
+      const today = new Date();
     today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
@@ -123,11 +145,28 @@ export class DailySummaryService {
 
     // 4. Generar PDF
     this.logger.log('Generando PDF del reporte...');
-    const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox'] });
-    const page = await browser.newPage();
-    await page.setContent(htmlContent, { waitUntil: 'domcontentloaded' });
-    const pdfBuffer = await page.pdf({ format: 'A4', printBackground: true });
-    await browser.close();
+    let browser: any = null;
+    let pdfBuffer: Buffer;
+    try {
+      browser = await puppeteer.launch({ 
+        headless: true, 
+        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'] 
+      });
+      const page = await browser.newPage();
+      await page.setContent(htmlContent, { waitUntil: 'domcontentloaded' });
+      pdfBuffer = Buffer.from(await page.pdf({ format: 'A4', printBackground: true }));
+    } catch (pdfErr) {
+      this.logger.error('Error al renderizar PDF con Puppeteer:', pdfErr);
+      throw pdfErr;
+    } finally {
+      if (browser) {
+        try {
+          await browser.close();
+        } catch (closeErr) {
+          this.logger.warn('Error cerrando navegador Puppeteer:', closeErr);
+        }
+      }
+    }
     
     // 5. Enviar a Destinatarios
     let settings = passedSettings;
@@ -141,38 +180,46 @@ export class DailySummaryService {
     for (const recipient of recipients) {
       if (recipient.sendEmail && recipient.email) {
         try {
-          await this.emailService.sendEmail({
-            recipientEmail: recipient.email,
+          const base64Data = Buffer.from(pdfBuffer).toString('base64');
+          await this.outboxService.enqueueEmail({
+            recipient: recipient.email,
             recipientName: recipient.name,
             subject: `Resumen de Cierre de Caja - ${today.toLocaleDateString()}`,
-            plainTextContent: 'Adjunto enviamos el resumen detallado del día.',
+            content: 'Adjunto enviamos el resumen detallado del día.',
             htmlContent: '<p>Adjunto enviamos el resumen detallado del día.</p>',
+            priority: NotificationPriority.HIGH,
             attachments: [{
               filename: `Resumen_${today.toLocaleDateString().replace(/\//g, '-')}.pdf`,
-              content: pdfBuffer,
+              content: base64Data,
               contentType: 'application/pdf',
             }],
+            metadata: { source: 'daily_summary', recipientName: recipient.name },
           });
-          this.logger.log(`Reporte enviado por correo a ${recipient.email}`);
+          this.logger.log(`Reporte diario encolado en Outbox para Email: ${recipient.email}`);
         } catch (e) {
-          this.logger.error(`Error enviando correo a ${recipient.email}:`, e);
+          this.logger.error(`Error encolando correo a ${recipient.email}:`, e);
         }
       }
 
       if (recipient.sendWhatsapp && recipient.phone) {
         try {
           const base64Data = Buffer.from(pdfBuffer).toString('base64');
-          await this.whatsappService.sendBase64Pdf(
-            recipient.phone, 
-            base64Data, 
-            `Resumen_${today.toLocaleDateString().replace(/\//g, '-')}.pdf`,
-            `Resumen Diario - Ingresos: $${totalIncomeToday.toFixed(2)} (${incomeDiff >= 0 ? '▲' : '▼'})`
-          );
-          this.logger.log(`Reporte enviado por WhatsApp a ${recipient.phone}`);
+          await this.outboxService.enqueueWhatsappPdf({
+            recipient: recipient.phone,
+            filename: `Resumen_${today.toLocaleDateString().replace(/\//g, '-')}.pdf`,
+            base64Data,
+            caption: `Resumen Diario - Ingresos: $${totalIncomeToday.toFixed(2)} (${incomeDiff >= 0 ? '▲' : '▼'})`,
+            priority: NotificationPriority.HIGH,
+            metadata: { source: 'daily_summary', recipientName: recipient.name },
+          });
+          this.logger.log(`Reporte diario encolado en Outbox para WhatsApp: ${recipient.phone}`);
         } catch (e) {
-          this.logger.error(`Error enviando WhatsApp a ${recipient.phone}:`, e);
+          this.logger.error(`Error encolando reporte para WhatsApp a ${recipient.phone}:`, e);
         }
       }
     }
+  } finally {
+    this.isGenerating = false;
   }
+}
 }

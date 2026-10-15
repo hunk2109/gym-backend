@@ -8,6 +8,8 @@ import { Member } from '../../entities/member.entity';
 import { Promotion } from '../promotions/entities/promotion.entity';
 import { GymSettings } from '../../entities/gym-settings.entity';
 import { Cron, CronExpression } from '@nestjs/schedule';
+import { OutboxService } from '../outbox/outbox.service';
+import { NotificationPriority } from '../outbox/entities/notification-outbox.entity';
 
 export interface CampaignTemplateDto {
   id: string;
@@ -34,6 +36,7 @@ export class CampaignsService {
     private gymSettingsRepo: Repository<GymSettings>,
     private whatsappService: WhatsappService,
     private emailService: EmailService,
+    private outboxService: OutboxService,
   ) {}
 
   async getCampaigns(): Promise<Campaign[]> {
@@ -232,15 +235,29 @@ export class CampaignsService {
     return savedCampaign;
   }
 
+  private isProcessingScheduled = false;
+
   @Cron(CronExpression.EVERY_MINUTE)
   async processScheduledCampaigns() {
-    const now = new Date();
-    const scheduledCampaigns = await this.campaignRepo.find({
-      where: {
-        status: CampaignStatus.SCHEDULED,
-        scheduledAt: LessThanOrEqual(now)
+    if (this.isProcessingScheduled) {
+      return;
+    }
+
+    this.isProcessingScheduled = true;
+    try {
+      const settingsList = await this.gymSettingsRepo.find({ order: { updatedAt: 'DESC' }, take: 1 });
+      const settings = settingsList[0];
+      if (settings?.enableCampaignScheduler === false) {
+        return;
       }
-    });
+
+      const now = new Date();
+      const scheduledCampaigns = await this.campaignRepo.find({
+        where: {
+          status: CampaignStatus.SCHEDULED,
+          scheduledAt: LessThanOrEqual(now)
+        }
+      });
 
     for (const campaign of scheduledCampaigns) {
       campaign.status = CampaignStatus.IN_PROGRESS;
@@ -256,6 +273,9 @@ export class CampaignsService {
       await this.campaignRepo.save(campaign);
 
       this.processCampaignAsync(campaign, members, campaign.messageTemplate, campaign.attachedCouponCode, campaign.channel);
+    }
+    } finally {
+      this.isProcessingScheduled = false;
     }
   }
 
@@ -368,26 +388,36 @@ export class CampaignsService {
         // 1. Envío vía WhatsApp
         if ((channel === CampaignChannel.WHATSAPP || channel === CampaignChannel.BOTH) && phone) {
           try {
-            await this.whatsappService.sendMessage(phone, textMessage);
+            await this.outboxService.enqueueWhatsapp({
+              recipient: phone,
+              recipientName: fullName,
+              content: textMessage,
+              priority: NotificationPriority.LOW,
+              metadata: { source: 'campaign', campaignId: campaign.id, memberId: member.id },
+            });
             sent = true;
-            this.logger.debug(`[Campaign] WhatsApp enviado a ${phone}`);
+            this.logger.debug(`[Campaign] WhatsApp encolado en Outbox para ${phone}`);
           } catch (waErr) {
-            this.logger.warn(`[Campaign] Error enviando WhatsApp a ${phone}: ${waErr.message}`);
+            this.logger.warn(`[Campaign] Error encolando WhatsApp a ${phone}: ${waErr.message}`);
           }
         }
 
         // 2. Envío vía Correo Electrónico
         if ((channel === CampaignChannel.EMAIL || channel === CampaignChannel.BOTH) && email) {
           try {
-            await this.emailService.sendEmail({
-              recipientEmail: email,
+            await this.outboxService.enqueueEmail({
+              recipient: email,
+              recipientName: fullName,
               subject: campaign.name,
               htmlContent: htmlContent,
+              content: textMessage,
+              priority: NotificationPriority.LOW,
+              metadata: { source: 'campaign', campaignId: campaign.id, memberId: member.id },
             });
             sent = true;
-            this.logger.debug(`[Campaign] Correo enviado a ${email}`);
+            this.logger.debug(`[Campaign] Correo encolado en Outbox para ${email}`);
           } catch (mailErr) {
-            this.logger.warn(`[Campaign] Error enviando Correo a ${email}: ${mailErr.message}`);
+            this.logger.warn(`[Campaign] Error encolando Correo a ${email}: ${mailErr.message}`);
           }
         }
 
@@ -396,9 +426,6 @@ export class CampaignsService {
         } else {
           failCount++;
         }
-
-        // Breve pausa para no saturar las conexiones (350ms)
-        await new Promise(resolve => setTimeout(resolve, 350));
       } catch (err) {
         failCount++;
         this.logger.error(`[Campaign] Fallo general en destinatario ${fullName}: ${err.message}`);

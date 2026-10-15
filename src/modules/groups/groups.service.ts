@@ -172,28 +172,48 @@ export class GroupsService {
   async getGroupsByMemberId(memberId: string): Promise<Group[]> {
     console.log(`[GroupsService] 🔍 getGroupsByMemberId(${memberId})`);
     
+    // Obtener información del miembro para saber su userId y id real
+    const member = await this.memberRepository.findOne({
+      where: [{ id: memberId }, { userId: memberId }],
+      relations: ['user'],
+    });
+
+    const realMemberId = member ? member.id : memberId;
+    const possibleUserIds = [memberId];
+    if (member) {
+      if (member.userId) possibleUserIds.push(member.userId);
+      if (member.user && member.user.id) possibleUserIds.push(member.user.id);
+    }
+    const uniqueUserIds = Array.from(new Set(possibleUserIds));
+
+    console.log(`[GroupsService] 🔍 IDs posibles del responsable:`, uniqueUserIds);
+
     // Obtener grupos donde es responsable
     console.log(`[GroupsService] 🔍 Buscando grupos como responsable...`);
-    const responsibleGroups = await this.groupRepository.find({
-      where: { responsibleUserId: memberId },
-      relations: ['membership', 'responsibleUser', 'companions', 'companions.member'],
-    });
+    const responsibleGroups = await this.groupRepository
+      .createQueryBuilder('group')
+      .leftJoinAndSelect('group.membership', 'membership')
+      .leftJoinAndSelect('group.responsibleUser', 'responsibleUser')
+      .leftJoinAndSelect('group.companions', 'companions')
+      .leftJoinAndSelect('companions.member', 'member')
+      .leftJoinAndSelect('member.user', 'memberUser')
+      .where('group.responsibleUserId IN (:...uniqueUserIds)', { uniqueUserIds })
+      .getMany();
+
     console.log(`[GroupsService] ✅ ${responsibleGroups.length} grupos como responsable`);
 
     // Obtener grupos donde es acompañante
     console.log(`[GroupsService] 🔍 Buscando grupos como acompañante...`);
     const companionGroups = await this.groupRepository
       .createQueryBuilder('group')
-      .leftJoinAndSelect(
-        'group.companions',
-        'companion',
-        'companion.memberId = :memberId',
-        { memberId },
-      )
       .leftJoinAndSelect('group.membership', 'membership')
       .leftJoinAndSelect('group.responsibleUser', 'responsibleUser')
-      .where('companion.memberId = :memberId', { memberId })
+      .leftJoinAndSelect('group.companions', 'companions')
+      .leftJoinAndSelect('companions.member', 'member')
+      .leftJoinAndSelect('member.user', 'memberUser')
+      .where('companions.memberId = :realMemberId', { realMemberId })
       .getMany();
+
     console.log(`[GroupsService] ✅ ${companionGroups.length} grupos como acompañante`);
 
     // Combinar y eliminar duplicados
@@ -324,31 +344,9 @@ export class GroupsService {
       );
     }
 
-    // Crear acompañante
-    const newCompanion = new GroupCompanion();
-    newCompanion.id = uuidv4();
-    newCompanion.groupId = groupId;
-    newCompanion.memberId = memberId;
-    newCompanion.relationship = relationship || '';
-    newCompanion.status = 'active';
-
-    // Validación adicional antes de guardar
-    if (!newCompanion.groupId) {
-      throw new BadRequestException('groupId no puede estar vacío');
-    }
-    if (!newCompanion.memberId) {
-      throw new BadRequestException('memberId no puede estar vacío');
-    }
-
-    // Usar insert en lugar de save para asegurar que es una inserción pura (sin triggers de update)
-    await this.groupCompanionRepository.insert(newCompanion);
-    console.log(`[addCompanionToGroup] ✅ GroupCompanion creado: ${newCompanion.id}`);
-
-    // Crear la membresía para el acompañante
-    // IMPORTANTE: Obtener las fechas del responsable del grupo para que sean iguales
-    // Primero, obtener el memberId del responsable usando su userId
-    const responsibleMember = await this.memberRepository.findOne({
-      where: { userId: group.responsibleUserId },
+    // Primero, obtener el member del responsable
+    let responsibleMember = await this.memberRepository.findOne({
+      where: [{ userId: group.responsibleUserId }, { id: group.responsibleUserId }],
     });
 
     if (!responsibleMember) {
@@ -357,21 +355,49 @@ export class GroupsService {
       );
     }
 
-    const responsibleMembership = await this.memberMembershipRepository.findOne({
+    // Buscar la membresía del responsable
+    let responsibleMembership = await this.memberMembershipRepository.findOne({
       where: {
         memberId: responsibleMember.id,
         groupId: groupId,
-        membershipType: 'responsible',
       },
+      order: { createdAt: 'DESC' },
     });
 
     if (!responsibleMembership) {
-      throw new BadRequestException(
-        'No se encontró la membresía del responsable del grupo',
-      );
+      responsibleMembership = await this.memberMembershipRepository.findOne({
+        where: {
+          memberId: responsibleMember.id,
+          membershipId: group.membershipId,
+        },
+        order: { createdAt: 'DESC' },
+      });
     }
 
-    console.log(`[addCompanionToGroup] 📅 Fechas del responsable - startDate: ${responsibleMembership.startDate}, endDate: ${responsibleMembership.endDate}`);
+    if (responsibleMembership) {
+      if (responsibleMembership.groupId !== groupId || responsibleMembership.membershipType !== 'responsible') {
+        await this.memberMembershipRepository.update(
+          { id: responsibleMembership.id },
+          { groupId: groupId, membershipType: 'responsible' },
+        );
+      }
+    }
+
+    const startDateToUse = responsibleMembership?.startDate || group.startDate;
+    const endDateToUse = responsibleMembership?.endDate || group.endDate;
+
+    console.log(`[addCompanionToGroup] 📅 Fechas utilizadas - startDate: ${startDateToUse}, endDate: ${endDateToUse}`);
+
+    // Crear acompañante
+    const newCompanion = new GroupCompanion();
+    newCompanion.id = uuidv4();
+    newCompanion.groupId = groupId;
+    newCompanion.memberId = memberId;
+    newCompanion.relationship = relationship || '';
+    newCompanion.status = 'active';
+
+    await this.groupCompanionRepository.insert(newCompanion);
+    console.log(`[addCompanionToGroup] ✅ GroupCompanion creado: ${newCompanion.id}`);
 
     const memberMembership = new MemberMembership();
     memberMembership.id = uuidv4();
@@ -379,9 +405,8 @@ export class GroupsService {
     memberMembership.membershipId = group.membershipId;
     memberMembership.groupId = groupId;
     memberMembership.membershipType = 'companion';
-    memberMembership.startDate = responsibleMembership.startDate; // ✅ Usar fecha de inicio del responsable
-    memberMembership.endDate = responsibleMembership.endDate; // ✅ Usar fecha de fin del responsable
-    // ✅ Guardar el costo del acompañante en payAmount (para rastrear variable pricing)
+    memberMembership.startDate = startDateToUse;
+    memberMembership.endDate = endDateToUse;
     const companionCost = group.membership.pricePerCompanion || 0;
     memberMembership.payAmount = companionCost;
 
@@ -415,7 +440,7 @@ export class GroupsService {
       companionPayment.id = uuidv4();
       companionPayment.amount = companionCost as any;
       companionPayment.paymentDate = null;
-      companionPayment.dueDate = responsibleMembership.endDate;
+      companionPayment.dueDate = endDateToUse;
       companionPayment.status = PaymentStatus.PENDING;
       companionPayment.paymentMethod = PaymentMethod.CASH;
       companionPayment.paymentType = PaymentType.MEMBERSHIP;

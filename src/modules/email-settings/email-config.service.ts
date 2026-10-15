@@ -45,7 +45,68 @@ export class EmailConfigService {
   async updateConfig(id: string, dto: UpdateEmailConfigDto): Promise<EmailConfig> {
     const config = await this.getConfigById(id);
     Object.assign(config, dto);
-    return this.emailConfigRepository.save(config);
+    const saved = await this.emailConfigRepository.save(config);
+    if (saved.isActive) {
+      try {
+        await this.emailService.initializeTransporter();
+      } catch (err) {
+        this.logger.warn(`Could not initialize transporter after update: ${err.message}`);
+      }
+    }
+    return saved;
+  }
+
+  async getActiveOrLatestConfig(): Promise<EmailConfig | null> {
+    const active = await this.emailConfigRepository.findOne({
+      where: { isActive: true },
+    });
+    if (active) return active;
+    const configs = await this.emailConfigRepository.find({
+      order: { createdAt: 'DESC' },
+      take: 1,
+    });
+    return configs.length > 0 ? configs[0] : null;
+  }
+
+  async saveOrUpdateConfig(dto: CreateEmailConfigDto): Promise<EmailConfig> {
+    let config = await this.emailConfigRepository.findOne({
+      where: { isActive: true },
+    });
+    if (!config) {
+      const configs = await this.emailConfigRepository.find({
+        order: { createdAt: 'DESC' },
+        take: 1,
+      });
+      if (configs.length > 0) {
+        config = configs[0];
+      }
+    }
+
+    if (config) {
+      Object.assign(config, dto);
+      config.isActive = true;
+    } else {
+      config = this.emailConfigRepository.create({
+        ...dto,
+        isActive: true,
+      });
+    }
+
+    const saved = await this.emailConfigRepository.save(config);
+    try {
+      await this.emailService.initializeTransporter();
+    } catch (err) {
+      this.logger.warn(`Could not initialize transporter on save: ${err.message}`);
+    }
+    return saved;
+  }
+
+  async verifyActiveConfig(testEmail?: string): Promise<{ success: boolean; message: string }> {
+    const active = await this.getActiveOrLatestConfig();
+    if (!active) {
+      throw new BadRequestException('No hay ninguna configuración de correo registrada.');
+    }
+    return this.verifyConfig(active.id, testEmail);
   }
 
   async deleteConfig(id: string): Promise<void> {
@@ -56,10 +117,10 @@ export class EmailConfigService {
     await this.emailConfigRepository.delete(id);
   }
 
-  async verifyConfig(id: string, testEmail: string): Promise<{ success: boolean; message: string }> {
+  async verifyConfig(id: string, testEmail?: string): Promise<{ success: boolean; message: string }> {
     try {
       await this.emailService.verifyEmailConfig(id, testEmail);
-      return { success: true, message: 'Email configuration verified successfully' };
+      return { success: true, message: 'Configuración de correo verificada exitosamente' };
     } catch (error) {
       this.logger.error(`Failed to verify config ${id}`, error);
       throw error;
@@ -73,6 +134,8 @@ export class EmailConfigService {
     // Activar la seleccionada
     const config = await this.getConfigById(id);
     config.isActive = true;
-    return this.emailConfigRepository.save(config);
+    const saved = await this.emailConfigRepository.save(config);
+    await this.emailService.initializeTransporter();
+    return saved;
   }
 }

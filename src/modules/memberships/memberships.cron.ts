@@ -2,27 +2,35 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { MembershipsService } from './memberships.service';
 import { CronLoggingService } from '../email-settings/cron-logging.service';
+import { GymSettingsService } from '../gym-settings/gym-settings.service';
 
 @Injectable()
 export class MembershipsCronService {
   private readonly logger = new Logger(MembershipsCronService.name);
 
+  private isRunning = false;
+
   constructor(
     private readonly membershipsService: MembershipsService,
     private readonly cronLoggingService: CronLoggingService,
+    private readonly gymSettingsService: GymSettingsService,
   ) {}
 
   /**
    * Ejecuta renovación automática de membresías cada 6 horas
-   * - Renueva membresías recurrentes con pago completado
-   * - Renueva membresías recurrentes con pago pendiente (< 15 días vencidas)
+   * - Renueva membresías recurrentes con pago completado (creando cobro pendiente para el nuevo ciclo)
    * - Suspende membresías recurrentes con pago pendiente (> 15 días vencidas)
    * - Suspende membresías no recurrentes cuando vencen
    * - Envía notificaciones 3 días antes de la suspensión
-   * - Crea automáticamente pagos pendientes para renovaciones
    */
   @Cron(CronExpression.EVERY_6_HOURS)
   async handleMembershipRenewal() {
+    if (this.isRunning) {
+      this.logger.warn('MembershipRenewalJob ya está en ejecución, omitiendo ejecución simultánea');
+      return;
+    }
+
+    this.isRunning = true;
     const startTime = Date.now();
     const logId = await this.cronLoggingService.logCronStart(
       'MembershipRenewalJob',
@@ -31,6 +39,13 @@ export class MembershipsCronService {
 
     try {
       this.logger.log('Iniciando renovación automática de membresías...');
+
+      const gymSettings = await this.gymSettingsService.getSettings();
+      if (gymSettings?.enableMembershipRenewal === false) {
+        this.logger.log('Renovación automática de membresías desactivada en configuración');
+        await this.cronLoggingService.logCronSuccess(logId, 0, Date.now() - startTime);
+        return;
+      }
 
       const result = await this.membershipsService.autoRenewExpiredMemberships();
 
@@ -52,6 +67,8 @@ export class MembershipsCronService {
         executionTimeMs,
       );
       this.logger.error('Error durante renovación automática:', error);
+    } finally {
+      this.isRunning = false;
     }
   }
 }

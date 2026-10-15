@@ -60,6 +60,13 @@ export class GymSettingsService {
         membershipPrice: 0,
         policies: '',
         ticketPaperSize: '80mm',
+        enableMembershipRenewal: true,
+        enablePaymentReminders: true,
+        enableBirthdayEmails: true,
+        enableAnniversaryEmails: true,
+        enableExpirationWarnings: true,
+        enableCampaignScheduler: true,
+        enableDailySummaryReport: true,
       });
       settings = await this.gymSettingsRepository.save(defaultSettings);
       this.logger.log('[GET] Default gym settings created');

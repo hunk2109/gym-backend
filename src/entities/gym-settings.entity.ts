@@ -63,13 +63,25 @@ export class GymSettings {
 
   // Envíos automáticos (Cron Jobs)
   @Column({ type: 'boolean', default: true })
+  enableMembershipRenewal: boolean;
+
+  @Column({ type: 'boolean', default: true })
+  enablePaymentReminders: boolean;
+
+  @Column({ type: 'boolean', default: true })
   enableBirthdayEmails: boolean;
+
+  @Column({ type: 'boolean', default: true })
+  enableAnniversaryEmails: boolean;
 
   @Column({ type: 'boolean', default: true })
   enableExpirationWarnings: boolean;
 
   @Column({ type: 'boolean', default: true })
-  enablePaymentReminders: boolean;
+  enableCampaignScheduler: boolean;
+
+  @Column({ type: 'boolean', default: true })
+  enableDailySummaryReport: boolean;
 
   @Column({ type: 'longblob', nullable: true })
   logoImage: Buffer; // Logo/imagen para facturas (BLOB)

@@ -16,6 +16,8 @@ import { EmailService } from '../email-settings/email.service';
 import { GymSettingsService } from '../gym-settings/gym-settings.service';
 import { AccessService } from '../sync/access.service';
 import { ZktecoDeviceService } from '../sync/zkteco-device.service';
+import { OutboxService } from '../outbox/outbox.service';
+import { NotificationPriority } from '../outbox/entities/notification-outbox.entity';
 
 @Injectable()
 export class MembershipsService {
@@ -39,6 +41,7 @@ export class MembershipsService {
     private gymSettingsService: GymSettingsService,
     private accessService: AccessService,
     private zktecoDeviceService: ZktecoDeviceService,
+    private outboxService: OutboxService,
   ) {}
 
   private async getActiveCashRegisterId(userId?: string): Promise<string | null> {
@@ -174,6 +177,16 @@ export class MembershipsService {
     // Extraer accessSchedules antes de hacer assign
     const { accessSchedules, ...updateData } = updateMembershipDto as any;
     
+    // Convertir type a enum si está presente
+    if (updateData.type) {
+      const typeValue = String(updateData.type).toLowerCase();
+      if (typeValue === 'group' || typeValue === MembershipType.GROUP) {
+        updateData.type = MembershipType.GROUP;
+      } else if (typeValue === 'individual' || typeValue === MembershipType.INDIVIDUAL) {
+        updateData.type = MembershipType.INDIVIDUAL;
+      }
+    }
+
     // Convertir priceType a enum si está presente
     if (updateData.priceType) {
       const priceTypeValue = String(updateData.priceType).toLowerCase();
@@ -184,8 +197,9 @@ export class MembershipsService {
       }
     }
     
-    Object.assign(membership, updateData);
-    const updatedMembership = await this.membershipRepository.save(membership);
+    // Usar update directo para garantizar que los campos null (como durationDays) se persistan en la BD
+    await this.membershipRepository.update(id, updateData);
+    const updatedMembership = await this.getMembershipById(id);
 
     // Si hay nuevos horarios, eliminar los antiguos y guardar los nuevos
     if (accessSchedules && accessSchedules.length > 0) {
@@ -219,7 +233,12 @@ export class MembershipsService {
 
   async deleteMembership(id: string): Promise<void> {
     const membership = await this.getMembershipById(id);
-    await this.membershipRepository.remove(membership);
+    try {
+      await this.membershipRepository.remove(membership);
+    } catch (e) {
+      membership.isActive = false;
+      await this.membershipRepository.save(membership);
+    }
   }
 
   async getActiveMemberships(): Promise<Membership[]> {
@@ -702,7 +721,7 @@ export class MembershipsService {
         const isPending = !membershipPayment || (membershipPayment && membershipPayment.status === PaymentStatus.PENDING);
 
         if (isPending) {
-          // Calcular días sin pagar
+          // El pago de esta membresía sigue pendiente. Verificar si sobrepasó el periodo de gracia para suspender.
           const daysSinceDue = Math.floor(
             (today.getTime() - new Date(currentMembership.endDate).getTime()) / (1000 * 60 * 60 * 24),
           );
@@ -715,16 +734,35 @@ export class MembershipsService {
             gymSettings?.enableExpirationWarnings !== false
           ) {
             try {
-              await this.emailService.sendEmailDirect({
-                to: currentMembership.member.user.email,
-                subject: '⚠️ Tu membresía será suspendida en 3 días',
-                text: `Hola ${currentMembership.member.user.firstName},\n\nTu pago de membresía está pendiente desde hace ${daysSinceDue} días.\n\nSi no realizas el pago en los próximos 3 días, tu membresía será suspendida.\n\nAccede al portal para completar el pago.\n\nGracias.`,
-                html: `<p>Hola ${currentMembership.member.user.firstName},</p><p>Tu pago de membresía está pendiente desde hace ${daysSinceDue} días.</p><p>Si no realizas el pago en los próximos <strong>3 días</strong>, tu membresía será suspendida.</p><p>Accede al portal para completar el pago.</p>`,
-              });
+              const user = currentMembership.member.user;
+              const subject = '⚠️ Tu membresía será suspendida en 3 días';
+              const text = `Hola ${user.firstName},\n\nTu pago de membresía está pendiente desde hace ${daysSinceDue} días.\n\nSi no realizas el pago en los próximos 3 días, tu membresía será suspendida.\n\nAccede al portal para completar el pago.\n\nGracias.`;
+              const html = `<p>Hola ${user.firstName},</p><p>Tu pago de membresía está pendiente desde hace ${daysSinceDue} días.</p><p>Si no realizas el pago en los próximos <strong>3 días</strong>, tu membresía será suspendida.</p><p>Accede al portal para completar el pago.</p>`;
+
+              if (user.email) {
+                await this.outboxService.enqueueEmail({
+                  recipient: user.email,
+                  recipientName: user.firstName,
+                  subject,
+                  content: text,
+                  htmlContent: html,
+                  priority: NotificationPriority.HIGH,
+                  metadata: { source: 'membership_suspension_warning', memberId: currentMembership.memberId },
+                });
+              }
+              if (user.phone) {
+                await this.outboxService.enqueueWhatsapp({
+                  recipient: user.phone,
+                  recipientName: user.firstName,
+                  content: text,
+                  priority: NotificationPriority.HIGH,
+                  metadata: { source: 'membership_suspension_warning', memberId: currentMembership.memberId },
+                });
+              }
               notified++;
-              console.log(`[MembershipsService] 📧 Notificación de suspensión próxima enviada - Miembro: ${currentMembership.memberId}`);
+              console.log(`[MembershipsService] 📧 Notificación de suspensión próxima encolada en Outbox - Miembro: ${currentMembership.memberId}`);
             } catch (emailError) {
-              console.warn(`[MembershipsService] Error enviando notificación: ${emailError.message}`);
+              console.warn(`[MembershipsService] Error encolando notificación: ${emailError.message}`);
             }
           }
 
@@ -748,63 +786,19 @@ export class MembershipsService {
               }
             } catch(e) {}
             
-            console.log(`[MembershipsService] ⛔ Membresía suspendida - Miembro: ${currentMembership.memberId}, Días vencido: ${daysSinceDue}`);
+            console.log(`[MembershipsService] ⛔ Membresía suspendida por falta de pago - Miembro: ${currentMembership.memberId}, Días vencido: ${daysSinceDue}`);
             suspended++;
           } else {
-            // Renovar con pago pendiente y crear nuevo Payment
-            await this.renewMembershipWithPendingPayment(currentMembership);
-            
-            // Sincronizar ZKAccess con días de gracia sumados
-            try {
-              const accEndDate = new Date(currentMembership.endDate);
-              accEndDate.setDate(accEndDate.getDate() + suspensionDays);
-              
-              if (currentMembership.member?.user) {
-                await this.accessService.pushMemberToAccess({
-                  Badgenumber: currentMembership.member.memberCode.replace(/[^0-9]/g, ''),
-                  name: currentMembership.member.user.firstName,
-                  lastname: currentMembership.member.user.lastName,
-                  email: currentMembership.member.user.email,
-                  acc_startdate: new Date(currentMembership.startDate).toISOString().split('T')[0],
-                  acc_enddate: accEndDate.toISOString().split('T')[0],
-                });
-              }
-            } catch(e) {
-              console.error(`[MembershipsService] Error sync ZKAccess:`, e);
-            }
-            
-            console.log(`[MembershipsService] ✅ Membresía renovada con pago pendiente - Miembro: ${currentMembership.memberId}`);
-            renewed++;
+            console.log(`[MembershipsService] ⏳ Membresía pendiente en periodo de gracia (${daysSinceDue}/${suspensionDays} días) - Miembro: ${currentMembership.memberId}`);
           }
         } else if (membershipPayment && membershipPayment.status === PaymentStatus.COMPLETED) {
-          // Si ya pagó, renovar automáticamente
-          const newStartDate = currentMembership.endDate;
-          const newEndDate = new Date(newStartDate);
-          newEndDate.setMonth(newEndDate.getMonth() + currentMembership.membership.durationMonths);
-
-          currentMembership.startDate = newStartDate;
-          currentMembership.endDate = newEndDate;
-          currentMembership.isActive = true;
-          
-          // Crear nuevo pago completado para el registro
-          const renewalPayment = new Payment();
-          renewalPayment.id = uuidv4();
-          renewalPayment.amount = parseFloat(currentMembership.membership.price as any) || 0;
-          renewalPayment.status = PaymentStatus.COMPLETED;
-          renewalPayment.paymentMethod = PaymentMethod.CASH;
-          renewalPayment.paymentType = PaymentType.MEMBERSHIP;
-          renewalPayment.paymentDate = today;
-          renewalPayment.description = `Auto-renewal for membership: ${currentMembership.membership.name}`;
-          const savedPayment = await this.paymentRepository.save(renewalPayment);
-          
-          currentMembership.paymentId = savedPayment.id;
-          currentMembership.payAmount = renewalPayment.amount as any;
-          
-          await this.memberMembershipRepository.save(currentMembership);
+          // El ciclo anterior fue pagado satisfactoriamente y ha expirado.
+          // Renovar al siguiente periodo y generar nuevo pago en PENDIENTE.
+          await this.renewMembershipWithPendingPayment(currentMembership);
           
           // Sincronizar ZKAccess con días de gracia sumados
           try {
-            const accEndDate = new Date(newEndDate);
+            const accEndDate = new Date(currentMembership.endDate);
             accEndDate.setDate(accEndDate.getDate() + suspensionDays);
             
             if (currentMembership.member?.user) {
@@ -821,7 +815,7 @@ export class MembershipsService {
             console.error(`[MembershipsService] Error sync ZKAccess:`, e);
           }
           
-          console.log(`[MembershipsService] ✅ Membresía renovada automáticamente (pago completado) - Miembro: ${currentMembership.memberId}`);
+          console.log(`[MembershipsService] ✅ Membresía recurrente renovada con nuevo cobro pendiente - Miembro: ${currentMembership.memberId}`);
           renewed++;
         }
       } catch (error) {
@@ -1121,16 +1115,19 @@ export class MembershipsService {
           <p>¡Gracias por tu pago!</p>
         `;
 
-        console.log(`[MembershipsService] 📧 Enviando email a: ${memberEmail}`);
+        console.log(`[MembershipsService] 📧 Encolando email de confirmación a: ${memberEmail}`);
         
-        const emailResult = await this.emailService.sendEmail({
-          recipientEmail: memberEmail,
+        await this.outboxService.enqueueEmail({
+          recipient: memberEmail,
           recipientName: memberName,
           subject: `✓ Pago Confirmado - ${membershipName}`,
           htmlContent,
+          content: `Pago Confirmado - ${membershipName}. Tu membresía está activa y disponible para usar. ¡Gracias por tu pago!`,
+          priority: NotificationPriority.URGENT,
+          metadata: { source: 'payment_confirmation', memberName },
         });
         
-        console.log(`[MembershipsService] ✅ Email de pago enviado exitosamente. Log ID: ${emailResult?.id}`);
+        console.log(`[MembershipsService] ✅ Email de pago encolado exitosamente en Outbox`);
       } else {
         console.log(`[MembershipsService] ⚠️  No se pudo enviar email - Usuario sin email o no encontrado`);
       }

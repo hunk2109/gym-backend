@@ -10,6 +10,8 @@ import { MemberMembership } from '../../entities/member-membership.entity';
 import { GymSettingsService } from '../gym-settings/gym-settings.service';
 import { CronLoggingService } from './cron-logging.service';
 import { WhatsappService } from '../whatsapp-settings/whatsapp.service';
+import { OutboxService } from '../outbox/outbox.service';
+import { NotificationPriority } from '../outbox/entities/notification-outbox.entity';
 
 @Injectable()
 export class PaymentReminderService {
@@ -26,6 +28,7 @@ export class PaymentReminderService {
     private gymSettingsService: GymSettingsService,
     private cronLoggingService: CronLoggingService,
     private whatsappService: WhatsappService,
+    private outboxService: OutboxService,
   ) {}
 
   async createReminder(dto: CreatePaymentReminderDto): Promise<PaymentReminder> {
@@ -83,11 +86,19 @@ export class PaymentReminderService {
 
   // ============ AUTOMATED TASKS ============
 
+  private isRunning = false;
+
   /**
    * Ejecutarse cada 30 minutos para enviar recordatorios de pago
    */
   @Cron(CronExpression.EVERY_30_MINUTES)
   async sendPaymentReminders() {
+    if (this.isRunning) {
+      this.logger.warn('PaymentReminderJob ya está en ejecución, omitiendo');
+      return;
+    }
+
+    this.isRunning = true;
     const startTime = Date.now();
     const logId = await this.cronLoggingService.logCronStart(
       'PaymentReminderJob',
@@ -129,6 +140,8 @@ export class PaymentReminderService {
         executionTimeMs,
       );
       this.logger.error('Error sending payment reminders', error);
+    } finally {
+      this.isRunning = false;
     }
   }
 
@@ -177,22 +190,27 @@ export class PaymentReminderService {
       const sendWhatsapp = notificationChannel === 'both' || notificationChannel === 'whatsapp';
 
       if (sendEmail && memberUser.email) {
-        await this.emailService.sendEmailDirect({
-          to: memberUser.email,
+        await this.outboxService.enqueueEmail({
+          recipient: memberUser.email,
+          recipientName: `${memberUser.firstName} ${memberUser.lastName}`,
           subject,
-          html: htmlContent,
-          text: plainText,
+          htmlContent,
+          content: plainText,
+          priority: NotificationPriority.HIGH,
+          metadata: { source: 'payment_reminder', reminderId: reminder.id, memberId: member.id },
         });
-        this.logger.log(`Payment reminder email sent to ${memberUser.email}`);
+        this.logger.log(`Payment reminder email encolado en Outbox para ${memberUser.email}`);
       }
 
       if (sendWhatsapp && memberUser.phone) {
-        try {
-          await this.whatsappService.sendMessage(memberUser.phone, plainText);
-          this.logger.log(`Payment reminder whatsapp sent to ${memberUser.phone}`);
-        } catch (waError) {
-          this.logger.error(`Failed to send WhatsApp reminder to ${memberUser.phone}:`, waError);
-        }
+        await this.outboxService.enqueueWhatsapp({
+          recipient: memberUser.phone,
+          recipientName: `${memberUser.firstName} ${memberUser.lastName}`,
+          content: plainText,
+          priority: NotificationPriority.HIGH,
+          metadata: { source: 'payment_reminder', reminderId: reminder.id, memberId: member.id },
+        });
+        this.logger.log(`Payment reminder WhatsApp encolado en Outbox para ${memberUser.phone}`);
       }
 
       // Actualizar recordatorio

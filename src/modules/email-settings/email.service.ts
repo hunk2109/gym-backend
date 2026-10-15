@@ -37,14 +37,15 @@ export class EmailService {
   /**
    * Inicializa el transportador de nodemailer basado en la configuración activa
    */
-  private async initializeTransporter() {
+  public async initializeTransporter() {
     try {
       const activeConfig = await this.emailConfigRepository.findOne({
-        where: { isActive: true, isVerified: true },
+        where: { isActive: true },
       });
 
       if (!activeConfig) {
         this.logger.warn('No active email configuration found');
+        this.transporter = undefined as any;
         return;
       }
 
@@ -61,14 +62,23 @@ export class EmailService {
   private async createTransporter(config: EmailConfig): Promise<nodemailer.Transporter> {
     switch (config.provider) {
       case EmailProvider.GOOGLE:
+        if (config.clientId && config.clientSecret && config.refreshToken) {
+          return nodemailer.createTransport({
+            service: 'gmail',
+            auth: {
+              type: 'OAuth2',
+              user: config.email,
+              clientId: config.clientId,
+              clientSecret: config.clientSecret,
+              refreshToken: config.refreshToken,
+            },
+          });
+        }
         return nodemailer.createTransport({
           service: 'gmail',
           auth: {
             user: config.email,
             pass: config.password,
-            clientId: config.clientId,
-            clientSecret: config.clientSecret,
-            refreshToken: config.refreshToken,
           },
         });
 
@@ -105,11 +115,15 @@ export class EmailService {
   async sendEmail(dto: SendEmailDto): Promise<EmailLog> {
     try {
       if (!this.transporter) {
+        await this.initializeTransporter();
+      }
+
+      if (!this.transporter) {
         throw new BadRequestException('Email service not configured');
       }
 
       const config = await this.emailConfigRepository.findOne({
-        where: { isActive: true, isVerified: true },
+        where: { isActive: true },
       });
 
       if (!config) {
@@ -263,7 +277,7 @@ export class EmailService {
   /**
    * Verifica la configuración de correo intentando enviar un correo de prueba
    */
-  async verifyEmailConfig(configId: string, testEmail: string): Promise<boolean> {
+  async verifyEmailConfig(configId: string, testEmail?: string): Promise<boolean> {
     try {
       const config = await this.emailConfigRepository.findOne({
         where: { id: configId },
@@ -285,6 +299,27 @@ export class EmailService {
 
       // Reinicializar transportador
       await this.initializeTransporter();
+
+      // Si se proporcionó un correo para probar envío real, enviarlo ahora
+      if (testEmail && testEmail.trim().length > 0) {
+        try {
+          await transporter.sendMail({
+            from: `${config.senderName || 'Gym Manager'} <${config.email}>`,
+            to: testEmail.trim(),
+            subject: 'Verificación de Correo - Gym Manager',
+            text: `Hola, esta es una verificación de correo exitosa desde Gym Manager (${config.email}).`,
+            html: `<div style="font-family:sans-serif;padding:24px;border:1px solid #e0e0e0;border-radius:10px;max-width:500px;background:#ffffff;color:#333333;">` +
+                  `<h2 style="color:#4CAF50;margin-top:0;">✓ Verificación Exitosa</h2>` +
+                  `<p>El servidor de correo saliente de <b>Gym Manager</b> ha sido configurado y verificado correctamente.</p>` +
+                  `<p><b>Remitente Configurado:</b> ${config.email}<br/><b>Proveedor:</b> ${config.provider}</p>` +
+                  `<p style="font-size:12px;color:#777;">Ya puedes enviar facturas, recibos, recordatorios y alertas por correo a tus socios.</p>` +
+                  `</div>`,
+          });
+          this.logger.log(`Test verification email sent to ${testEmail}`);
+        } catch (sendErr) {
+          this.logger.warn(`Transporter verified successfully, but sending test email failed: ${sendErr.message}`);
+        }
+      }
 
       return true;
     } catch (error) {

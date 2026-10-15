@@ -43,6 +43,8 @@ import { CashRegisterTransaction } from './entities/cash-register-transaction.en
 import { Campaign } from './entities/campaign.entity';
 import { RolePermission } from './entities/role-permission.entity';
 import { CampaignsModule } from './modules/campaigns/campaigns.module';
+import { NotificationOutbox } from './modules/outbox/entities/notification-outbox.entity';
+import { OutboxModule } from './modules/outbox/outbox.module';
 
 import { AuthModule } from './modules/auth/auth.module';
 import { AccountingModule } from './modules/accounting/accounting.module';
@@ -117,7 +119,8 @@ import { LoggerMiddleware } from './common/middleware';
           username,
           password,
           database,
-          entities: [User, Product, Equipment, Sale, SaleItem, GymSettings, Employee, Member, Membership, MembershipAccessSchedule, MemberMembership, Group, GroupCompanion, GymClass, ClassEnrollment, Payment, Payroll, AuditLog, ModuleSettings, CashRegister, Coupon, Promotion, Campaign, EmailConfig, EmailTemplate, EmailLog, PaymentReminder, CronExecutionLog, Attendance, Table, TableAccount, TableAccountItem, AppConfig, AccountPayable, AccountReceivable, CashRegisterTransaction, RolePermission],
+          timezone: 'local',
+          entities: [User, Product, Equipment, Sale, SaleItem, GymSettings, Employee, Member, Membership, MembershipAccessSchedule, MemberMembership, Group, GroupCompanion, GymClass, ClassEnrollment, Payment, Payroll, AuditLog, ModuleSettings, CashRegister, Coupon, Promotion, Campaign, EmailConfig, EmailTemplate, EmailLog, PaymentReminder, CronExecutionLog, Attendance, Table, TableAccount, TableAccountItem, AppConfig, AccountPayable, AccountReceivable, CashRegisterTransaction, RolePermission, NotificationOutbox],
           synchronize: true,
           logging: false,
         };
@@ -159,6 +162,7 @@ import { LoggerMiddleware } from './common/middleware';
     SyncModule,
     WhatsappSettingsModule,
     AccountingModule,
+    OutboxModule,
   ],
   controllers: [],
   providers: [

@@ -13,6 +13,8 @@ import { GymSettingsService } from '../gym-settings/gym-settings.service';
 import { CouponsService } from '../coupons/coupons.service';
 import { EmailDuplicateCheckerService } from './email-duplicate-checker.service';
 import { CronLoggingService } from './cron-logging.service';
+import { OutboxService } from '../outbox/outbox.service';
+import { NotificationPriority } from '../outbox/entities/notification-outbox.entity';
 
 @Injectable()
 export class AutoEmailService {
@@ -35,6 +37,7 @@ export class AutoEmailService {
     private couponsService: CouponsService,
     private duplicateChecker: EmailDuplicateCheckerService,
     private cronLoggingService: CronLoggingService,
+    private outboxService: OutboxService,
   ) {}
 
   /**
@@ -54,6 +57,12 @@ export class AutoEmailService {
 
       // Obtener configuración del gym
       const gymSettings = await this.getGymSettings();
+      if (gymSettings?.enableExpirationWarnings === false) {
+        this.logger.log('Avisos preventivos de vencimiento desactivados en configuración');
+        await this.cronLoggingService.logCronSuccess(logId, 0, Date.now() - startTime);
+        return;
+      }
+
       const gymConfig: GymConfig = {
         gymName: gymSettings?.gymName || 'Gym Manager',
         email: gymSettings?.email || '',
@@ -62,9 +71,8 @@ export class AutoEmailService {
         website: gymSettings?.website,
       };
 
-      // Ejecutar todos los procesos y contar emails enviados
+      // Ejecutar procesos de vencimiento (los cumpleaños se gestionan centralizadamente a las 8 AM en BirthdayEmailScheduler)
       const results = await Promise.all([
-        this.checkBirthdayEmails(gymConfig),
         this.checkMembershipDueToday(gymConfig),
         this.checkMembershipDueSoon(gymConfig),
         this.checkMembershipOverdue(gymConfig),
@@ -252,15 +260,26 @@ export class AutoEmailService {
           gymConfig
         );
 
-        await this.emailService.sendEmail({
-          recipientEmail: member.user.email,
+        await this.outboxService.enqueueEmail({
+          recipient: member.user.email,
           recipientName: member.user.firstName,
           subject,
           htmlContent,
-          plainTextContent: message,
+          content: message,
+          priority: NotificationPriority.HIGH,
+          metadata: { source: 'auto_email_due_today', memberId: member.id },
         });
 
-        // ✅ REGISTRAR EN LOG
+        if (member.user.phone) {
+          await this.outboxService.enqueueWhatsapp({
+            recipient: member.user.phone,
+            recipientName: member.user.firstName,
+            content: message,
+            priority: NotificationPriority.HIGH,
+            metadata: { source: 'auto_email_due_today', memberId: member.id },
+          });
+        }
+
         // ✅ REGISTRAR EN LOG en checkMembershipDueToday
         const logDueToday = this.emailLogRepository.create({
           recipientEmail: member.user.email,
@@ -274,7 +293,7 @@ export class AutoEmailService {
         });
         await this.emailLogRepository.save(logDueToday);
 
-        this.logger.log(`✅ Email de vencimiento hoy enviado a: ${member.user.email}`);
+        this.logger.log(`✅ Aviso de vencimiento hoy encolado en Outbox para: ${member.user.email}`);
         emailsSent++;
       }
     } catch (error) {
@@ -342,13 +361,25 @@ export class AutoEmailService {
           gymConfig
         );
 
-        await this.emailService.sendEmail({
-          recipientEmail: member.user.email,
+        await this.outboxService.enqueueEmail({
+          recipient: member.user.email,
           recipientName: member.user.firstName,
           subject,
           htmlContent,
-          plainTextContent: message,
+          content: message,
+          priority: NotificationPriority.HIGH,
+          metadata: { source: 'auto_email_due_soon', memberId: member.id },
         });
+
+        if (member.user.phone) {
+          await this.outboxService.enqueueWhatsapp({
+            recipient: member.user.phone,
+            recipientName: member.user.firstName,
+            content: message,
+            priority: NotificationPriority.HIGH,
+            metadata: { source: 'auto_email_due_soon', memberId: member.id },
+          });
+        }
 
         // ✅ REGISTRAR EN LOG
         const logDueSoon = this.emailLogRepository.create({
@@ -363,7 +394,7 @@ export class AutoEmailService {
         });
         await this.emailLogRepository.save(logDueSoon);
 
-        this.logger.log(`✅ Email de vencimiento próximo enviado a: ${member.user.email}`);
+        this.logger.log(`✅ Aviso de vencimiento próximo encolado en Outbox para: ${member.user.email}`);
         emailsSent++;
       }
     } catch (error) {
@@ -427,13 +458,25 @@ export class AutoEmailService {
           gymConfig
         );
 
-        await this.emailService.sendEmail({
-          recipientEmail: member.user.email,
+        await this.outboxService.enqueueEmail({
+          recipient: member.user.email,
           recipientName: member.user.firstName,
           subject,
           htmlContent,
-          plainTextContent: message,
+          content: message,
+          priority: NotificationPriority.HIGH,
+          metadata: { source: 'auto_email_overdue', memberId: member.id },
         });
+
+        if (member.user.phone) {
+          await this.outboxService.enqueueWhatsapp({
+            recipient: member.user.phone,
+            recipientName: member.user.firstName,
+            content: message,
+            priority: NotificationPriority.HIGH,
+            metadata: { source: 'auto_email_overdue', memberId: member.id },
+          });
+        }
 
         // ✅ REGISTRAR EN LOG
         const logOverdue = this.emailLogRepository.create({
@@ -448,7 +491,7 @@ export class AutoEmailService {
         });
         await this.emailLogRepository.save(logOverdue);
 
-        this.logger.log(`✅ Email de membresía vencida enviado a: ${member.user.email}`);
+        this.logger.log(`✅ Aviso de membresía vencida encolado en Outbox para: ${member.user.email}`);
         emailsSent++;
       }
     } catch (error) {

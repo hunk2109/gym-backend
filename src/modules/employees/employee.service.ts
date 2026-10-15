@@ -14,6 +14,8 @@ import { GymSettingsService } from '../gym-settings/gym-settings.service';
 import { AccessService } from '../sync/access.service';
 import { ZktecoDeviceService } from '../sync/zkteco-device.service';
 import { WhatsappService, WhatsappStatus } from '../whatsapp-settings/whatsapp.service';
+import { OutboxService } from '../outbox/outbox.service';
+import { NotificationPriority } from '../outbox/entities/notification-outbox.entity';
 
 @Injectable()
 export class EmployeeService {
@@ -33,6 +35,7 @@ export class EmployeeService {
     private accessService: AccessService,
     private zktecoDeviceService: ZktecoDeviceService,
     private whatsappService: WhatsappService,
+    private outboxService: OutboxService,
   ) {}
 
   async create(createDto: CreateEmployeeDto, authUser?: any): Promise<Employee> {
@@ -511,8 +514,8 @@ export class EmployeeService {
 
       // Si no está explícitamente desactivado (false), procedemos a enviar
       if (sendWelcomeEmail !== false) {
-        await this.emailService.sendEmail({
-          recipientEmail: employee.email,
+        await this.outboxService.enqueueEmail({
+          recipient: employee.email,
           recipientName: `${employee.firstName} ${employee.lastName}`,
           subject: `¡Bienvenido a ${gymName}! - Acceso de Empleado`,
           htmlContent: this.generateEmployeeWelcomeEmailHTML(
@@ -521,9 +524,12 @@ export class EmployeeService {
             tempPassword,
             gymName,
           ),
+          content: `Bienvenido a ${gymName}. Tus credenciales: Email: ${employee.email}, Contraseña temporal: ${tempPassword}`,
+          priority: NotificationPriority.URGENT,
+          metadata: { source: 'employee_credentials', employeeId: employee.id },
         });
         emailSent = true;
-        this.logger.log(`Credentials email sent to ${employee.email}`);
+        this.logger.log(`Credentials email encolado en Outbox para ${employee.email}`);
       } else {
         this.logger.log(`Welcome email is explicitly disabled in settings for employees.`);
       }
@@ -537,22 +543,22 @@ export class EmployeeService {
     const targetPhone = employee.phone || user.phone;
     if (targetPhone) {
       try {
-        const statusInfo = this.whatsappService.getStatus();
-        if (statusInfo && statusInfo.status === WhatsappStatus.CONNECTED) {
-          const accessInfo = employee.accessCode ? `\n🏢 *Código de Acceso / Biométrico:* ${employee.accessCode}` : '';
-          const waMessage = `🏋️ *¡Bienvenido al equipo de ${gymName}!*\n\nHola *${employee.firstName}*, aquí tienes tus credenciales de acceso al sistema:\n\n📧 *Email:* ${employee.email}\n🔑 *Contraseña temporal:* ${tempPassword}${accessInfo}\n\n⚠️ *Importante:* Al iniciar sesión te recomendamos cambiar tu contraseña desde tu perfil.\nPor seguridad no compartas estos datos con nadie.`;
-          await this.whatsappService.sendMessage(targetPhone, waMessage);
-          whatsappSent = true;
-          this.logger.log(`Credentials WhatsApp sent to ${targetPhone}`);
-        } else {
-          const msg = `WhatsApp no está conectado (estado actual: ${statusInfo?.status || 'DESCONECTADO'})`;
-          errors.push(msg);
-          this.logger.warn(`Cannot send WhatsApp credentials to ${targetPhone}: ${msg}`);
-        }
+        const accessInfo = employee.accessCode ? `\n🏢 *Código de Acceso / Biométrico:* ${employee.accessCode}` : '';
+        const waMessage = `🏋️ *¡Bienvenido al equipo de ${gymName}!*\n\nHola *${employee.firstName}*, aquí tienes tus credenciales de acceso al sistema:\n\n📧 *Email:* ${employee.email}\n🔑 *Contraseña temporal:* ${tempPassword}${accessInfo}\n\n⚠️ *Importante:* Al iniciar sesión te recomendamos cambiar tu contraseña desde tu perfil.\nPor seguridad no compartas estos datos con nadie.`;
+
+        await this.outboxService.enqueueWhatsapp({
+          recipient: targetPhone,
+          recipientName: `${employee.firstName} ${employee.lastName}`,
+          content: waMessage,
+          priority: NotificationPriority.URGENT,
+          metadata: { source: 'employee_credentials', employeeId: employee.id },
+        });
+        whatsappSent = true;
+        this.logger.log(`Credentials WhatsApp encolado en Outbox para ${targetPhone}`);
       } catch (waError) {
         const msg = `WhatsApp error: ${waError.message || waError}`;
         errors.push(msg);
-        this.logger.error(`Failed to send credentials WhatsApp to ${targetPhone}`, waError);
+        this.logger.error(`Failed to enqueue WhatsApp credentials to ${targetPhone}`, waError);
       }
     } else {
       errors.push('El empleado no posee número de teléfono registrado');

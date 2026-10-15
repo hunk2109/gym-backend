@@ -47,6 +47,21 @@ export class EmailSettingsController {
     return this.emailConfigService.getAllConfigs();
   }
 
+  @Get('config/current')
+  async getCurrentEmailConfig() {
+    return this.emailConfigService.getActiveOrLatestConfig();
+  }
+
+  @Post('config/save')
+  async saveEmailConfig(@Body() dto: CreateEmailConfigDto) {
+    return this.emailConfigService.saveOrUpdateConfig(dto);
+  }
+
+  @Post('config/verify-active')
+  async verifyActiveEmailConfig(@Body() dto: SendTestEmailDto) {
+    return this.emailConfigService.verifyActiveConfig(dto.recipientEmail);
+  }
+
   @Get('config/:id')
   async getEmailConfig(@Param('id') id: string) {
     return this.emailConfigService.getConfigById(id);

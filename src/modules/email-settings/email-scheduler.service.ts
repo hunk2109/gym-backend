@@ -12,6 +12,8 @@ import { SendEmailDto } from './dto';
 import { GymSettingsService } from '../gym-settings/gym-settings.service';
 import { CronLoggingService } from './cron-logging.service';
 import { WhatsappService } from '../whatsapp-settings/whatsapp.service';
+import { OutboxService } from '../outbox/outbox.service';
+import { NotificationPriority } from '../outbox/entities/notification-outbox.entity';
 
 @Injectable()
 export class EmailSchedulerService {
@@ -33,6 +35,7 @@ export class EmailSchedulerService {
     private gymSettingsService: GymSettingsService,
     private cronLoggingService: CronLoggingService,
     private whatsappService: WhatsappService,
+    private outboxService: OutboxService,
   ) {}
 
   /**
@@ -111,34 +114,41 @@ export class EmailSchedulerService {
           const sendEmail = notificationChannel === 'both' || notificationChannel === 'email';
           const sendWhatsapp = notificationChannel === 'both' || notificationChannel === 'whatsapp';
 
+          let rawHtml = template.htmlContent || '<p>¡Feliz Cumpleaños!</p>';
+          let rawSubject = template.subject || '¡Feliz Cumpleaños!';
+          for (const [key, value] of Object.entries(variables)) {
+            const regex = new RegExp(`{{\\s*${key}\\s*}}`, 'g');
+            rawHtml = rawHtml.replace(regex, value as string);
+            rawSubject = rawSubject.replace(regex, value as string);
+          }
+          const plainText = rawHtml.replace(/<[^>]*>?/gm, '').trim();
+
           if (sendEmail && user.email) {
-            await this.emailService.sendEmail({
-              templateId: template.id,
-              recipientEmail: user.email,
+            await this.outboxService.enqueueEmail({
+              recipient: user.email,
               recipientName: `${user.firstName} ${user.lastName}`,
-              memberId: member.id,
-              variables,
+              subject: rawSubject,
+              htmlContent: rawHtml,
+              content: plainText,
+              priority: NotificationPriority.NORMAL,
+              metadata: { source: 'birthday_scheduler', memberId: member.id, templateId: template.id },
             });
-            this.logger.log(`Birthday email sent to ${user.email}`);
+            this.logger.log(`Birthday email encolado en Outbox para ${user.email}`);
             emailsSent++;
           }
 
           if (sendWhatsapp && user.phone) {
-            let rawText = template.htmlContent || '¡Feliz Cumpleaños!';
-            for (const [key, value] of Object.entries(variables)) {
-              const regex = new RegExp(`{{\\s*${key}\\s*}}`, 'g');
-              rawText = rawText.replace(regex, value as string);
-            }
-            const plainText = rawText.replace(/<[^>]*>?/gm, '').trim();
-            try {
-              await this.whatsappService.sendMessage(user.phone, plainText);
-              this.logger.log(`Birthday whatsapp sent to ${user.phone}`);
-            } catch (waError) {
-              this.logger.error(`Failed to send WhatsApp to ${user.phone}:`, waError);
-            }
+            await this.outboxService.enqueueWhatsapp({
+              recipient: user.phone,
+              recipientName: `${user.firstName} ${user.lastName}`,
+              content: plainText,
+              priority: NotificationPriority.NORMAL,
+              metadata: { source: 'birthday_scheduler', memberId: member.id },
+            });
+            this.logger.log(`Birthday whatsapp encolado en Outbox para ${user.phone}`);
           }
         } catch (error) {
-          this.logger.error(`Failed to send birthday email to member ${member.id}`, error);
+          this.logger.error(`Failed to enqueue birthday notification to member ${member.id}`, error);
         }
       }
 
@@ -189,11 +199,16 @@ export class EmailSchedulerService {
         return;
       }
 
-      // Obtener nombre del gimnasio
+      // Obtener configuración del gimnasio
       let gymName = 'GYM Manager';
       let notificationChannel = 'both';
       try {
         const gymSettings = await this.gymSettingsService.getSettings();
+        if (gymSettings?.enableAnniversaryEmails === false) {
+          this.logger.log('Anniversary emails are disabled in gym settings');
+          await this.cronLoggingService.logCronSuccess(logId, 0, Date.now() - startTime);
+          return;
+        }
         if (gymSettings?.gymName) {
           gymName = gymSettings.gymName;
         }
@@ -229,34 +244,41 @@ export class EmailSchedulerService {
           const sendEmail = notificationChannel === 'both' || notificationChannel === 'email';
           const sendWhatsapp = notificationChannel === 'both' || notificationChannel === 'whatsapp';
 
+          let rawHtml = template.htmlContent || '<p>¡Feliz Aniversario!</p>';
+          let rawSubject = template.subject || '¡Feliz Aniversario en el Gimnasio!';
+          for (const [key, value] of Object.entries(variables)) {
+            const regex = new RegExp(`{{\\s*${key}\\s*}}`, 'g');
+            rawHtml = rawHtml.replace(regex, value as string);
+            rawSubject = rawSubject.replace(regex, value as string);
+          }
+          const plainText = rawHtml.replace(/<[^>]*>?/gm, '').trim();
+
           if (sendEmail && user.email) {
-            await this.emailService.sendEmail({
-              templateId: template.id,
-              recipientEmail: user.email,
+            await this.outboxService.enqueueEmail({
+              recipient: user.email,
               recipientName: `${user.firstName} ${user.lastName}`,
-              memberId: member.id,
-              variables,
+              subject: rawSubject,
+              htmlContent: rawHtml,
+              content: plainText,
+              priority: NotificationPriority.NORMAL,
+              metadata: { source: 'anniversary_scheduler', memberId: member.id, templateId: template.id },
             });
-            this.logger.log(`Anniversary email sent to ${user.email}`);
+            this.logger.log(`Anniversary email encolado en Outbox para ${user.email}`);
             emailsSent++;
           }
 
           if (sendWhatsapp && user.phone) {
-            let rawText = template.htmlContent || '¡Feliz Aniversario!';
-            for (const [key, value] of Object.entries(variables)) {
-              const regex = new RegExp(`{{\\s*${key}\\s*}}`, 'g');
-              rawText = rawText.replace(regex, value as string);
-            }
-            const plainText = rawText.replace(/<[^>]*>?/gm, '').trim();
-            try {
-              await this.whatsappService.sendMessage(user.phone, plainText);
-              this.logger.log(`Anniversary whatsapp sent to ${user.phone}`);
-            } catch (waError) {
-              this.logger.error(`Failed to send WhatsApp to ${user.phone}:`, waError);
-            }
+            await this.outboxService.enqueueWhatsapp({
+              recipient: user.phone,
+              recipientName: `${user.firstName} ${user.lastName}`,
+              content: plainText,
+              priority: NotificationPriority.NORMAL,
+              metadata: { source: 'anniversary_scheduler', memberId: member.id },
+            });
+            this.logger.log(`Anniversary whatsapp encolado en Outbox para ${user.phone}`);
           }
         } catch (error) {
-          this.logger.error(`Failed to send anniversary email to member ${anniversary.member.id}`, error);
+          this.logger.error(`Failed to enqueue anniversary notification to member ${anniversary.member.id}`, error);
         }
       }
 

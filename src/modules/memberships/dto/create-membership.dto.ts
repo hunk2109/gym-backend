@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsNumber, IsBoolean, IsArray, IsDate, IsEnum } from 'class-validator';
+import { IsString, IsOptional, IsNumber, IsBoolean, IsArray, IsDate, IsEnum, ValidateIf } from 'class-validator';
 import { Transform } from 'class-transformer';
 import { MembershipType, PriceType } from '../../../entities/membership.entity';
 
@@ -90,12 +90,27 @@ export class UpdateMembershipDto {
   durationMonths?: number;
 
   @IsOptional()
+  @ValidateIf((o, value) => value !== null && value !== undefined)
   @IsNumber()
-  durationDays?: number; // Para membresías no recurrentes (días específicos en lugar de meses)
+  durationDays?: number | null; // Para membresías no recurrentes (días específicos en lugar de meses)
 
   @IsOptional()
   @IsArray()
   benefits?: string[];
+
+  @IsOptional()
+  @IsEnum(MembershipType)
+  @Transform(({ value }) => {
+    if (typeof value === 'string') {
+      return value.toLowerCase() as MembershipType;
+    }
+    return value;
+  })
+  type?: MembershipType;
+
+  @IsOptional()
+  @IsString()
+  parentMembershipId?: string;
 
   @IsOptional()
   @IsBoolean()
@@ -117,12 +132,14 @@ export class UpdateMembershipDto {
   priceType?: PriceType; // 'fixed' o 'variable'
 
   @IsOptional()
+  @ValidateIf((o, value) => value !== null && value !== undefined)
   @IsNumber()
-  pricePerCompanion?: number; // Precio adicional por cada acompañante (solo para membresías grupales)
+  pricePerCompanion?: number | null; // Precio adicional por cada acompañante (solo para membresías grupales)
 
   @IsOptional()
+  @ValidateIf((o, value) => value !== null && value !== undefined)
   @IsNumber()
-  maxGroupCompanions?: number;
+  maxGroupCompanions?: number | null;
 
   @IsOptional()
   @IsArray()

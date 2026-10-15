@@ -103,6 +103,10 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  public isConnected(): boolean {
+    return this.status === WhatsappStatus.CONNECTED;
+  }
+
   public async logout() {
     this.logger.log('Logging out from WhatsApp...');
     if (this.client) {
