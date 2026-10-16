@@ -201,8 +201,18 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
       // 2. Generate PDF using Puppeteer
       this.logger.log('Generating PDF from HTML content...');
       const browser = await puppeteer.launch({
-        headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox']
+        headless: 'shell',
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--no-startup-window',
+          '--no-first-run',
+          '--no-default-browser-check',
+          '--disable-gpu',
+          '--hide-scrollbars',
+          '--mute-audio',
+        ],
       });
       
       const page = await browser.newPage();

@@ -506,8 +506,18 @@ export class DailySummaryService {
       let pdfBuffer: Buffer;
       try {
         browser = await puppeteer.launch({ 
-          headless: true, 
-          args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'] 
+          headless: 'shell', 
+          args: [
+            '--no-sandbox', 
+            '--disable-setuid-sandbox', 
+            '--disable-dev-shm-usage',
+            '--no-startup-window',
+            '--no-first-run',
+            '--no-default-browser-check',
+            '--disable-gpu',
+            '--hide-scrollbars',
+            '--mute-audio',
+          ],
         });
         const page = await browser.newPage();
         try {
