@@ -2,7 +2,7 @@ import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ScheduleModule } from '@nestjs/schedule';
 import { EmailConfig, EmailTemplate, EmailLog, PaymentReminder } from './entities';
-import { CronExecutionLog } from './entities/cron-execution-log.entity';
+import { CronExecutionLog } from '../../entities/cron-execution-log.entity';
 import { BulkPromotion } from '../../entities/bulk-promotion.entity';
 import { Member } from '../../entities/member.entity';
 import { User } from '../../entities/user.entity';

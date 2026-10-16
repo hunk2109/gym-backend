@@ -32,7 +32,7 @@ import { CashRegister } from './entities/cash-register.entity';
 import { Coupon } from './entities/coupon.entity';
 import { Promotion } from './modules/promotions/entities/promotion.entity';
 import { EmailConfig, EmailTemplate, EmailLog, PaymentReminder } from './modules/email-settings/entities';
-import { CronExecutionLog } from './modules/email-settings/entities/cron-execution-log.entity';
+import { CronExecutionLog } from './entities/cron-execution-log.entity';
 import { Table } from './entities/table.entity';
 import { TableAccount } from './entities/table-account.entity';
 import { TableAccountItem } from './entities/table-account-item.entity';
