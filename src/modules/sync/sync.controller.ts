@@ -236,6 +236,61 @@ export class SyncController {
   }
 
   /**
+   * GET /api/sync/zkteco-status
+   * Obtiene si la sincronización ZKTeco está habilitada en el sistema
+   */
+  @Get('zkteco-status')
+  @Public()
+  async getZktecoStatus() {
+    try {
+      const enabled = await this.configService.getConfig('ZKTECO_SYNC_ENABLED');
+      return {
+        success: true,
+        enabled: enabled !== 'false',
+      };
+    } catch (error) {
+      return {
+        success: false,
+        enabled: false,
+        error: error.message,
+      };
+    }
+  }
+
+  /**
+   * PUT /api/sync/zkteco-status
+   * Habilita o deshabilita la sincronización con equipos ZKTeco
+   */
+  @Put('zkteco-status')
+  @Public()
+  @HttpCode(200)
+  async setZktecoStatus(@Body() body: { enabled: boolean }) {
+    this.logger.log(`Endpoint: Sincronización ZKTeco establecida en: ${body.enabled}`);
+    try {
+      await this.configService.setConfig(
+        'ZKTECO_SYNC_ENABLED',
+        body.enabled ? 'true' : 'false',
+        'Indica si la integración con ZKTeco / Access está habilitada'
+      );
+      if (!body.enabled) {
+        this.syncService.disableAutoSync();
+      }
+      return {
+        success: true,
+        enabled: body.enabled,
+        message: body.enabled
+          ? 'Sincronización ZKTeco habilitada correctamente'
+          : 'Sincronización ZKTeco deshabilitada correctamente',
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error.message || 'Error guardando estado de ZKTeco',
+      };
+    }
+  }
+
+  /**
    * GET /api/sync/explore
    * Explora el disco del servidor para seleccionar base de datos Access
    */
