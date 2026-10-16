@@ -166,7 +166,15 @@ export class EmailService {
       };
 
       if (dto.attachments && dto.attachments.length > 0) {
-        mailOptions.attachments = dto.attachments;
+        mailOptions.attachments = dto.attachments.map((att: any) => {
+          if (att && typeof att.content === 'string') {
+            return {
+              ...att,
+              content: Buffer.from(att.content, att.encoding === 'utf8' || att.encoding === 'utf-8' ? 'utf8' : 'base64'),
+            };
+          }
+          return att;
+        });
       }
 
       const info = await this.transporter.sendMail(mailOptions);
@@ -381,13 +389,23 @@ export class EmailService {
         where: { isActive: true, isVerified: true },
       });
 
+      const normalizedAttachments = options.attachments?.map((att: any) => {
+        if (att && typeof att.content === 'string') {
+          return {
+            ...att,
+            content: Buffer.from(att.content, att.encoding === 'utf8' || att.encoding === 'utf-8' ? 'utf8' : 'base64'),
+          };
+        }
+        return att;
+      });
+
       await this.transporter.sendMail({
         from: `${config?.senderName || 'Gym Manager'} <${config?.email || 'noreply@gymmanager.com'}>`,
         to: options.to,
         subject: options.subject,
         html: options.html,
         text: options.text,
-        attachments: options.attachments,
+        attachments: normalizedAttachments,
       });
 
       this.logger.log(`Email sent to ${options.to}`);

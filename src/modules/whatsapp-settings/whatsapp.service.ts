@@ -248,8 +248,16 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
 
       // Send the PDF as media using base64 data directly
       this.logger.log(`Sending base64 PDF to ${cleanNumber}`);
-      const media = new MessageMedia('application/pdf', base64Data, filename);
-      await this.client.sendMessage(chatId, media, { caption: filename });
+      const media = new MessageMedia(
+        'application/pdf',
+        base64Data,
+        filename,
+        Buffer.byteLength(base64Data, 'base64'),
+      );
+      await this.client.sendMessage(chatId, media, {
+        caption: caption || filename,
+        sendMediaAsDocument: true,
+      });
 
       this.logger.log(`Base64 PDF sent successfully to ${cleanNumber}`);
       return true;

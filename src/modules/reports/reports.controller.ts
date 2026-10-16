@@ -1,8 +1,9 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
 import { ReportsService } from './reports.service';
 import { PromotionsReportService } from './promotions-report.service';
 import { BirthdayReportService } from './birthday-report.service';
 import { FinancialAnalyticsService, FinancialAnalyticsDto } from './financial-analytics.service';
+import { DailySummaryService } from './daily-summary.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -27,7 +28,18 @@ export class ReportsController {
     private promotionsReportService: PromotionsReportService,
     private birthdayReportService: BirthdayReportService,
     private financialAnalyticsService: FinancialAnalyticsService,
+    private dailySummaryService: DailySummaryService,
   ) {}
+
+  @Post('send-daily-summary')
+  @Roles(UserRole.ADMIN, UserRole.ENCARGADO)
+  async triggerManualDailySummary() {
+    await this.dailySummaryService.generateAndSendDailySummary();
+    return {
+      success: true,
+      message: 'Reporte de corte y resumen diario generado y enviado a los destinatarios.',
+    };
+  }
 
   @Get('analytics/financial-and-behavior')
   @Roles(UserRole.ADMIN, UserRole.ENCARGADO)

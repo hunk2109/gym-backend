@@ -163,24 +163,25 @@ export class FinancialAnalyticsService {
       .getRawOne();
     const payrollExpenses = parseFloat(payrolls?.total || 0);
 
-    // B) Cuentas por pagar / Gastos pagados en el periodo
-    const payablesRaw = await this.payableRepository
-      .createQueryBuilder('ap')
-      .select('SUM(ap.amountPaid)', 'total')
-      .where('ap.createdAt >= :start AND ap.createdAt <= :end OR ap.updatedAt >= :start AND ap.updatedAt <= :end', { start: startStr, end: endStr })
-      .andWhere('ap.status = :status', { status: AccountPayableStatus.PAID })
-      .getRawOne();
-    const operationalExpenses = parseFloat(payablesRaw?.total || 0);
-
-    // C) Retiros de caja manuales
+    // B) Salidas de efectivo / Gastos directos de caja
+    // Todo retiro de efectivo (type = 'out') representa un gasto operativo real de gaveta
     const cashWithdrawalsRaw = await this.cashTxRepository
       .createQueryBuilder('tx')
       .select('SUM(tx.amount)', 'total')
       .where('tx.createdAt >= :start AND tx.createdAt <= :end', { start: startStr, end: endStr })
       .andWhere('tx.type = :type', { type: CashRegisterTransactionType.OUT })
-      .andWhere('tx.referenceId IS NULL') // que no sea duplicado de cuenta por pagar
       .getRawOne();
     const cashWithdrawals = parseFloat(cashWithdrawalsRaw?.total || 0);
+
+    // C) Cuentas por pagar operativas pagadas por banco/otros métodos (que no sean retiros de caja)
+    const payablesRaw = await this.payableRepository
+      .createQueryBuilder('ap')
+      .select('SUM(ap.amountPaid)', 'total')
+      .where('(ap.createdAt >= :start AND ap.createdAt <= :end OR ap.updatedAt >= :start AND ap.updatedAt <= :end)', { start: startStr, end: endStr })
+      .andWhere('ap.status = :status', { status: AccountPayableStatus.PAID })
+      .andWhere('ap.isCashWithdrawal = :isCash', { isCash: false })
+      .getRawOne();
+    const operationalExpenses = parseFloat(payablesRaw?.total || 0);
 
     const totalExpenses = payrollExpenses + operationalExpenses + cashWithdrawals;
     const netProfit = totalRevenue - totalExpenses;

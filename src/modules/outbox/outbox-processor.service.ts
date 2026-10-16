@@ -167,6 +167,18 @@ export class OutboxProcessorService {
       } catch (_) {}
     }
 
+    if (attachments && Array.isArray(attachments)) {
+      attachments = attachments.map((att: any) => {
+        if (att && typeof att.content === 'string') {
+          return {
+            ...att,
+            content: Buffer.from(att.content, 'base64'),
+          };
+        }
+        return att;
+      });
+    }
+
     await this.emailService.sendEmail({
       recipientEmail: item.recipient,
       recipientName: item.recipientName,

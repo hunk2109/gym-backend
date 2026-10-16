@@ -28,7 +28,7 @@ export class EnqueueEmailDto {
   htmlContent?: string;
 
   @IsOptional()
-  attachments?: Array<{ filename: string; content?: any; base64?: string; contentType?: string }>;
+  attachments?: Array<{ filename: string; content?: any; base64?: string; contentType?: string; encoding?: string }>;
 
   @IsOptional()
   metadata?: Record<string, any>;
