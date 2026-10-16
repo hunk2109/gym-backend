@@ -227,23 +227,46 @@ export class MembersService {
       throw new BadRequestException('Member already exists for this user');
     }
 
-    // Generar código de miembro (YYYY-#### incremental)
-    const year = new Date().getFullYear().toString();
-    const lastMember = await this.memberRepository
-      .createQueryBuilder('member')
-      .where('member.memberCode LIKE :year', { year: `${year}-%` })
-      .orderBy('member.memberCode', 'DESC')
-      .limit(1)
-      .getOne();
+    // Obtener o sincronizar código de socio igual que en ZKAccess (secuencial directo sin duplicados)
+    let memberCode: string | null = null;
+    let zkUid: number | undefined;
 
-    const nextSequence = this.getSequenceFromMemberCode(lastMember?.memberCode) + 1;
-    const memberCode = `${year}-${String(nextSequence).padStart(4, '0')}`;
+    try {
+      const accessRes = await this.accessService.findOrCreateAccessMember({
+        firstName: user.firstName,
+        lastName: user.lastName,
+        email: user.email,
+        phone: user.phone,
+        documentId: createMemberDto.documentId,
+        acc_startdate: '2000-01-01',
+        acc_enddate: '2000-01-01',
+      });
+      if (accessRes?.badgeNumber) {
+        memberCode = accessRes.badgeNumber;
+        const numBadge = Number(accessRes.badgeNumber);
+        zkUid = Number.isFinite(numBadge) ? numBadge : accessRes.USERID;
+        this.logger.log(
+          `[MembersService] Socio sincronizado con Access. Badge: ${memberCode}, USERID: ${zkUid}, acción: ${accessRes.action}`,
+        );
+      }
+    } catch (accessErr) {
+      this.logger.warn(
+        `[MembersService] No se pudo obtener badge desde Access (${accessErr.message}), usando secuencia local`,
+      );
+    }
+
+    if (!memberCode) {
+      memberCode = await this.accessService.getNextSequentialMemberCode();
+      const numCode = Number(memberCode);
+      zkUid = Number.isFinite(numCode) ? numCode : undefined;
+    }
 
     // Preparar datos del member, filtrando campos que no son de la entidad
     const memberData: any = {
       id: uuidv4(),
       userId: createMemberDto.userId,
       memberCode: memberCode,
+      zkUid: zkUid,
       documentId: createMemberDto.documentId,
       emergencyContact: createMemberDto.emergencyContact,
       emergencyPhone: createMemberDto.emergencyPhone,
@@ -344,12 +367,15 @@ export class MembersService {
     try {
       this.logger.log(`[MembersService] 🔄 Empujando socio a ZKAccess (USERINFO)...`);
       await this.accessService.pushMemberToAccess({
-        Badgenumber: savedMember.memberCode.replace(/[^0-9]/g, ''), // Obtener números del CLI_00000X o YYYY-XXXX
+        Badgenumber: savedMember.memberCode.replace(/[^0-9]/g, ''),
         name: user.firstName,
         lastname: user.lastName,
         email: user.email,
+        phone: user.phone,
+        documentId: savedMember.documentId,
+        USERID: savedMember.zkUid,
         acc_startdate: '2000-01-01',
-        acc_enddate: '2000-01-01' // Nuevo socio sin suscripción empieza bloqueado o sin fecha
+        acc_enddate: '2000-01-01',
       });
     } catch (accessError) {
       this.logger.error(`[MembersService] ❌ Falló la sincronización a Access del socio ${savedMember.id}`, accessError);

@@ -124,27 +124,42 @@ export class UserRolesService {
         
         const existingMember = await this.memberRepository.findOne({ where: { userId: user.id } });
         if (!existingMember) {
-          const year = new Date().getFullYear();
-          const lastMember = await this.memberRepository
-            .createQueryBuilder('member')
-            .where('member.memberCode LIKE :year', { year: `${year}-%` })
-            .orderBy('member.memberCode', 'DESC')
-            .limit(1)
-            .getOne();
-          
-          let nextSequence = 1;
-          if (lastMember && lastMember.memberCode) {
-            nextSequence = parseInt(lastMember.memberCode.split('-')[1], 10) + 1;
+          let memberCode: string | null = null;
+          let zkUid: number | undefined;
+
+          try {
+            const accessRes = await this.accessService.findOrCreateAccessMember({
+              firstName: user.firstName,
+              lastName: user.lastName,
+              email: user.email,
+              phone: user.phone,
+              documentId: '',
+              acc_startdate: '2000-01-01',
+              acc_enddate: '2000-01-01',
+            });
+            if (accessRes?.badgeNumber) {
+              memberCode = accessRes.badgeNumber;
+              const numBadge = Number(accessRes.badgeNumber);
+              zkUid = Number.isFinite(numBadge) ? numBadge : accessRes.USERID;
+            }
+          } catch (e) {
+            this.logger.warn(`[UserRolesService] No se pudo obtener badge desde Access: ${e.message}`);
           }
-          const memberCode = `${year}-${String(nextSequence).padStart(4, '0')}`;
+
+          if (!memberCode) {
+            memberCode = await this.accessService.getNextSequentialMemberCode();
+            const numCode = Number(memberCode);
+            zkUid = Number.isFinite(numCode) ? numCode : undefined;
+          }
 
           await this.memberRepository.save({
             userId: user.id,
             memberCode: memberCode,
+            zkUid: zkUid,
             emergencyContact: '',
             emergencyPhone: '',
           });
-          this.logger.log(`[UserRolesService] Perfil de miembro creado para el usuario ${user.id}`);
+          this.logger.log(`[UserRolesService] Perfil de miembro creado para el usuario ${user.id} con código ${memberCode}`);
         }
       }
     } catch (employeeSyncError) {

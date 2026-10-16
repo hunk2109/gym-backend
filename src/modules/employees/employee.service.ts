@@ -728,6 +728,10 @@ export class EmployeeService {
 
     // Buscar si ya existe registro de empleado por email
     let employee = await this.employeeRepository.findOne({ where: { email: user.email } });
+    const existingMember = await this.memberRepository.findOne({ where: { userId: user.id } });
+    const preferredAccessCode = existingMember?.memberCode && /^\d+$/.test(existingMember.memberCode.trim())
+      ? existingMember.memberCode.trim()
+      : null;
 
     if (employee) {
       employee.isActive = true;
@@ -736,12 +740,12 @@ export class EmployeeService {
       if (dto.specialization !== undefined) employee.specialization = dto.specialization;
       if (dto.hireDate) employee.hireDate = new Date(dto.hireDate);
       if (!employee.accessCode) {
-        employee.accessCode = await this.generateNextAccessCode();
+        employee.accessCode = preferredAccessCode || (await this.generateNextAccessCode());
       }
       await this.employeeRepository.save(employee);
       this.logger.log(`[EmployeeService] Empleado existente reactivado y actualizado para ${user.email}`);
     } else {
-      const accessCode = await this.generateNextAccessCode();
+      const accessCode = preferredAccessCode || (await this.generateNextAccessCode());
       employee = this.employeeRepository.create({
         id: uuidv4(),
         firstName: user.firstName,
@@ -767,6 +771,9 @@ export class EmployeeService {
         name: employee.firstName,
         lastname: employee.lastName,
         email: employee.email,
+        phone: employee.phone,
+        documentId: existingMember?.documentId,
+        USERID: existingMember?.zkUid,
         acc_startdate: new Date().toISOString().split('T')[0],
         acc_enddate: '2099-12-31',
       });

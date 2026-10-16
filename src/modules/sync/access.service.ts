@@ -461,23 +461,138 @@ export class AccessService {
   /**
    * Envía un miembro a ZKAccess
    */
-  async pushMemberToAccess(userData: { Badgenumber: string, name: string, lastname: string, email: string, acc_startdate?: string | null, acc_enddate?: string | null, USERID?: number | null, legacyBadgenumber?: string | null }): Promise<void> {
+  /**
+   * Envía un miembro a ZKAccess asegurando que no se creen duplicados
+   */
+  async pushMemberToAccess(userData: {
+    Badgenumber: string;
+    name: string;
+    lastname: string;
+    email: string;
+    acc_startdate?: string | null;
+    acc_enddate?: string | null;
+    USERID?: number | null;
+    legacyBadgenumber?: string | null;
+    phone?: string | null;
+    documentId?: string | null;
+  }): Promise<any> {
     await this.validateAccessDbPath();
     try {
-      const member = await this.findMemberByAccessBadge(userData.Badgenumber);
-      if (member) {
-        const legacyBadgenumber = userData.Badgenumber;
-        const zkUid = await this.ensureMemberZkUid(member.id);
-        userData.Badgenumber = String(zkUid);
-        delete userData.USERID;
-        userData.legacyBadgenumber = legacyBadgenumber;
+      let member = await this.findMemberByAccessBadge(userData.Badgenumber);
+      if (!member && userData.USERID) {
+        member = await this.memberRepository.findOne({
+          where: { zkUid: userData.USERID },
+          relations: ['user'],
+        });
       }
 
-      await this.executeAccessWrite(userData);
-      this.logger.log(`Socio ${userData.Badgenumber} empujado a ZKAccess correctamente.`);
+      // Enriquecer datos con cédula y teléfono si existen en la BD local
+      if (member) {
+        if (!userData.documentId && member.documentId) {
+          userData.documentId = member.documentId;
+        }
+        if (!userData.phone && member.user?.phone) {
+          userData.phone = member.user.phone;
+        }
+        if (!userData.USERID && member.zkUid) {
+          userData.USERID = member.zkUid;
+        }
+      }
+
+      const writeResult = await this.executeAccessWrite(userData);
+      this.logger.log(`Socio ${userData.Badgenumber} empujado a ZKAccess correctamente (acción: ${writeResult?.action || 'upsert'}).`);
+
+      // Si Access retornó un Badgenumber asignado o actualizado, mantener sincronizado MySQL
+      if (member && writeResult?.badgeNumber && writeResult.badgeNumber !== member.memberCode) {
+        const numericCode = Number(writeResult.badgeNumber);
+        await this.memberRepository.update(member.id, {
+          memberCode: writeResult.badgeNumber,
+          zkUid: Number.isFinite(numericCode) ? numericCode : member.zkUid,
+        });
+      }
+
+      return writeResult;
     } catch (error) {
       this.logger.error(`Error empujando socio ${userData.Badgenumber} a ZKAccess: ${error.message}`);
       throw error;
+    }
+  }
+
+  /**
+   * Busca si el miembro ya existe en Access por documento, teléfono o nombre completo.
+   * Si no existe, lo inserta con el siguiente ID secuencial de Access.
+   */
+  async findOrCreateAccessMember(params: {
+    firstName: string;
+    lastName: string;
+    email?: string;
+    phone?: string;
+    documentId?: string;
+    Badgenumber?: string;
+    USERID?: number;
+    acc_startdate?: string | null;
+    acc_enddate?: string | null;
+  }): Promise<{ badgeNumber: string; USERID?: number; action: string; success: boolean }> {
+    await this.validateAccessDbPath();
+    const payload: any = {
+      action: 'upsert',
+      name: (params.firstName || '').trim(),
+      lastname: (params.lastName || '').trim(),
+      email: (params.email || '').trim(),
+      phone: (params.phone || '').trim(),
+      documentId: (params.documentId || '').trim(),
+      Badgenumber: params.Badgenumber ? String(params.Badgenumber).trim() : '',
+      USERID: params.USERID || null,
+      acc_startdate: params.acc_startdate || '2000-01-01',
+      acc_enddate: params.acc_enddate || '2000-01-01',
+    };
+
+    const res = await this.executeAccessWrite(payload);
+    if (!res || !res.success) {
+      throw new Error(res?.error || 'Error al comunicarse con ZKAccess para crear/obtener usuario');
+    }
+    return res;
+  }
+
+  /**
+   * Obtiene el siguiente ID de miembro numérico secuencial (igual que en Access).
+   */
+  async getNextSequentialMemberCode(): Promise<string> {
+    try {
+      const rows = await this.executeAccessQuery(
+        'SELECT TOP 1 Badgenumber FROM USERINFO WHERE VAL(Badgenumber) > 0 AND VAL(Badgenumber) < 900 ORDER BY USERID DESC',
+      );
+      let lastBadge = 0;
+      if (rows?.[0]?.Badgenumber) {
+        lastBadge = parseInt(String(rows[0].Badgenumber).trim(), 10) || 0;
+      }
+      if (lastBadge === 0) {
+        const maxRows = await this.executeAccessQuery(
+          'SELECT MAX(VAL(Badgenumber)) AS maxBadge FROM USERINFO WHERE VAL(Badgenumber) < 900',
+        );
+        lastBadge = Number(maxRows?.[0]?.maxBadge) || 0;
+      }
+      if (lastBadge > 0) {
+        return String(lastBadge + 1);
+      }
+    } catch (e) {
+      this.logger.warn(`No se pudo consultar max ID en Access, usando base de datos local: ${e.message}`);
+    }
+
+    try {
+      const rawResult = await this.memberRepository
+        .createQueryBuilder('m')
+        .select('MAX(CAST(m.memberCode AS UNSIGNED))', 'maxCode')
+        .addSelect('MAX(m.zkUid)', 'maxUid')
+        .where("m.memberCode REGEXP '^[0-9]+$' AND CAST(m.memberCode AS UNSIGNED) < 200000")
+        .getRawOne();
+
+      const maxCode = Number(rawResult?.maxCode) || 0;
+      const maxUid = Number(rawResult?.maxUid) || 0;
+      const nextSeq = Math.max(maxCode, maxUid) + 1;
+      return String(nextSeq || 1);
+    } catch (e) {
+      return '1';
     }
   }
 
@@ -617,10 +732,11 @@ export class AccessService {
     await this.validateAccessDbPath();
     this.logger.log('Iniciando sincronización de miembros desde USERINFO...');
 
-    // Los miembros están en USERINFO, traemos TODOS los usuarios
+    // Los miembros están en USERINFO, traemos TODOS los usuarios incluyendo Badgenumber
     const query = `
       SELECT 
         USERID,
+        Badgenumber,
         name,
         lastname,
         email,
@@ -685,8 +801,19 @@ export class AccessService {
           acc_enddate: accessEndDate,
         } = member;
 
-        // Usar USERID como identificador único
-        const memberCode = `MEM_${String(memberId).padStart(6, '0')}`;
+        // Usar Badgenumber o USERID directamente sin prefijos para igualar a Access
+        const rawBadge = (member.Badgenumber || '').toString().trim();
+        const numericBadge = parseInt(rawBadge, 10);
+        const finalBadge =
+          rawBadge && Number.isFinite(numericBadge) && numericBadge < 1000000
+            ? String(numericBadge)
+            : String(memberId);
+        const memberCode = finalBadge;
+        const zkUid =
+          Number.isFinite(numericBadge) && numericBadge < 1000000
+            ? numericBadge
+            : Number(memberId);
+
         const userId = `member_${memberId}`;
         const targetEmail = email || `member${memberId}@gym.local`;
 
@@ -694,8 +821,11 @@ export class AccessService {
         let user = await this.userRepository.findOne({ where: { id: userId } });
 
         // Si no se encontró por ID, intentar buscar por email para evitar duplicados
-        if (!user) {
+        if (!user && targetEmail) {
           user = await this.userRepository.findOne({ where: { email: targetEmail } });
+        }
+        if (!user && phone && phone.trim()) {
+          user = await this.userRepository.findOne({ where: { phone: phone.trim() } });
         }
 
         if (!user) {
@@ -714,14 +844,39 @@ export class AccessService {
             firstName: firstName || user.firstName,
             lastName: lastName || user.lastName,
             phone: phone || user.phone,
-            role: UserRole.CLIENTE, // Actualizar rol a CLIENTE
+            role: UserRole.CLIENTE,
           });
         }
 
-        // Crear o actualizar miembro
-        const existingMember = await this.memberRepository.findOne({
+        // Buscar miembro existente (por memberCode, legacy MEM_000xxx, zkUid, userId o documentId)
+        let existingMember = await this.memberRepository.findOne({
           where: { memberCode },
         });
+
+        if (!existingMember) {
+          const legacyCode = `MEM_${String(memberId).padStart(6, '0')}`;
+          existingMember = await this.memberRepository.findOne({
+            where: { memberCode: legacyCode },
+          });
+        }
+
+        if (!existingMember && zkUid) {
+          existingMember = await this.memberRepository.findOne({
+            where: { zkUid },
+          });
+        }
+
+        if (!existingMember && user) {
+          existingMember = await this.memberRepository.findOne({
+            where: { userId: user.id },
+          });
+        }
+
+        if (!existingMember && documentId && documentId.trim()) {
+          existingMember = await this.memberRepository.findOne({
+            where: { documentId: documentId.trim() },
+          });
+        }
 
         // Convertir género correctamente a enum (F/M)
         let genderEnum: MemberGender = MemberGender.OTHER;
@@ -737,6 +892,7 @@ export class AccessService {
         const memberData = {
           userId: user.id,
           memberCode,
+          zkUid,
           documentId: documentId || null,
           gender: genderEnum,
           dateOfBirth: dateOfBirth || null,
@@ -904,10 +1060,17 @@ export class AccessService {
             }
 
             if (!member) {
+              member = await this.memberRepository.findOne({
+                where: { memberCode: cleanPin },
+                relations: ['user'],
+              });
+            }
+
+            if (!member) {
               const formattedPin = `MEM_${cleanPin.padStart(6, '0')}`;
               member = await this.memberRepository.findOne({
                 where: { memberCode: formattedPin },
-                relations: ['user']
+                relations: ['user'],
               });
             }
             
@@ -1102,12 +1265,29 @@ export class AccessService {
 
     if (/^\d{1,6}$/.test(digits)) {
       candidates.add(`MEM_${digits.padStart(6, '0')}`);
+      candidates.add(String(parseInt(digits, 10)));
     }
 
     for (const memberCode of candidates) {
-      const member = await this.memberRepository.findOne({ where: { memberCode } });
+      const member = await this.memberRepository.findOne({
+        where: { memberCode },
+        relations: ['user'],
+      });
       if (member) {
         return member;
+      }
+    }
+
+    if (digits) {
+      const uid = parseInt(digits, 10);
+      if (Number.isFinite(uid)) {
+        const member = await this.memberRepository.findOne({
+          where: { zkUid: uid },
+          relations: ['user'],
+        });
+        if (member) {
+          return member;
+        }
       }
     }
 
