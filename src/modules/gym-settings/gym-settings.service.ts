@@ -102,6 +102,40 @@ export class GymSettingsService {
         delete updateData.logoImage;
       }
     }
+
+    // Normalizar closingReportRecipients si viene como texto o JSON string
+    if (updateData.closingReportRecipients !== undefined) {
+      if (typeof updateData.closingReportRecipients === 'string') {
+        const raw = updateData.closingReportRecipients.trim();
+        let parsed: any = null;
+        if (raw.startsWith('[') && raw.endsWith(']')) {
+          try {
+            parsed = JSON.parse(raw);
+          } catch (e) {
+            parsed = null;
+          }
+        }
+
+        if (Array.isArray(parsed)) {
+          updateData.closingReportRecipients = parsed;
+        } else {
+          const items = raw
+            .split(',')
+            .map((s: string) => s.trim())
+            .filter(Boolean);
+          updateData.closingReportRecipients = items.map((item: string) => {
+            const isEmail = item.includes('@');
+            return {
+              name: item,
+              email: isEmail ? item : '',
+              phone: isEmail ? '' : item.replace(/[^0-9+]/g, ''),
+              sendEmail: isEmail,
+              sendWhatsapp: !isEmail,
+            };
+          });
+        }
+      }
+    }
     
     Object.assign(settings, updateData);
     this.logger.log(`[UPDATE] Settings after assign`);
