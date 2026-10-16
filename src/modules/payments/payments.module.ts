@@ -11,6 +11,7 @@ import { EmailSettingsModule } from '../email-settings/email-settings.module';
 import { PaymentSubscriber } from '../../entities/payment.subscriber';
 import { PromotionsModule } from '../promotions/promotions.module';
 import { WhatsappSettingsModule } from '../whatsapp-settings/whatsapp-settings.module';
+import { SyncModule } from '../sync/sync.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { WhatsappSettingsModule } from '../whatsapp-settings/whatsapp-settings.m
     EmailSettingsModule,
     PromotionsModule,
     WhatsappSettingsModule,
+    SyncModule,
   ],
   providers: [PaymentsService, PaymentSubscriber],
   controllers: [PaymentsController],

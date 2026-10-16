@@ -202,4 +202,19 @@ export class OutboxService {
 
     await this.outboxRepository.delete(id);
   }
+
+  /**
+   * Verifica si ya se envió o encoló una notificación reciente con la misma fuente y miembro
+   */
+  async hasRecentNotification(source: string, memberId: string, withinDays: number = 4): Promise<boolean> {
+    const sinceDate = new Date();
+    sinceDate.setDate(sinceDate.getDate() - withinDays);
+    const count = await this.outboxRepository
+      .createQueryBuilder('o')
+      .where('o.createdAt >= :sinceDate', { sinceDate })
+      .andWhere('o.metadataJson LIKE :metaSource', { metaSource: `%"source":"${source}"%` })
+      .andWhere('o.metadataJson LIKE :metaMember', { metaMember: `%"memberId":"${memberId}"%` })
+      .getCount();
+    return count > 0;
+  }
 }

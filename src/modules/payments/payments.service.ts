@@ -12,6 +12,7 @@ import { WhatsappService } from '../whatsapp-settings/whatsapp.service';
 import { PromotionsService } from '../promotions/promotions.service';
 import { OutboxService } from '../outbox/outbox.service';
 import { NotificationPriority } from '../outbox/entities/notification-outbox.entity';
+import { AccessService } from '../sync/access.service';
 
 @Injectable()
 export class PaymentsService {
@@ -31,6 +32,7 @@ export class PaymentsService {
     private readonly whatsappService: WhatsappService,
     private readonly promotionsService: PromotionsService,
     private readonly outboxService: OutboxService,
+    private readonly accessService: AccessService,
   ) {}
 
   private async getActiveCashRegisterId(userId?: string): Promise<string | null> {
@@ -86,6 +88,11 @@ export class PaymentsService {
     console.log(`[PAYMENTS_SERVICE] After save - savedPayment:`, { id: savedPayment.id, createdBy: savedPayment.createdBy, updatedBy: savedPayment.updatedBy, status: savedPayment.status, paymentDate: savedPayment.paymentDate });
     
     this.logger.log(`[Payment] Payment created. ID: ${savedPayment.id}, Amount: ${createPaymentDto.amount}, Status: ${savedPayment.status}, PaymentDate: ${savedPayment.paymentDate}, createdBy: ${savedPayment.createdBy}`);
+    
+    if (savedPayment.status === PaymentStatus.COMPLETED) {
+      await this.autoReactivateMemberOnPayment(savedPayment);
+    }
+
     return savedPayment;
   }
 
@@ -194,9 +201,57 @@ export class PaymentsService {
 
     if (previousStatus !== PaymentStatus.COMPLETED && savedPayment.status === PaymentStatus.COMPLETED) {
       await this.sendPaymentConfirmationSafe(savedPayment);
+      await this.autoReactivateMemberOnPayment(savedPayment);
     }
 
     return savedPayment;
+  }
+
+  /**
+   * Reactiva automáticamente la membresía y desbloquea el torniquete ZKTeco
+   * inmediatamente cuando un pago de membresía se completa en caja o POS.
+   */
+  private async autoReactivateMemberOnPayment(payment: Payment): Promise<void> {
+    try {
+      if (payment.paymentType !== PaymentType.MEMBERSHIP) {
+        return;
+      }
+
+      const memberships = await this.memberMembershipRepository.find({
+        where: { paymentId: payment.id },
+        relations: ['member', 'member.user'],
+      });
+
+      for (const mm of memberships) {
+        if (!mm.isActive || mm.suspensionDate) {
+          mm.isActive = true;
+          mm.suspensionDate = null as any;
+          await this.memberMembershipRepository.save(mm);
+          this.logger.log(`[PaymentsService] 🔁 Membresía ${mm.id} reactivada inmediatamente tras completar pago.`);
+
+          // Desbloquear torniquete ZKTeco en tiempo real
+          try {
+            if (mm.member?.user) {
+              const accEndDate = new Date(mm.endDate);
+              accEndDate.setDate(accEndDate.getDate() + 15);
+              await this.accessService.pushMemberToAccess({
+                Badgenumber: mm.member.memberCode.replace(/[^0-9]/g, ''),
+                name: mm.member.user.firstName,
+                lastname: mm.member.user.lastName,
+                email: mm.member.user.email,
+                acc_startdate: new Date(mm.startDate).toISOString().split('T')[0],
+                acc_enddate: accEndDate.toISOString().split('T')[0],
+              });
+              this.logger.log(`[PaymentsService] ⚡ Torniquete ZKTeco desbloqueado en tiempo real para ${mm.member.user.firstName}`);
+            }
+          } catch (syncErr) {
+            this.logger.warn(`[PaymentsService] Error al sincronizar ZKTeco en tiempo real:`, syncErr);
+          }
+        }
+      }
+    } catch (e) {
+      this.logger.warn(`[PaymentsService] Error en auto-reactivación tras pago:`, e);
+    }
   }
 
   async deletePayment(id: string): Promise<void> {

@@ -726,41 +726,65 @@ export class MembershipsService {
             (today.getTime() - new Date(currentMembership.endDate).getTime()) / (1000 * 60 * 60 * 24),
           );
 
-          // Enviar notificación 3 días antes de la suspensión
+          // Enviar notificación preventiva antes de la suspensión (con tolerancia a fallos de días y horario respetuoso)
           const daysUntilSuspension = suspensionDays - daysSinceDue;
+          const shouldWarn = daysUntilSuspension <= notificationDaysBefore && daysUntilSuspension >= 1;
+
           if (
-            daysUntilSuspension === notificationDaysBefore && 
+            shouldWarn && 
             currentMembership.member?.user &&
             gymSettings?.enableExpirationWarnings !== false
           ) {
             try {
-              const user = currentMembership.member.user;
-              const subject = '⚠️ Tu membresía será suspendida en 3 días';
-              const text = `Hola ${user.firstName},\n\nTu pago de membresía está pendiente desde hace ${daysSinceDue} días.\n\nSi no realizas el pago en los próximos 3 días, tu membresía será suspendida.\n\nAccede al portal para completar el pago.\n\nGracias.`;
-              const html = `<p>Hola ${user.firstName},</p><p>Tu pago de membresía está pendiente desde hace ${daysSinceDue} días.</p><p>Si no realizas el pago en los próximos <strong>3 días</strong>, tu membresía será suspendida.</p><p>Accede al portal para completar el pago.</p>`;
+              // Evitar enviar más de una notificación en la misma ventana de 4 días
+              const alreadyNotified = await this.outboxService.hasRecentNotification(
+                'membership_suspension_warning',
+                currentMembership.memberId,
+                4,
+              );
 
-              if (user.email) {
-                await this.outboxService.enqueueEmail({
-                  recipient: user.email,
-                  recipientName: user.firstName,
-                  subject,
-                  content: text,
-                  htmlContent: html,
-                  priority: NotificationPriority.HIGH,
-                  metadata: { source: 'membership_suspension_warning', memberId: currentMembership.memberId },
-                });
+              if (!alreadyNotified) {
+                const user = currentMembership.member.user;
+                const subject = `⚠️ Tu membresía será suspendida en ${daysUntilSuspension} día${daysUntilSuspension === 1 ? '' : 's'}`;
+                const text = `Hola ${user.firstName},\n\nTu pago de membresía está pendiente desde hace ${daysSinceDue} días.\n\nPara mantener tu acceso activo en el torniquete, te recordamos realizar tu pago en los próximos ${daysUntilSuspension} día${daysUntilSuspension === 1 ? '' : 's'} antes de la suspensión automática de tu cuenta.\n\nPuedes pagar en recepción o mediante transferencia.\n\n¡Gracias por entrenar con nosotros!`;
+                const html = `<p>Hola ${user.firstName},</p><p>Tu pago de membresía está pendiente desde hace ${daysSinceDue} días.</p><p>Para mantener tu acceso activo en el torniquete, te recordamos realizar tu pago en los próximos <strong>${daysUntilSuspension} día${daysUntilSuspension === 1 ? '' : 's'}</strong> antes de la suspensión automática.</p><p>Puedes pagar directamente en recepción.</p>`;
+
+                if (user.email) {
+                  await this.outboxService.enqueueEmail({
+                    recipient: user.email,
+                    recipientName: user.firstName,
+                    subject,
+                    content: text,
+                    htmlContent: html,
+                    priority: NotificationPriority.HIGH,
+                    metadata: { source: 'membership_suspension_warning', memberId: currentMembership.memberId },
+                  });
+                }
+
+                if (user.phone) {
+                  // Respetar horario de descanso: si es antes de 8:00 AM o después de 8:00 PM, programar para las 9:00 AM
+                  const now = new Date();
+                  const curHour = now.getHours();
+                  let scheduledFor: Date | undefined;
+                  if (curHour < 8 || curHour >= 20) {
+                    const morning = new Date();
+                    if (curHour >= 20) morning.setDate(morning.getDate() + 1);
+                    morning.setHours(9, 0, 0, 0);
+                    scheduledFor = morning;
+                  }
+
+                  await this.outboxService.enqueueWhatsapp({
+                    recipient: user.phone,
+                    recipientName: user.firstName,
+                    content: text,
+                    scheduledFor,
+                    priority: NotificationPriority.HIGH,
+                    metadata: { source: 'membership_suspension_warning', memberId: currentMembership.memberId },
+                  });
+                }
+                notified++;
+                console.log(`[MembershipsService] 📧 Notificación preventiva de suspensión encolada en Outbox - Miembro: ${currentMembership.memberId} (Vence en ${daysUntilSuspension}d)`);
               }
-              if (user.phone) {
-                await this.outboxService.enqueueWhatsapp({
-                  recipient: user.phone,
-                  recipientName: user.firstName,
-                  content: text,
-                  priority: NotificationPriority.HIGH,
-                  metadata: { source: 'membership_suspension_warning', memberId: currentMembership.memberId },
-                });
-              }
-              notified++;
-              console.log(`[MembershipsService] 📧 Notificación de suspensión próxima encolada en Outbox - Miembro: ${currentMembership.memberId}`);
             } catch (emailError) {
               console.warn(`[MembershipsService] Error encolando notificación: ${emailError.message}`);
             }
@@ -817,6 +841,34 @@ export class MembershipsService {
           
           console.log(`[MembershipsService] ✅ Membresía recurrente renovada con nuevo cobro pendiente - Miembro: ${currentMembership.memberId}`);
           renewed++;
+
+          // Mensaje cordial de renovación al cliente
+          if (currentMembership.member?.user) {
+            try {
+              const u = currentMembership.member.user;
+              const renewalMsg = `¡Hola ${u.firstName}! 🎉 Tu membresía (${currentMembership.membership.name}) ha sido renovada exitosamente para tu próximo ciclo hasta el ${new Date(currentMembership.endDate).toLocaleDateString()}. ¡Gracias por seguir entrenando con nosotros! 💪`;
+              
+              if (u.phone) {
+                const now = new Date();
+                const curHour = now.getHours();
+                let scheduledFor: Date | undefined;
+                if (curHour < 8 || curHour >= 20) {
+                  const targetM = new Date();
+                  if (curHour >= 20) targetM.setDate(targetM.getDate() + 1);
+                  targetM.setHours(9, 30, 0, 0);
+                  scheduledFor = targetM;
+                }
+                await this.outboxService.enqueueWhatsapp({
+                  recipient: u.phone,
+                  recipientName: u.firstName,
+                  content: renewalMsg,
+                  scheduledFor,
+                  priority: NotificationPriority.LOW,
+                  metadata: { source: 'membership_renewal_courtesy', memberId: currentMembership.memberId },
+                });
+              }
+            } catch (_) {}
+          }
         }
       } catch (error) {
         console.error(`[MembershipsService] ❌ Error procesando membresía recurrente ${currentMembership.id}:`, error.message);
