@@ -18,13 +18,13 @@ export class Promotion {
   discountPercentage: number;
 
   @Column({ type: 'text', nullable: true })
-  description: string;
+  description?: string | null;
 
   @Column({ type: 'boolean', default: false })
   capturesBirthday: boolean;
 
   @Column({ type: 'int', nullable: true })
-  maxUses: number;
+  maxUses?: number | null;
 
   @Column({ type: 'int', default: 0 })
   usesCount: number;
@@ -39,5 +39,5 @@ export class Promotion {
   updatedAt: Date;
 
   @Column({ type: 'datetime', nullable: true })
-  expiresAt: Date;
+  expiresAt?: Date | null;
 }

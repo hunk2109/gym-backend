@@ -98,8 +98,14 @@ export class PromotionsService {
       return { valid: false, discount: 0, message: 'Código de promoción inactivo' };
     }
 
-    if (promotion.expiresAt && new Date() > promotion.expiresAt) {
-      return { valid: false, discount: 0, message: 'Código de promoción expirado' };
+    if (promotion.expiresAt) {
+      const expiry = new Date(promotion.expiresAt);
+      if (expiry.getHours() === 0 && expiry.getMinutes() === 0 && expiry.getSeconds() === 0) {
+        expiry.setHours(23, 59, 59, 999);
+      }
+      if (new Date() > expiry) {
+        return { valid: false, discount: 0, message: 'Código de promoción expirado' };
+      }
     }
 
     // Validar máximo de usos
@@ -149,7 +155,14 @@ export class PromotionsService {
 
   private mapToResponse(promotion: Promotion): PromotionResponseDto {
     const now = new Date();
-    const isExpired = promotion.expiresAt && now > promotion.expiresAt;
+    let isExpired = false;
+    if (promotion.expiresAt) {
+      const expiry = new Date(promotion.expiresAt);
+      if (expiry.getHours() === 0 && expiry.getMinutes() === 0 && expiry.getSeconds() === 0) {
+        expiry.setHours(23, 59, 59, 999);
+      }
+      isExpired = now > expiry;
+    }
     const isMaxUsesReached = promotion.maxUses && promotion.usesCount >= promotion.maxUses;
 
     return {
@@ -164,7 +177,7 @@ export class PromotionsService {
       createdAt: promotion.createdAt,
       expiresAt: promotion.expiresAt,
       isValid: promotion.active && !isExpired && !isMaxUsesReached,
-      remainingUses: promotion.maxUses ? promotion.maxUses - promotion.usesCount : undefined,
+      remainingUses: promotion.maxUses ? Math.max(0, promotion.maxUses - promotion.usesCount) : undefined,
     };
   }
 }

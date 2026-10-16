@@ -73,8 +73,14 @@ export class CouponsService {
       return { valid: false, message: 'Cupón inactivo' };
     }
 
-    if (coupon.expiryDate && new Date() > new Date(coupon.expiryDate)) {
-      return { valid: false, message: 'Cupón expirado' };
+    if (coupon.expiryDate) {
+      const expiry = new Date(coupon.expiryDate);
+      if (expiry.getHours() === 0 && expiry.getMinutes() === 0 && expiry.getSeconds() === 0) {
+        expiry.setHours(23, 59, 59, 999);
+      }
+      if (new Date() > expiry) {
+        return { valid: false, message: 'Cupón expirado' };
+      }
     }
 
     if (coupon.maxUsages && coupon.usageCount >= coupon.maxUsages) {

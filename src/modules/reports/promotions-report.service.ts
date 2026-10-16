@@ -108,7 +108,9 @@ export class PromotionsReportService {
       code: p.code,
       description: p.description,
       expiresAt: p.expiresAt,
-      daysUntilExpiry: Math.ceil((p.expiresAt.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)),
+      daysUntilExpiry: p.expiresAt
+        ? Math.ceil((p.expiresAt.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24))
+        : 0,
     }));
   }
 

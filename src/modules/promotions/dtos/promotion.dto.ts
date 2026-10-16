@@ -1,4 +1,5 @@
 import { IsString, IsNumber, IsBoolean, IsOptional, Min, Max, IsDate } from 'class-validator';
+import { Type } from 'class-transformer';
 
 export class CreatePromotionDto {
   @IsString()
@@ -19,11 +20,12 @@ export class CreatePromotionDto {
 
   @IsOptional()
   @IsNumber()
-  maxUses?: number;
+  maxUses?: number | null;
 
   @IsOptional()
+  @Type(() => Date)
   @IsDate()
-  expiresAt?: Date;
+  expiresAt?: Date | null;
 }
 
 export class UpdatePromotionDto {
@@ -47,15 +49,16 @@ export class UpdatePromotionDto {
 
   @IsOptional()
   @IsNumber()
-  maxUses?: number;
+  maxUses?: number | null;
 
   @IsOptional()
   @IsBoolean()
   active?: boolean;
 
   @IsOptional()
+  @Type(() => Date)
   @IsDate()
-  expiresAt?: Date;
+  expiresAt?: Date | null;
 }
 
 export class ValidatePromotionDto {
@@ -71,13 +74,13 @@ export class PromotionResponseDto {
   id: string;
   code: string;
   discountPercentage: number;
-  description: string;
+  description?: string | null;
   capturesBirthday: boolean;
-  maxUses: number;
+  maxUses?: number | null;
   usesCount: number;
   active: boolean;
   createdAt: Date;
-  expiresAt: Date;
+  expiresAt?: Date | null;
   isValid: boolean;
   remainingUses?: number;
 }
