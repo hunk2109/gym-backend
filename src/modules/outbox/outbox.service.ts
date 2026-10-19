@@ -16,6 +16,22 @@ import {
   GetOutboxQueryDto,
 } from './dto/enqueue-notification.dto';
 
+export function isDeliverableEmail(email?: string | null): boolean {
+  if (!email) return false;
+  const clean = email.trim().toLowerCase();
+  if (
+    clean.endsWith('.local') ||
+    clean.endsWith('.test') ||
+    clean.includes('@gym.local') ||
+    clean.includes('example.com') ||
+    !clean.includes('@') ||
+    !clean.includes('.')
+  ) {
+    return false;
+  }
+  return true;
+}
+
 @Injectable()
 export class OutboxService {
   private readonly logger = new Logger(OutboxService.name);
@@ -30,10 +46,31 @@ export class OutboxService {
    * Encola un correo electrónico en la bandeja de salida (Outbox)
    */
   async enqueueEmail(dto: EnqueueEmailDto): Promise<NotificationOutbox> {
+    const cleanRecipient = dto.recipient.trim().toLowerCase();
+
+    // Bloquear correos a dominios locales (.local), de prueba o inválidos
+    if (!isDeliverableEmail(cleanRecipient)) {
+      this.logger.warn(`[Outbox] 🛑 Omitiendo correo a dirección no entregable / ficticia: ${cleanRecipient}`);
+      const skippedItem = this.outboxRepository.create({
+        channel: NotificationChannel.EMAIL,
+        type: NotificationOutboxType.TEXT,
+        recipient: cleanRecipient,
+        recipientName: dto.recipientName,
+        subject: dto.subject,
+        content: dto.content || dto.subject,
+        htmlContent: dto.htmlContent,
+        priority: dto.priority ?? NotificationPriority.NORMAL,
+        status: NotificationOutboxStatus.SENT,
+        errorMessage: 'Omitido automáticamente: dirección local o ficticia (.local)',
+        processedAt: new Date(),
+      });
+      return await this.outboxRepository.save(skippedItem);
+    }
+
     const outboxItem = this.outboxRepository.create({
       channel: NotificationChannel.EMAIL,
       type: NotificationOutboxType.TEXT,
-      recipient: dto.recipient.trim().toLowerCase(),
+      recipient: cleanRecipient,
       recipientName: dto.recipientName,
       subject: dto.subject,
       content: dto.content || dto.subject,

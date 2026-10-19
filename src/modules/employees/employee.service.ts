@@ -257,9 +257,18 @@ export class EmployeeService {
   }
 
   async findAll(): Promise<Employee[]> {
-    return this.employeeRepository.find({
+    const employees = await this.employeeRepository.find({
       order: { lastName: 'ASC' },
     });
+
+    // Un Administrador no figura como empleado en el sistema
+    const adminUsers = await this.userRepository.find({
+      where: { role: UserRole.ADMIN },
+      select: ['email'],
+    });
+    const adminEmails = new Set(adminUsers.map((u) => u.email.toLowerCase()));
+
+    return employees.filter((emp) => !adminEmails.has(emp.email.toLowerCase()));
   }
 
   async findById(id: string): Promise<Employee> {

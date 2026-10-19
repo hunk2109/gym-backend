@@ -14,6 +14,7 @@ import { EmailTemplateBuilder } from './email-template.builder';
 
 import { User } from '../../entities/user.entity';
 import { WhatsappService } from '../whatsapp-settings/whatsapp.service';
+import { isDeliverableEmail } from '../outbox/outbox.service';
 
 @Injectable()
 export class EmailService {
@@ -114,6 +115,22 @@ export class EmailService {
    */
   async sendEmail(dto: SendEmailDto): Promise<EmailLog> {
     try {
+      if (!isDeliverableEmail(dto.recipientEmail)) {
+        this.logger.warn(`[EmailService] 🛑 Envío de correo cancelado: dirección local/ficticia ignorada (${dto.recipientEmail})`);
+        const skippedLog = this.emailLogRepository.create({
+          templateId: dto.templateId,
+          recipientEmail: dto.recipientEmail,
+          recipientName: dto.recipientName,
+          memberId: dto.memberId,
+          subject: dto.subject || 'Sin asunto',
+          htmlContent: dto.htmlContent || '',
+          status: EmailStatus.FAILED,
+          errorMessage: 'Omitido automáticamente: dirección local o ficticia (.local)',
+          failedAt: new Date(),
+        });
+        return await this.emailLogRepository.save(skippedLog);
+      }
+
       if (!this.transporter) {
         await this.initializeTransporter();
       }

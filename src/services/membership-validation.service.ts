@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Member } from '../entities/member.entity';
 import { MemberMembership } from '../entities/member-membership.entity';
+import { UserRole } from '../entities/user.entity';
 
 export enum MembershipStatus {
   ACTIVE = 'ACTIVE',
@@ -136,6 +137,7 @@ export class MembershipValidationService {
           'latest.memberId = mm.memberId AND latest.maxEndDate = mm.endDate'
         )
         .where('DATE(mm.endDate) < CURDATE()')
+        .andWhere('(user.role != :adminRole OR user.role IS NULL)', { adminRole: UserRole.ADMIN })
         .orderBy('mm.endDate', 'ASC')
         .getMany();
 
@@ -181,6 +183,7 @@ export class MembershipValidationService {
         )
         .where('mm.endDate > NOW()')
         .andWhere('mm.endDate <= :futureDate', { futureDate })
+        .andWhere('(user.role != :adminRole OR user.role IS NULL)', { adminRole: UserRole.ADMIN })
         .orderBy('mm.endDate', 'ASC')
         .getMany();
 

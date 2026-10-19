@@ -1,13 +1,15 @@
 import { Injectable, BadRequestException, NotFoundException, ForbiddenException, Logger, Inject, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, MoreThanOrEqual } from 'typeorm';
 import { User, UserRole } from '../../entities/user.entity';
 import { EmployeeRole } from '../../entities/employee.entity';
 import { RolePermission } from '../../entities/role-permission.entity';
+import { Member } from '../../entities/member.entity';
+import { MemberMembership } from '../../entities/member-membership.entity';
 import { PermissionsService } from '../auth/services/permissions.service';
 import { EmployeeService } from '../employees/employee.service';
 import { AccessService } from '../sync/access.service';
-import { Member } from '../../entities/member.entity';
+import { ZktecoDeviceService } from '../sync/zkteco-device.service';
 import { SYSTEM_PERMISSIONS, DEFAULT_ROLE_PERMISSIONS, PermissionDefinition } from './permissions-catalog';
 
 @Injectable()
@@ -19,17 +21,19 @@ export class UserRolesService {
     private userRepository: Repository<User>,
     @InjectRepository(Member)
     private memberRepository: Repository<Member>,
+    @InjectRepository(MemberMembership)
+    private memberMembershipRepository: Repository<MemberMembership>,
     @InjectRepository(RolePermission)
     private rolePermissionRepository: Repository<RolePermission>,
     private readonly permissionsService: PermissionsService,
     @Inject(forwardRef(() => EmployeeService))
     private readonly employeeService: EmployeeService,
     private readonly accessService: AccessService,
+    private readonly zktecoDeviceService: ZktecoDeviceService,
   ) {}
 
   private mapUserRoleToEmployeeRole(userRole: UserRole): EmployeeRole {
     switch (userRole) {
-      case UserRole.ADMIN:
       case UserRole.ENCARGADO:
         return EmployeeRole.SUPERVISOR;
       case UserRole.EMPLEADO_CAJERO:
@@ -39,6 +43,49 @@ export class UserRolesService {
       default:
         return EmployeeRole.CASHIER;
     }
+  }
+
+  private async ensureMemberForUser(user: User): Promise<Member> {
+    let member = await this.memberRepository.findOne({ where: { userId: user.id } });
+    if (!member) {
+      let memberCode: string | null = null;
+      let zkUid: number | undefined;
+
+      try {
+        const accessRes = await this.accessService.findOrCreateAccessMember({
+          firstName: user.firstName,
+          lastName: user.lastName,
+          email: user.email,
+          phone: user.phone,
+          documentId: '',
+          acc_startdate: '2000-01-01',
+          acc_enddate: '2000-01-01',
+        });
+        if (accessRes?.badgeNumber) {
+          memberCode = accessRes.badgeNumber;
+          const numBadge = Number(accessRes.badgeNumber);
+          zkUid = Number.isFinite(numBadge) ? numBadge : accessRes.USERID;
+        }
+      } catch (e) {
+        this.logger.warn(`[UserRolesService] No se pudo obtener badge desde Access: ${e.message}`);
+      }
+
+      if (!memberCode) {
+        memberCode = await this.accessService.getNextSequentialMemberCode();
+        const numCode = Number(memberCode);
+        zkUid = Number.isFinite(numCode) ? numCode : undefined;
+      }
+
+      member = await this.memberRepository.save({
+        userId: user.id,
+        memberCode: memberCode,
+        zkUid: zkUid,
+        emergencyContact: '',
+        emergencyPhone: '',
+      });
+      this.logger.log(`[UserRolesService] Perfil de miembro creado para usuario ${user.id} con código ${memberCode}`);
+    }
+    return member;
   }
 
   async assignRole(userId: string, newRole: UserRole, requestingUserId: string): Promise<User> {
@@ -70,7 +117,102 @@ export class UserRolesService {
     );
 
     try {
-      if (oldRole === UserRole.CLIENTE && newRole !== UserRole.CLIENTE) {
+      if (newRole === UserRole.ADMIN) {
+        // 1. Un Administrador NO figura como empleado en nómina. Si existía registro de empleado, desactivarlo.
+        const existingEmployee = await this.employeeService.findByEmail(user.email);
+        if (existingEmployee && existingEmployee.isActive) {
+          await this.employeeService.delete(existingEmployee.id, { id: requestingUserId, skipUserDeactivation: true });
+          this.logger.log(`[UserRolesService] Registro de empleado ${existingEmployee.id} desactivado tras asignar rol ADMIN al usuario ${user.id}.`);
+        }
+
+        // 2. Asegurar credencial de miembro para torniquete y sincronizar acceso ILIMITADO (2099-12-31)
+        const member = await this.ensureMemberForUser(user);
+        const badgeNumber = member.memberCode.replace(/[^0-9]/g, '');
+
+        try {
+          await this.accessService.pushMemberToAccess({
+            Badgenumber: badgeNumber,
+            name: user.firstName,
+            lastname: user.lastName,
+            email: user.email,
+            phone: user.phone,
+            USERID: member.zkUid,
+            acc_startdate: new Date().toISOString().split('T')[0],
+            acc_enddate: '2099-12-31',
+          });
+
+          await this.zktecoDeviceService.syncMemberById(member.id, {
+            allowWithoutActiveMembership: true,
+          });
+          this.logger.log(`[UserRolesService] ✅ Acceso ILIMITADO configurado en equipo para Administrador ${user.id} (${badgeNumber}).`);
+        } catch (accessError) {
+          this.logger.error(`[UserRolesService] ❌ Error configurando ZKAccess/ZKTeco para admin ${user.id}: ${accessError.message}`);
+        }
+      } else if (newRole === UserRole.CLIENTE) {
+        // 1. Si era empleado o admin, desactivar registro de empleado
+        const existingEmployee = await this.employeeService.findByEmail(user.email);
+        if (existingEmployee && existingEmployee.isActive) {
+          await this.employeeService.delete(existingEmployee.id, { id: requestingUserId, skipUserDeactivation: true });
+          this.logger.log(`[UserRolesService] Empleado ${existingEmployee.id} desactivado tras cambiar rol a CLIENTE.`);
+        }
+
+        // 2. Asegurar que tenga perfil de miembro
+        const member = await this.ensureMemberForUser(user);
+        const badgeNumber = member.memberCode.replace(/[^0-9]/g, '');
+
+        // 3. CONTROL DE ACCESO PARA CLIENTE:
+        // Si NO tiene membresía activa, NO debe tener acceso (bloqueado 2000-01-01 hasta que compre/asigne membresía).
+        // Si SÍ tiene membresía activa, su acceso es hasta la fecha de expiración de dicha membresía.
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        const activeMembership = await this.memberMembershipRepository.findOne({
+          where: {
+            memberId: member.id,
+            isActive: true,
+            endDate: MoreThanOrEqual(today),
+          },
+          order: { endDate: 'DESC' },
+        });
+
+        if (activeMembership) {
+          try {
+            await this.accessService.pushMemberToAccess({
+              Badgenumber: badgeNumber,
+              name: user.firstName,
+              lastname: user.lastName,
+              email: user.email,
+              phone: user.phone,
+              USERID: member.zkUid,
+              acc_startdate: activeMembership.startDate ? new Date(activeMembership.startDate).toISOString().split('T')[0] : today.toISOString().split('T')[0],
+              acc_enddate: new Date(activeMembership.endDate).toISOString().split('T')[0],
+            });
+            await this.zktecoDeviceService.syncMemberById(member.id);
+            this.logger.log(`[UserRolesService] ✅ Cliente ${user.id} tiene membresía activa hasta ${activeMembership.endDate}. Acceso sincronizado.`);
+          } catch (syncError) {
+            this.logger.error(`[UserRolesService] Error sincronizando cliente con membresía activa: ${syncError.message}`);
+          }
+        } else {
+          // NO tiene membresía activa: BLOQUEAR acceso hasta que se le asigne una membresía
+          try {
+            await this.accessService.pushMemberToAccess({
+              Badgenumber: badgeNumber,
+              name: user.firstName,
+              lastname: user.lastName,
+              email: user.email,
+              phone: user.phone,
+              USERID: member.zkUid,
+              acc_startdate: '2000-01-01',
+              acc_enddate: '2000-01-01', // Sin acceso
+            });
+            await this.zktecoDeviceService.syncMemberById(member.id);
+            this.logger.log(`[UserRolesService] ⛔ Cliente ${user.id} NO tiene membresía activa. Acceso bloqueado en torniquete hasta asignarle una.`);
+          } catch (syncError) {
+            this.logger.error(`[UserRolesService] Error bloqueando acceso en equipo para cliente sin membresía: ${syncError.message}`);
+          }
+        }
+      } else if (oldRole === UserRole.CLIENTE) {
+        // Roles de empleado (encargado, cajero, entrenador)
         const existingEmployee = await this.employeeService.findByEmail(user.email);
         if (existingEmployee) {
           if (!existingEmployee.isActive) {
@@ -115,55 +257,9 @@ export class UserRolesService {
           
           await this.employeeService.resetPasswordAndSendCredentials(user, createdEmployee);
         }
-      } else if (oldRole !== UserRole.CLIENTE && newRole === UserRole.CLIENTE) {
-        const existingEmployee = await this.employeeService.findByEmail(user.email);
-        if (existingEmployee && existingEmployee.isActive) {
-           await this.employeeService.delete(existingEmployee.id, { id: requestingUserId, skipUserDeactivation: true });
-           this.logger.log(`[UserRolesService] Empleado ${existingEmployee.id} desactivado tras cambio de rol a ${newRole}.`);
-        }
-        
-        const existingMember = await this.memberRepository.findOne({ where: { userId: user.id } });
-        if (!existingMember) {
-          let memberCode: string | null = null;
-          let zkUid: number | undefined;
-
-          try {
-            const accessRes = await this.accessService.findOrCreateAccessMember({
-              firstName: user.firstName,
-              lastName: user.lastName,
-              email: user.email,
-              phone: user.phone,
-              documentId: '',
-              acc_startdate: '2000-01-01',
-              acc_enddate: '2000-01-01',
-            });
-            if (accessRes?.badgeNumber) {
-              memberCode = accessRes.badgeNumber;
-              const numBadge = Number(accessRes.badgeNumber);
-              zkUid = Number.isFinite(numBadge) ? numBadge : accessRes.USERID;
-            }
-          } catch (e) {
-            this.logger.warn(`[UserRolesService] No se pudo obtener badge desde Access: ${e.message}`);
-          }
-
-          if (!memberCode) {
-            memberCode = await this.accessService.getNextSequentialMemberCode();
-            const numCode = Number(memberCode);
-            zkUid = Number.isFinite(numCode) ? numCode : undefined;
-          }
-
-          await this.memberRepository.save({
-            userId: user.id,
-            memberCode: memberCode,
-            zkUid: zkUid,
-            emergencyContact: '',
-            emergencyPhone: '',
-          });
-          this.logger.log(`[UserRolesService] Perfil de miembro creado para el usuario ${user.id} con código ${memberCode}`);
-        }
       }
     } catch (employeeSyncError) {
-      this.logger.error(`[UserRolesService] Fallo en la sincronización de empleado al cambiar rol de ${user.id}`, employeeSyncError);
+      this.logger.error(`[UserRolesService] Fallo en la sincronización al cambiar rol de ${user.id}`, employeeSyncError);
     }
 
     return updatedUser;

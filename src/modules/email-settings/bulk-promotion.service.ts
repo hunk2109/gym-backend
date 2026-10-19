@@ -10,6 +10,8 @@ import { EmailService } from './email.service';
 import { EmailTemplateBuilder, GymConfig } from './email-template.builder';
 import { GymSettingsService } from '../gym-settings/gym-settings.service';
 import { CouponsService } from '../coupons/coupons.service';
+import { OutboxService } from '../outbox/outbox.service';
+import { NotificationPriority } from '../outbox/entities/notification-outbox.entity';
 
 @Injectable()
 export class BulkPromotionService {
@@ -30,6 +32,7 @@ export class BulkPromotionService {
     private emailService: EmailService,
     private gymSettingsService: GymSettingsService,
     private couponsService: CouponsService,
+    private outboxService: OutboxService,
   ) {}
 
   /**
@@ -108,20 +111,22 @@ export class BulkPromotionService {
             continue;
           }
 
-          await this.emailService.sendEmail({
-            recipientEmail: memberWithUser.user.email,
+          await this.outboxService.enqueueEmail({
+            recipient: memberWithUser.user.email,
             recipientName: memberWithUser.user.firstName,
             subject: promotion.title,
             htmlContent: promotion.htmlContent,
-            plainTextContent: promotion.description,
+            content: promotion.description,
+            priority: NotificationPriority.LOW,
+            metadata: { source: 'bulk-promotion', promotionId: promotion.id, memberId: member.id },
           });
 
           promotion.sentCount++;
           this.logger.log(
-            `✅ Promoción enviada a: ${memberWithUser.user.email}`,
+            `✅ Promoción encolada en Outbox para: ${memberWithUser.user.email}`,
           );
         } catch (error) {
-          this.logger.error(`❌ Error enviando a ${member.id}:`, error);
+          this.logger.error(`❌ Error encolando a ${member.id}:`, error);
           promotion.failedCount++;
         }
       }

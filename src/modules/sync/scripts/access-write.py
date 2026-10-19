@@ -29,7 +29,7 @@ def clean_str(val):
     return str(val).strip().lower()
 
 
-def find_access_user(cursor, badge_number=None, access_user_id=None, legacy_badge_number=None, name=None, lastname=None, phone=None, document_id=None):
+def find_access_user(cursor, badge_number=None, access_user_id=None, legacy_badge_number=None, name=None, lastname=None, phone=None, document_id=None, email=None):
     # 1. Buscar por access_user_id (USERID directo)
     if access_user_id is not None:
         try:
@@ -41,7 +41,15 @@ def find_access_user(cursor, badge_number=None, access_user_id=None, legacy_badg
         except (ValueError, TypeError):
             pass
 
-    # 2. Buscar por Badgenumber exacto o normalizado
+    # 2. Buscar por Email real (si no está vacío y no es dummy @gym.local)
+    if email and '@' in email and not str(email).strip().lower().endswith('@gym.local'):
+        clean_email = str(email).strip().lower()
+        cursor.execute("SELECT USERID, Badgenumber FROM USERINFO WHERE LCASE(email) = ?", (clean_email,))
+        row = cursor.fetchone()
+        if row:
+            return (row[0], row[1])
+
+    # 3. Buscar por Badgenumber exacto
     if badge_number:
         str_badge = str(badge_number).strip()
         cursor.execute("SELECT USERID, Badgenumber FROM USERINFO WHERE Badgenumber = ?", (str_badge,))
@@ -49,29 +57,23 @@ def find_access_user(cursor, badge_number=None, access_user_id=None, legacy_badg
         if row:
             return (row[0], row[1])
 
-        if str_badge.isdigit():
-            normalized = str(int(str_badge))
-            if normalized != str_badge:
-                cursor.execute("SELECT USERID, Badgenumber FROM USERINFO WHERE Badgenumber = ?", (normalized,))
-                row = cursor.fetchone()
-                if row:
-                    return (row[0], row[1])
-
-            padded = str_badge.zfill(6)
-            if padded != str_badge:
-                cursor.execute("SELECT USERID, Badgenumber FROM USERINFO WHERE Badgenumber = ?", (padded,))
-                row = cursor.fetchone()
-                if row:
-                    return (row[0], row[1])
-
-    # 3. Buscar por legacy_badge_number
+    # 4. Buscar por legacy_badge_number o formato MEM_000xxx
     if legacy_badge_number:
         cursor.execute("SELECT USERID, Badgenumber FROM USERINFO WHERE Badgenumber = ?", (str(legacy_badge_number).strip(),))
         row = cursor.fetchone()
         if row:
             return (row[0], row[1])
 
-    # 4. Buscar por Cédula / Documento (identitycard)
+    if badge_number:
+        digits_only = clean_digits(badge_number)
+        if digits_only:
+            legacy_code = f"MEM_{digits_only.zfill(6)}"
+            cursor.execute("SELECT USERID, Badgenumber FROM USERINFO WHERE Badgenumber = ?", (legacy_code,))
+            row = cursor.fetchone()
+            if row:
+                return (row[0], row[1])
+
+    # 5. Buscar por Cédula / Documento (identitycard)
     clean_doc = clean_digits(document_id)
     if len(clean_doc) >= 6:
         cursor.execute("SELECT USERID, Badgenumber, identitycard FROM USERINFO WHERE identitycard IS NOT NULL")
@@ -80,7 +82,7 @@ def find_access_user(cursor, badge_number=None, access_user_id=None, legacy_badg
             if stored_doc and stored_doc == clean_doc:
                 return (r[0], r[1])
 
-    # 5. Buscar por Teléfono (PAGER)
+    # 6. Buscar por Teléfono (PAGER)
     clean_ph = clean_digits(phone)
     if len(clean_ph) >= 7:
         cursor.execute("SELECT USERID, Badgenumber, PAGER FROM USERINFO WHERE PAGER IS NOT NULL")
@@ -89,7 +91,7 @@ def find_access_user(cursor, badge_number=None, access_user_id=None, legacy_badg
             if stored_ph and (clean_ph in stored_ph or stored_ph in clean_ph):
                 return (r[0], r[1])
 
-    # 6. Buscar por Nombre y Apellido exactos (ignorando espacios extras y mayúsculas/minúsculas)
+    # 7. Buscar por Nombre y Apellido exactos (ignorando espacios extras y mayúsculas/minúsculas)
     c_name = clean_str(name)
     c_last = clean_str(lastname)
     if c_name and c_last:
@@ -99,6 +101,25 @@ def find_access_user(cursor, badge_number=None, access_user_id=None, legacy_badg
             db_last = clean_str(r[3])
             if db_name == c_name and db_last == c_last:
                 return (r[0], r[1])
+
+    # 8. Fallback: Buscar por Badgenumber normalizado/rellenado asegurando coincidencia o sin conflicto
+    if badge_number:
+        str_badge = str(badge_number).strip()
+        if str_badge.isdigit():
+            normalized = str(int(str_badge))
+            padded = str_badge.zfill(6)
+            candidates = [c for c in [normalized, padded] if c != str_badge]
+            for cand in candidates:
+                cursor.execute("SELECT USERID, Badgenumber, name, lastname FROM USERINFO WHERE Badgenumber = ?", (cand,))
+                row = cursor.fetchone()
+                if row:
+                    # Validar que si tiene nombre no pertenezca a otra persona diferente
+                    row_name = clean_str(row[2])
+                    row_last = clean_str(row[3])
+                    if c_name and row_name and c_name not in row_name and row_name not in c_name:
+                        # Pertenece a otra persona distinta, no sobreescribir
+                        continue
+                    return (row[0], row[1])
 
     return (None, None)
 
@@ -166,7 +187,7 @@ def write_user(conn, user_data):
 
         set_valid_time = 1
 
-        # Buscar usuario existente por ID, Badge, Cédula, Teléfono o Nombre+Apellido
+        # Buscar usuario existente por ID, Email, Badge, Cédula, Teléfono o Nombre+Apellido
         user_id, existing_badge = find_access_user(
             cursor,
             badge_number=badge_number,
@@ -176,6 +197,7 @@ def write_user(conn, user_data):
             lastname=last_name,
             phone=phone,
             document_id=document_id,
+            email=email,
         )
 
         if action_type == 'delete':
@@ -192,6 +214,15 @@ def write_user(conn, user_data):
             # Usuario existente encontrado -> ACTUALIZAR sin duplicar
             # Si el usuario ya tiene un Badgenumber válido, conservarlo si no se envió uno nuevo explícito
             final_badge = badge_number or (str(existing_badge).strip() if existing_badge else str(user_id))
+
+            # Seguridad: Verificar que final_badge no pertenezca a OTRO usuario en Access
+            if final_badge:
+                cursor.execute("SELECT USERID FROM USERINFO WHERE Badgenumber = ? AND USERID <> ?", (final_badge, user_id))
+                conflict_row = cursor.fetchone()
+                if conflict_row:
+                    # El Badgenumber solicitado pertenece a otra persona en Access.
+                    # Conservar el badge existente de este usuario para no duplicar ni causar colisión.
+                    final_badge = str(existing_badge).strip() if existing_badge else str(user_id)
 
             update_query = """
                 UPDATE USERINFO 

@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
 import { MemberMembership } from '../../entities/member-membership.entity';
 import { Member } from '../../entities/member.entity';
+import { UserRole } from '../../entities/user.entity';
 import { Membership, MembershipType } from '../../entities/membership.entity';
 import { Payment, PaymentMethod, PaymentType, PaymentStatus } from '../../entities/payment.entity';
 import { CashRegister } from '../../entities/cash-register.entity';
@@ -787,26 +788,37 @@ export class MemberMembershipsService {
     
     console.log(`[REMOVE MEMBERSHIP] ✓ Membresía eliminada de la BD: ${memberMembership.id} - Registros eliminados: ${deleteResult.affected}`);
 
-    // QUINTO: SINCRONIZAR A ZKACCESS: Remover fecha de vencimiento
+    // QUINTO: SINCRONIZAR A ZKACCESS: Bloquear fecha de acceso (acc_enddate = 2000-01-01)
     try {
       console.log(`[MemberMembershipsService] 🔄 Removiendo fecha de membresía en ZKAccess...`);
       const memberDetails = await this.memberRepository.findOne({ where: { id: memberId }, relations: ['user'] });
       if (memberDetails && memberDetails.user) {
-        await this.accessService.pushMemberToAccess({
+        const accessPromise = this.accessService.pushMemberToAccess({
           Badgenumber: memberDetails.memberCode.replace(/[^0-9]/g, ''),
           name: memberDetails.user.firstName,
           lastname: memberDetails.user.lastName,
           email: memberDetails.user.email,
+          phone: memberDetails.user.phone,
+          USERID: memberDetails.zkUid,
           acc_startdate: '2000-01-01',
-          acc_enddate: '2000-01-01' // Sin suscripción -> fecha pasada para bloquear
+          acc_enddate: '2000-01-01', // Sin suscripción -> fecha pasada para bloquear
         });
-        console.log(`[MemberMembershipsService] ✅ Remoción en ZKAccess exitosa.`);
+
+        // Timeout preventivo de 2.5s para evitar que bloquee la respuesta
+        await Promise.race([
+          accessPromise,
+          new Promise((resolve) => setTimeout(resolve, 2500)),
+        ]);
+        console.log(`[MemberMembershipsService] ✅ Remoción en ZKAccess completada.`);
       }
-    } catch (accessError) {
+    } catch (accessError: any) {
       console.error(`[MemberMembershipsService] ❌ Error sincronizando a ZKAccess:`, accessError.message);
     }
 
-    await this.deleteMemberFromDeviceSafe(memberId, 'remove-membership');
+    // SEXTO: Sincronización biométrica en segundo plano (no bloquea la API y preserva huellas dactilares)
+    this.syncMemberToDeviceSafe(memberId, 'remove-membership').catch((zkError) => {
+      console.warn(`[MemberMembershipsService] Advertencia en sync ZKTeco tras cancelación:`, zkError?.message || zkError);
+    });
 
     console.log(`[REMOVE MEMBERSHIP] ✓ Membresía removida para: ${memberId}\n`);
 
@@ -871,6 +883,7 @@ export class MemberMembershipsService {
       .leftJoinAndSelect('member.user', 'user')
       .where('payment.paymentType = :paymentType', { paymentType: PaymentType.MEMBERSHIP })
       .andWhere('payment.status = :status', { status: PaymentStatus.PENDING })
+      .andWhere('(user.role != :adminRole OR user.role IS NULL)', { adminRole: UserRole.ADMIN })
       .orderBy('payment.createdAt', 'DESC')
       .getManyAndCount();
 
@@ -887,6 +900,7 @@ export class MemberMembershipsService {
       .leftJoinAndSelect('member.user', 'user')
       .where('payment.paymentType = :type', { type: PaymentType.REGISTRATION })
       .andWhere('payment.status = :status', { status: PaymentStatus.PENDING })
+      .andWhere('(user.role != :adminRole OR user.role IS NULL)', { adminRole: UserRole.ADMIN })
       .orderBy('payment.createdAt', 'DESC')
       .getMany();
 

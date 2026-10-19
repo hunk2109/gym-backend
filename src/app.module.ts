@@ -6,6 +6,8 @@ import { PassportModule } from '@nestjs/passport';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { ScheduleModule } from '@nestjs/schedule';
 import * as mysql from 'mysql2/promise';
+import { AppController } from './app.controller';
+import { AppService } from './app.service';
 
 import { User } from './entities/user.entity';
 import { Product } from './entities/product.entity';
@@ -164,8 +166,9 @@ import { LoggerMiddleware } from './common/middleware';
     AccountingModule,
     OutboxModule,
   ],
-  controllers: [],
+  controllers: [AppController],
   providers: [
+    AppService,
     {
       provide: APP_INTERCEPTOR,
       useClass: ErrorHandlingInterceptor,

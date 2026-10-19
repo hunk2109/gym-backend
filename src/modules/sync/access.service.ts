@@ -485,8 +485,19 @@ export class AccessService {
           relations: ['user'],
         });
       }
+      if (!member && userData.email && userData.email.trim()) {
+        const foundUser = await this.userRepository.findOne({
+          where: { email: userData.email.trim() },
+        });
+        if (foundUser) {
+          member = await this.memberRepository.findOne({
+            where: { userId: foundUser.id },
+            relations: ['user'],
+          });
+        }
+      }
 
-      // Enriquecer datos con cédula y teléfono si existen en la BD local
+      // Enriquecer datos con cédula, teléfono, email, zkUid y legacyBadgenumber si existen en la BD local
       if (member) {
         if (!userData.documentId && member.documentId) {
           userData.documentId = member.documentId;
@@ -494,8 +505,18 @@ export class AccessService {
         if (!userData.phone && member.user?.phone) {
           userData.phone = member.user.phone;
         }
+        if (!userData.email && member.user?.email) {
+          userData.email = member.user.email;
+        }
         if (!userData.USERID && member.zkUid) {
           userData.USERID = member.zkUid;
+        }
+        if (!userData.legacyBadgenumber) {
+          if (member.memberCode && member.memberCode.startsWith('MEM_')) {
+            userData.legacyBadgenumber = member.memberCode;
+          } else if (member.zkUid) {
+            userData.legacyBadgenumber = `MEM_${String(member.zkUid).padStart(6, '0')}`;
+          }
         }
       }
 

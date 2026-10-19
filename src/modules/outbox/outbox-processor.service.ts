@@ -11,6 +11,7 @@ import {
 } from './entities/notification-outbox.entity';
 import { WhatsappService } from '../whatsapp-settings/whatsapp.service';
 import { EmailService } from '../email-settings/email.service';
+import { isDeliverableEmail } from './outbox.service';
 
 @Injectable()
 export class OutboxProcessorService {
@@ -128,10 +129,12 @@ export class OutboxProcessorService {
         throw new Error(`Canal desconocido: ${item.channel}`);
       }
 
-      // Éxito: Marcar como SENT
+      // Éxito o Descarte controlado: Marcar como SENT
       item.status = NotificationOutboxStatus.SENT;
       item.processedAt = new Date();
-      item.errorMessage = undefined;
+      if (!item.errorMessage?.startsWith('Omitido')) {
+        item.errorMessage = undefined;
+      }
       await this.outboxRepository.save(item);
       this.logger.log(`[Outbox] ✅ Entregado (${item.channel}): ${item.recipient} (ID: ${item.id})`);
     } catch (error: any) {
@@ -160,6 +163,12 @@ export class OutboxProcessorService {
    * Despacha un correo electrónico usando EmailService
    */
   private async deliverEmail(item: NotificationOutbox): Promise<void> {
+    if (!isDeliverableEmail(item.recipient)) {
+      this.logger.warn(`[OutboxProcessor] 🛑 Omitiendo entrega de correo a dirección local/ficticia: ${item.recipient} (ID: ${item.id})`);
+      item.errorMessage = 'Omitido automáticamente: dirección local (.local)';
+      return;
+    }
+
     let attachments: any[] | undefined;
     if (item.payloadJson) {
       try {

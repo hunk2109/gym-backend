@@ -10,7 +10,7 @@ import { PermissionsService } from '../auth/services/permissions.service';
 import { EmailService } from '../email-settings/email.service';
 import { WhatsappService } from '../whatsapp-settings/whatsapp.service';
 import { PromotionsService } from '../promotions/promotions.service';
-import { OutboxService } from '../outbox/outbox.service';
+import { OutboxService, isDeliverableEmail } from '../outbox/outbox.service';
 import { NotificationPriority } from '../outbox/entities/notification-outbox.entity';
 import { AccessService } from '../sync/access.service';
 
@@ -832,7 +832,7 @@ export class PaymentsService {
         }
       }
 
-      if (user.email) {
+      if (user.email && isDeliverableEmail(user.email)) {
         try {
           await this.outboxService.enqueueEmail({
             recipient: user.email,

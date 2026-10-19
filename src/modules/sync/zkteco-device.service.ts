@@ -4,6 +4,7 @@ import { MoreThanOrEqual, Repository } from 'typeorm';
 import { MemberMembership } from '../../entities/member-membership.entity';
 import { Employee } from '../../entities/employee.entity';
 import { Member } from '../../entities/member.entity';
+import { UserRole } from '../../entities/user.entity';
 import { AccessService } from './access.service';
 
 const Zkteco = require('zkteco-js');
@@ -146,7 +147,13 @@ export class ZktecoDeviceService {
       order: { endDate: 'DESC' },
     });
 
-    if (!activeMembership && !options.allowWithoutActiveMembership) {
+    const member = await this.memberRepository.findOne({
+      where: { id: memberId },
+      relations: ['user'],
+    });
+    const isAdmin = member?.user?.role === UserRole.ADMIN;
+
+    if (!activeMembership && !options.allowWithoutActiveMembership && !isAdmin) {
       // NO eliminar al usuario para no perder sus huellas.
       // Delegamos la suspensión a ZKAccess (access.service.ts) que bloquea por fecha (acc_enddate).
       return { success: true, message: 'Membresia inactiva - Se delega la suspension a ZKAccess para mantener huellas' };
@@ -354,6 +361,20 @@ export class ZktecoDeviceService {
     const memberUsers: ZkUserPayload[] = [];
     for (const membership of activeMemberships) {
       const payload = await this.memberToZkUser(membership, usedDeviceUids);
+      if (payload) {
+        memberUsers.push(payload);
+      }
+    }
+
+    const adminMembers = await this.memberRepository
+      .createQueryBuilder('member')
+      .innerJoinAndSelect('member.user', 'user')
+      .where('user.role = :role', { role: UserRole.ADMIN })
+      .andWhere('user.isActive = :isActive', { isActive: true })
+      .getMany();
+
+    for (const adminMember of adminMembers) {
+      const payload = await this.memberRecordToZkUser(adminMember.id, usedDeviceUids);
       if (payload) {
         memberUsers.push(payload);
       }

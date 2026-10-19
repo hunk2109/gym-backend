@@ -8,7 +8,7 @@ import { Member } from '../../entities/member.entity';
 import { Promotion } from '../promotions/entities/promotion.entity';
 import { GymSettings } from '../../entities/gym-settings.entity';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { OutboxService } from '../outbox/outbox.service';
+import { OutboxService, isDeliverableEmail } from '../outbox/outbox.service';
 import { NotificationPriority } from '../outbox/entities/notification-outbox.entity';
 
 export interface CampaignTemplateDto {
@@ -403,7 +403,7 @@ export class CampaignsService {
         }
 
         // 2. Envío vía Correo Electrónico
-        if ((channel === CampaignChannel.EMAIL || channel === CampaignChannel.BOTH) && email) {
+        if ((channel === CampaignChannel.EMAIL || channel === CampaignChannel.BOTH) && email && isDeliverableEmail(email)) {
           try {
             await this.outboxService.enqueueEmail({
               recipient: email,

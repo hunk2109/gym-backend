@@ -1,9 +1,9 @@
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Like } from 'typeorm';
+import { Repository, Like, Brackets } from 'typeorm';
 import { v4 as uuidv4 } from 'uuid';
 import { Member } from '../../entities/member.entity';
-import { User } from '../../entities/user.entity';
+import { User, UserRole } from '../../entities/user.entity';
 import { MemberMembership } from '../../entities/member-membership.entity';
 import { Payment, PaymentType, PaymentStatus, PaymentMethod } from '../../entities/payment.entity';
 import { CreateMemberDto, UpdateMemberDto } from './dto/create-member.dto';
@@ -451,12 +451,13 @@ export class MembersService {
   async findAll(page: number = 1, limit: number = 10): Promise<{ data: any[]; pagination: any }> {
     const skip = (page - 1) * limit;
 
-    // Query simple con relaciones
+    // Query simple con relaciones excluyendo usuarios ADMIN
     const data = await this.memberRepository
       .createQueryBuilder('member')
       .leftJoinAndSelect('member.user', 'user')
       .leftJoinAndSelect('member.memberships', 'memberships')
       .leftJoinAndSelect('memberships.membership', 'plan')
+      .where('(user.role != :adminRole OR user.role IS NULL)', { adminRole: UserRole.ADMIN })
       .select([
         'member.id',
         'member.userId',
@@ -488,7 +489,11 @@ export class MembersService {
       console.log(`[MembersService.findAll] Primer miembro: id=${data[0].id}, userId=${data[0].userId}, type=${typeof data[0].id}`);
     }
 
-    const total = await this.memberRepository.count();
+    const total = await this.memberRepository
+      .createQueryBuilder('member')
+      .leftJoin('member.user', 'user')
+      .where('(user.role != :adminRole OR user.role IS NULL)', { adminRole: UserRole.ADMIN })
+      .getCount();
 
     // Calcular hasPendingPayment para cada miembro (con async)
     const mappedData = await Promise.all(
@@ -913,19 +918,24 @@ export class MembersService {
     const searchQuery = `%${(query || '').trim().toLowerCase()}%`;
 
     // Search in user email, firstName, lastName, member code or documentId.
-    // MySQL does not support ILIKE, so use LOWER(...) LIKE for case-insensitive search.
+    // Excluyendo siempre usuarios con rol ADMIN
     const [data, total] = await this.memberRepository
       .createQueryBuilder('member')
       .leftJoinAndSelect('member.user', 'user')
       .leftJoinAndSelect('member.memberships', 'memberships')
       .leftJoinAndSelect('memberships.membership', 'plan')
-      .where('LOWER(user.email) LIKE :query', { query: searchQuery })
-      .orWhere('LOWER(user.firstName) LIKE :query', { query: searchQuery })
-      .orWhere('LOWER(user.lastName) LIKE :query', { query: searchQuery })
-      .orWhere('LOWER(member.memberCode) LIKE :query', { query: searchQuery })
-      .orWhere('LOWER(member.documentId) LIKE :query', { query: searchQuery })
-      .orWhere('user.phone LIKE :query', { query: searchQuery })
-      .orWhere('member.emergencyPhone LIKE :query', { query: searchQuery })
+      .where('(user.role != :adminRole OR user.role IS NULL)', { adminRole: UserRole.ADMIN })
+      .andWhere(
+        new Brackets((qb) => {
+          qb.where('LOWER(user.email) LIKE :query', { query: searchQuery })
+            .orWhere('LOWER(user.firstName) LIKE :query', { query: searchQuery })
+            .orWhere('LOWER(user.lastName) LIKE :query', { query: searchQuery })
+            .orWhere('LOWER(member.memberCode) LIKE :query', { query: searchQuery })
+            .orWhere('LOWER(member.documentId) LIKE :query', { query: searchQuery })
+            .orWhere('user.phone LIKE :query', { query: searchQuery })
+            .orWhere('member.emergencyPhone LIKE :query', { query: searchQuery });
+        }),
+      )
       .skip(skip)
       .take(limitNum)
       .orderBy('member.createdAt', 'DESC')
@@ -965,6 +975,7 @@ export class MembersService {
       .createQueryBuilder('member')
       .leftJoinAndSelect('member.user', 'user')
       .where('member.joinDate >= :date', { date })
+      .andWhere('(user.role != :adminRole OR user.role IS NULL)', { adminRole: UserRole.ADMIN })
       .orderBy('member.joinDate', 'DESC')
       .getMany();
   }

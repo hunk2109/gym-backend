@@ -16,7 +16,7 @@ import { EmailService } from '../email-settings/email.service';
 import { GymSettingsService } from '../gym-settings/gym-settings.service';
 import { AccessService } from '../sync/access.service';
 import { ZktecoDeviceService } from '../sync/zkteco-device.service';
-import { OutboxService } from '../outbox/outbox.service';
+import { OutboxService, isDeliverableEmail } from '../outbox/outbox.service';
 import { NotificationPriority } from '../outbox/entities/notification-outbox.entity';
 
 @Injectable()
@@ -749,7 +749,7 @@ export class MembershipsService {
                 const text = `Hola ${user.firstName},\n\nTu pago de membresía está pendiente desde hace ${daysSinceDue} días.\n\nPara mantener tu acceso activo en el torniquete, te recordamos realizar tu pago en los próximos ${daysUntilSuspension} día${daysUntilSuspension === 1 ? '' : 's'} antes de la suspensión automática de tu cuenta.\n\nPuedes pagar en recepción o mediante transferencia.\n\n¡Gracias por entrenar con nosotros!`;
                 const html = `<p>Hola ${user.firstName},</p><p>Tu pago de membresía está pendiente desde hace ${daysSinceDue} días.</p><p>Para mantener tu acceso activo en el torniquete, te recordamos realizar tu pago en los próximos <strong>${daysUntilSuspension} día${daysUntilSuspension === 1 ? '' : 's'}</strong> antes de la suspensión automática.</p><p>Puedes pagar directamente en recepción.</p>`;
 
-                if (user.email) {
+                if (user.email && isDeliverableEmail(user.email)) {
                   await this.outboxService.enqueueEmail({
                     recipient: user.email,
                     recipientName: user.firstName,
@@ -1131,7 +1131,7 @@ export class MembershipsService {
         relations: ['user'],
       });
 
-      if (memberWithUser && memberWithUser.user && memberWithUser.user.email) {
+      if (memberWithUser && memberWithUser.user && memberWithUser.user.email && isDeliverableEmail(memberWithUser.user.email)) {
         const memberEmail = memberWithUser.user.email;
         const memberName = memberWithUser.user.firstName || memberWithUser.user.email;
         const membershipName = membership.membership?.name || 'Tu Membresía';
