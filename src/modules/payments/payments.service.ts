@@ -219,7 +219,7 @@ export class PaymentsService {
 
       const memberships = await this.memberMembershipRepository.find({
         where: { paymentId: payment.id },
-        relations: ['member', 'member.user'],
+        relations: ['member', 'member.user', 'membership'],
       });
 
       for (const mm of memberships) {
@@ -232,8 +232,10 @@ export class PaymentsService {
           // Desbloquear torniquete ZKTeco en tiempo real
           try {
             if (mm.member?.user) {
+              const isDaily = Boolean(mm.membership?.durationDays && Number(mm.membership?.durationDays) > 0);
+              const graceDays = isDaily ? 0 : 15;
               const accEndDate = new Date(mm.endDate);
-              accEndDate.setDate(accEndDate.getDate() + 15);
+              accEndDate.setDate(accEndDate.getDate() + graceDays);
               await this.accessService.pushMemberToAccess({
                 Badgenumber: mm.member.memberCode.replace(/[^0-9]/g, ''),
                 name: mm.member.user.firstName,

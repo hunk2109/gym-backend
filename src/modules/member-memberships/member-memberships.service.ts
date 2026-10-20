@@ -165,8 +165,9 @@ export class MemberMembershipsService {
     // 🛡️ Política de Empresa: No permitir cambiar de plan directamente si el socio tiene una membresía activa vigente
     const activeMembership = await this.getMemberActiveMembership(memberId);
     if (activeMembership && activeMembership.isActive) {
-      const now = new Date();
-      const isStillVigente = !activeMembership.endDate || new Date(activeMembership.endDate) > now;
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+      const isStillVigente = !activeMembership.endDate || new Date(activeMembership.endDate) >= todayStart;
       if (isStillVigente && activeMembership.membershipId !== dto.membershipId) {
         throw new BadRequestException(
           'El socio tiene una membresía activa con otro plan. Por política de la empresa, no está permitido modificar el plan directamente; debe cancelar el plan actual antes de asignar uno nuevo.',
@@ -579,15 +580,19 @@ export class MemberMembershipsService {
       // Obtener el memberCode
       const memberDetails = await this.memberRepository.findOne({ where: { id: memberId }, relations: ['user'] });
       
-      // Calcular grace period
+      // Calcular grace period (SOLO para membresías NO diarias / plazo fijo en días)
+      // Las membresías por día no deben considerar días de gracia
       let graceDays = 0;
-      try {
-        const settings = await this.gymSettingsService.getSettings();
-        if (settings && settings.membershipSuspensionDays) {
-          graceDays = settings.membershipSuspensionDays;
+      const isDailyMembership = Boolean(membership.durationDays && Number(membership.durationDays) > 0);
+      if (!isDailyMembership) {
+        try {
+          const settings = await this.gymSettingsService.getSettings();
+          if (settings && settings.membershipSuspensionDays) {
+            graceDays = settings.membershipSuspensionDays;
+          }
+        } catch (e) {
+          console.warn(`[MemberMembershipsService] No se pudo obtener settings, usando graceDays = 0`, e);
         }
-      } catch (e) {
-        console.warn(`[MemberMembershipsService] No se pudo obtener settings, usando graceDays = 0`, e);
       }
       
       const accEndDate = new Date(endDate);

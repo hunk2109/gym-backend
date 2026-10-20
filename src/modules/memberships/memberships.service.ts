@@ -821,8 +821,10 @@ export class MembershipsService {
           
           // Sincronizar ZKAccess con días de gracia sumados
           try {
+            const isDaily = Boolean(currentMembership.membership?.durationDays && Number(currentMembership.membership?.durationDays) > 0);
+            const graceDays = isDaily ? 0 : suspensionDays;
             const accEndDate = new Date(currentMembership.endDate);
-            accEndDate.setDate(accEndDate.getDate() + suspensionDays);
+            accEndDate.setDate(accEndDate.getDate() + graceDays);
             
             if (currentMembership.member?.user) {
               await this.accessService.pushMemberToAccess({
@@ -1091,7 +1093,8 @@ export class MembershipsService {
     // Sincronizar ZKAccess y reactivar si estaba suspendida
     try {
       const settings = await this.gymSettingsService.getSettings();
-      const graceDays = settings?.membershipSuspensionDays || 0;
+      const isDaily = Boolean(membership.membership?.durationDays && Number(membership.membership?.durationDays) > 0);
+      const graceDays = isDaily ? 0 : (settings?.membershipSuspensionDays || 0);
       const accEndDate = new Date(membership.endDate);
       accEndDate.setDate(accEndDate.getDate() + graceDays);
 
