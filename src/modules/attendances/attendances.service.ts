@@ -273,6 +273,10 @@ export class AttendancesService {
       success: true,
       status: 'ACCEPTED',
       message: 'Acceso permitido',
+      memberId: member.id,
+      memberCode: member.memberCode || null,
+      memberName: member.user?.firstName || 'Desconocido',
+      memberLastName: member.user?.lastName || '',
       attendance: serializedAttendance,
       timestamp: new Date().toISOString(),
     };
@@ -394,6 +398,10 @@ export class AttendancesService {
       success: true,
       status: 'ACCEPTED',
       message: 'Acceso permitido',
+      memberId: member.id,
+      memberCode: member.memberCode || null,
+      memberName: member.user?.firstName || 'Desconocido',
+      memberLastName: member.user?.lastName || '',
       attendance: serializedAttendance,
       timestamp: new Date().toISOString(),
     };

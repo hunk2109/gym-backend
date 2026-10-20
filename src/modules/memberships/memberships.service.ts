@@ -315,15 +315,15 @@ export class MembershipsService {
       
       console.log(`[MembershipsService] Calculando end date - isRecurring: ${isRecurring}, durationDays: ${updatedMembership.durationDays}, durationMonths: ${updatedMembership.durationMonths}`);
       
-      // No recurrente: usar durationDays
-      if (!isRecurring && updatedMembership.durationDays) {
-        console.log(`[MembershipsService] Membresía NO recurrente - Sumando ${updatedMembership.durationDays} días`);
-        end.setDate(end.getDate() + updatedMembership.durationDays);
+      // Si tiene duración en días, prevalece sobre meses
+      if (updatedMembership.durationDays && Number(updatedMembership.durationDays) > 0) {
+        console.log(`[MembershipsService] Membresía con duración en días - Sumando ${updatedMembership.durationDays} días`);
+        end.setDate(end.getDate() + Number(updatedMembership.durationDays));
       }
-      // Recurrente: usar durationMonths
-      else if (isRecurring && updatedMembership.durationMonths) {
-        console.log(`[MembershipsService] Membresía recurrente - Sumando ${updatedMembership.durationMonths} meses`);
-        end.setMonth(end.getMonth() + updatedMembership.durationMonths);
+      // Si tiene duración en meses
+      else if (updatedMembership.durationMonths && Number(updatedMembership.durationMonths) > 0) {
+        console.log(`[MembershipsService] Membresía mensual - Sumando ${updatedMembership.durationMonths} meses`);
+        end.setMonth(end.getMonth() + Number(updatedMembership.durationMonths));
       }
       // Error when no membership duration is defined
       else {
@@ -424,12 +424,11 @@ export class MembershipsService {
     const newStartDate = currentMembership.endDate;
     const newEndDate = new Date(newStartDate);
     
-    // Usar durationDays si es no recurrente, durationMonths si es recurrente
-    const isRecurring = Boolean(currentMembership.membership.isRecurring);
-    if (isRecurring && currentMembership.membership.durationMonths) {
-      newEndDate.setMonth(newEndDate.getMonth() + currentMembership.membership.durationMonths);
-    } else if (!isRecurring && currentMembership.membership.durationDays) {
-      newEndDate.setDate(newEndDate.getDate() + currentMembership.membership.durationDays);
+    // Si tiene duración en días, prevalece sobre meses
+    if (currentMembership.membership.durationDays && Number(currentMembership.membership.durationDays) > 0) {
+      newEndDate.setDate(newEndDate.getDate() + Number(currentMembership.membership.durationDays));
+    } else if (currentMembership.membership.durationMonths && Number(currentMembership.membership.durationMonths) > 0) {
+      newEndDate.setMonth(newEndDate.getMonth() + Number(currentMembership.membership.durationMonths));
     } else {
       throw new BadRequestException(
         'No se puede renovar esta membresía porque no tiene duración definida.',

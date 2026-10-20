@@ -790,6 +790,16 @@ export class EmployeeService {
       this.logger.error(`[EmployeeService] ❌ Falló la sincronización a Access del empleado promovido: ${accessError.message}`);
     }
 
+    // Remover registro previo de socio para evitar que siga apareciendo en el directorio de socios
+    if (existingMember) {
+      try {
+        await this.memberRepository.remove(existingMember);
+        this.logger.log(`[EmployeeService] Registro previo de socio eliminado tras promoción a empleado para ${user.email}`);
+      } catch (err) {
+        this.logger.warn(`[EmployeeService] No se pudo remover el member previo tras promoción: ${err.message}`);
+      }
+    }
+
     // Enviar credenciales tanto por correo como por WhatsApp
     const { emailSent, whatsappSent } = await this.sendEmployeeCredentialsNotifications(
       employee,

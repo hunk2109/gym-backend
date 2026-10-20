@@ -1,6 +1,9 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Product } from '../../entities/product.entity';
+import { CashRegister } from '../../entities/cash-register.entity';
+import { CashRegisterTransaction } from '../../entities/cash-register-transaction.entity';
+import { AccountPayable } from '../../entities/account-payable.entity';
 import { ProductService } from './product.service';
 import { ProductController } from './product.controller';
 import { AuthModule } from '../auth/auth.module';
@@ -11,7 +14,7 @@ import { GymSettingsModule } from '../gym-settings/gym-settings.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Product]),
+    TypeOrmModule.forFeature([Product, CashRegister, CashRegisterTransaction, AccountPayable]),
     AuthModule,
     AuditLogModule,
     EmailSettingsModule,

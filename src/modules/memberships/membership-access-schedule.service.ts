@@ -188,11 +188,18 @@ export class MembershipAccessScheduleService {
       relations: ['accessSchedules'],
     });
 
-    if (!membership || !membership.accessSchedules || membership.accessSchedules.length === 0) {
+    if (!membership) {
       return {
         allowed: false,
-        reason: 'Sin horarios de acceso configurados',
-        membership: membership || undefined,
+        reason: 'Membresía no encontrada',
+      };
+    }
+
+    // Si la membresía no tiene horarios específicos configurados, se asume acceso libre/completo
+    if (!membership.accessSchedules || membership.accessSchedules.length === 0) {
+      return {
+        allowed: true,
+        membership,
       };
     }
 
@@ -324,11 +331,18 @@ export class MembershipAccessScheduleService {
       relations: ['accessSchedules'],
     });
 
-    if (!membership || !membership.accessSchedules || membership.accessSchedules.length === 0) {
+    if (!membership) {
       return {
         allowed: false,
-        reason: 'Sin horarios de acceso configurados',
-        membership: membership || undefined,
+        reason: 'Membresía no encontrada',
+      };
+    }
+
+    // Si la membresía no tiene horarios específicos configurados, se asume acceso libre/completo
+    if (!membership.accessSchedules || membership.accessSchedules.length === 0) {
+      return {
+        allowed: true,
+        membership,
       };
     }
 

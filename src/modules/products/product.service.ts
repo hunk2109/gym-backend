@@ -1,7 +1,10 @@
-import { Injectable, NotFoundException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Product } from '../../entities/product.entity';
+import { CashRegister } from '../../entities/cash-register.entity';
+import { CashRegisterTransaction, CashRegisterTransactionType } from '../../entities/cash-register-transaction.entity';
+import { AccountPayable, AccountPayableStatus } from '../../entities/account-payable.entity';
 import { CreateProductDto, UpdateProductDto } from './dto/create-product.dto';
 import { PermissionsService } from '../auth/services/permissions.service';
 import { AuditLogService } from '../audit-logs/audit-log.service';
@@ -16,6 +19,12 @@ export class ProductService {
   constructor(
     @InjectRepository(Product)
     private productRepository: Repository<Product>,
+    @InjectRepository(CashRegister)
+    private cashRegisterRepository: Repository<CashRegister>,
+    @InjectRepository(CashRegisterTransaction)
+    private cashTxRepository: Repository<CashRegisterTransaction>,
+    @InjectRepository(AccountPayable)
+    private payableRepository: Repository<AccountPayable>,
     private readonly permissionsService: PermissionsService,
     private readonly auditLogService: AuditLogService,
     private readonly emailService: EmailService,
@@ -69,6 +78,10 @@ export class ProductService {
   async updateProduct(id: string, updateProductDto: UpdateProductDto, authUser?: any) {
     this.logger.debug(`[Products] Attempting to update product ID: ${id}`, updateProductDto);
     
+    // Evitar la edicion manual del stock actual al editar un producto
+    delete (updateProductDto as any).quantity;
+    delete (updateProductDto as any).quantityAvailable;
+
     // Validar que el producto existe
     const oldProduct = await this.getProductById(id);
     if (!oldProduct) {
@@ -171,18 +184,84 @@ export class ProductService {
       .getMany();
   }
 
-  async addStock(id: string, quantity: number) {
+  async getActiveCashRegister(userId?: string): Promise<CashRegister | null> {
+    if (userId) {
+      const userRegister = await this.cashRegisterRepository.findOne({
+        where: { userId, isOpen: true },
+      });
+      if (userRegister) return userRegister;
+    }
+
+    return this.cashRegisterRepository.findOne({
+      where: { isOpen: true },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+async addStock(id: string, quantity: number, unitCost?: number, generateCashExpense?: boolean, userId?: string) {
+    const activeRegister = await this.getActiveCashRegister(userId);
+    if (!activeRegister) {
+      throw new BadRequestException('No hay una caja abierta. Debe haber un turno de caja activo para registrar entradas de productos.');
+    }
+
     const product = await this.getProductById(id);
     product.quantityAvailable += quantity;
+
+    if (unitCost !== undefined && unitCost !== null && !isNaN(Number(unitCost)) && Number(unitCost) >= 0) {
+      product.cost = Number(unitCost);
+    }
+
     const savedProduct = await this.productRepository.save(product);
+
+    const effectiveUnitCost = (unitCost !== undefined && unitCost !== null && !isNaN(Number(unitCost)))
+      ? Number(unitCost)
+      : Number(product.cost || 0);
+    const totalExpense = effectiveUnitCost * quantity;
+
+    // Registrar gasto de caja SOLAMENTE si el usuario selecciono que genera gasto en caja
+    if (generateCashExpense === true && totalExpense > 0) {
+      try {
+        const payable = this.payableRepository.create({
+          concept: `Entrada de inventario: ${quantity}x ${product.name}`,
+          providerName: 'Entrada de Inventario',
+          amount: totalExpense,
+          amountPaid: totalExpense,
+          status: AccountPayableStatus.PAID,
+          isCashWithdrawal: true,
+          cashRegisterId: activeRegister.id,
+        });
+        const savedPayable = await this.payableRepository.save(payable);
+
+        const cashTx = this.cashTxRepository.create({
+          cashRegisterId: activeRegister.id,
+          type: CashRegisterTransactionType.OUT,
+          amount: totalExpense,
+          concept: `Entrada de inventario: ${quantity}x ${product.name} (RD$ ${effectiveUnitCost.toFixed(2)} c/u)`,
+          referenceId: savedPayable.id,
+        });
+        await this.cashTxRepository.save(cashTx);
+        this.logger.log(`[Products] Gasto de caja registrado por entrada de stock: RD$ ${totalExpense} (Caja ID: ${activeRegister.id})`);
+      } catch (error) {
+        this.logger.error('Error registrando gasto de caja por entrada de inventario:', error);
+      }
+    }
 
     try {
       await this.auditLogService.create({
         action: 'PRODUCT_STOCK_ADDED',
         module: 'PRODUCTS',
-        description: `Entrada de stock para producto ${product.name}: +${quantity}`,
+        description: `Entrada de stock para ${product.name}: +${quantity} (${generateCashExpense ? `Gasto en caja: RD$ ${totalExpense}` : 'Sin gasto en caja'})`,
+        userId: userId,
         userName: 'Sistema',
-        newValue: { productId: product.id, quantityAdded: quantity, quantityAvailable: savedProduct.quantityAvailable },
+        newValue: {
+          productId: product.id,
+          quantityAdded: quantity,
+          unitCost: effectiveUnitCost,
+          generateCashExpense: !!generateCashExpense,
+          totalExpense: generateCashExpense ? totalExpense : 0,
+          quantityAvailable: savedProduct.quantityAvailable,
+          cashRegisterId: activeRegister.id,
+        },
       });
     } catch (error) {
       this.logger.error('Error logging product stock addition:', error);
@@ -197,13 +276,71 @@ export class ProductService {
     return savedProduct;
   }
 
-  async removeStock(id: string, quantity: number) {
+  async removeStock(
+    id: string,
+    quantity: number,
+    reason?: string,
+    generateCashIncome?: boolean,
+    unitPrice?: number,
+    userId?: string,
+  ) {
+    const activeRegister = await this.getActiveCashRegister(userId);
+    if (!activeRegister) {
+      throw new BadRequestException('No hay una caja abierta. Debe haber un turno de caja activo para registrar salidas de productos.');
+    }
+
     const product = await this.getProductById(id);
     if (product.quantityAvailable < quantity) {
-      throw new Error('Insufficient stock');
+      throw new BadRequestException(`Stock insuficiente. Stock actual: ${product.quantityAvailable}, solicitado: ${quantity}`);
     }
+
     product.quantityAvailable -= quantity;
-    return this.productRepository.save(product);
+    const savedProduct = await this.productRepository.save(product);
+
+    const effectiveUnitPrice = (unitPrice !== undefined && unitPrice !== null && !isNaN(Number(unitPrice)))
+      ? Number(unitPrice)
+      : Number(product.price || 0);
+    const totalIncome = effectiveUnitPrice * quantity;
+
+    // Registrar ingreso en caja chica SOLAMENTE si el usuario selecciono que genera ingreso
+    if (generateCashIncome === true && totalIncome > 0) {
+      try {
+        const cashTx = this.cashTxRepository.create({
+          cashRegisterId: activeRegister.id,
+          type: CashRegisterTransactionType.IN,
+          amount: totalIncome,
+          concept: `Ingreso por salida de inventario: ${quantity}x ${product.name} (RD$ ${effectiveUnitPrice.toFixed(2)} c/u)`,
+          referenceId: product.id,
+        });
+        await this.cashTxRepository.save(cashTx);
+        this.logger.log(`[Products] Ingreso en caja chica registrado por salida de stock: RD$ ${totalIncome} (Caja ID: ${activeRegister.id})`);
+      } catch (error) {
+        this.logger.error('Error registrando ingreso en caja chica por salida de inventario:', error);
+      }
+    }
+
+    try {
+      await this.auditLogService.create({
+        action: 'PRODUCT_STOCK_REMOVED',
+        module: 'PRODUCTS',
+        description: `Salida de stock para ${product.name}: -${quantity}. Razón: ${reason || 'Ajuste / Salida manual'} (${generateCashIncome ? `Ingreso en caja: RD$ ${totalIncome}` : 'Sin ingreso en caja'})`,
+        userId: userId,
+        userName: 'Sistema',
+        newValue: {
+          productId: product.id,
+          quantityRemoved: quantity,
+          reason: reason || 'Ajuste manual',
+          generateCashIncome: !!generateCashIncome,
+          totalIncome: generateCashIncome ? totalIncome : 0,
+          quantityAvailable: savedProduct.quantityAvailable,
+          cashRegisterId: activeRegister.id,
+        },
+      });
+    } catch (error) {
+      this.logger.error('Error logging product stock removal:', error);
+    }
+
+    return savedProduct;
   }
 
   private async sendProductEntryNotifications(product: Product, quantityAdded: number) {

@@ -162,26 +162,35 @@ export class MemberMembershipsService {
       );
     }
 
+    // 🛡️ Política de Empresa: No permitir cambiar de plan directamente si el socio tiene una membresía activa vigente
+    const activeMembership = await this.getMemberActiveMembership(memberId);
+    if (activeMembership && activeMembership.isActive) {
+      const now = new Date();
+      const isStillVigente = !activeMembership.endDate || new Date(activeMembership.endDate) > now;
+      if (isStillVigente && activeMembership.membershipId !== dto.membershipId) {
+        throw new BadRequestException(
+          'El socio tiene una membresía activa con otro plan. Por política de la empresa, no está permitido modificar el plan directamente; debe cancelar el plan actual antes de asignar uno nuevo.',
+        );
+      }
+    }
+
 
 
     // Validar fechas
     const startDate = new Date(dto.startDate);
     let endDate: Date;
 
-    // IMPORTANTE: Recalcular endDate según si es recurrente o no
-    // Si es NO recurrente (isRecurring = false), usar durationDays
-    // Si es recurrente (isRecurring = true), usar durationMonths
-    const isRecurring = Boolean(membership.isRecurring);
-    console.log(`[MemberMembershipsService] Evaluando duración - isRecurring: ${isRecurring}, durationDays: ${membership.durationDays}, durationMonths: ${membership.durationMonths}`);
-    
-    // RECALCULAR endDate basado en los campos correctos de la membresía
+    // IMPORTANTE: Recalcular endDate según la duración de la membresía
+    // Si la membresía tiene duración en días (durationDays > 0), SIEMPRE prevalece sobre durationMonths
     endDate = new Date(startDate);
-    if (!isRecurring && membership.durationDays) {
-      console.log(`[MemberMembershipsService] Membresía NO recurrente - Sumando ${membership.durationDays} días a partir de ${startDate.toISOString()}`);
-      endDate.setDate(endDate.getDate() + membership.durationDays);
-    } else if (isRecurring && membership.durationMonths) {
-      console.log(`[MemberMembershipsService] Membresía recurrente - Sumando ${membership.durationMonths} meses a partir de ${startDate.toISOString()}`);
-      endDate.setMonth(endDate.getMonth() + membership.durationMonths);
+    if (membership.durationDays && Number(membership.durationDays) > 0) {
+      const days = Number(membership.durationDays);
+      console.log(`[MemberMembershipsService] Membresía con duración en días (${days} días) - Sumando a partir de ${startDate.toISOString()}`);
+      endDate.setDate(endDate.getDate() + days);
+    } else if (membership.durationMonths && Number(membership.durationMonths) > 0) {
+      const months = Number(membership.durationMonths);
+      console.log(`[MemberMembershipsService] Membresía mensual (${months} meses) - Sumando a partir de ${startDate.toISOString()}`);
+      endDate.setMonth(endDate.getMonth() + months);
     } else if (dto.endDate) {
       endDate = new Date(dto.endDate);
       console.log(`[MemberMembershipsService] No hay duración definida; usando endDate proporcionada: ${dto.endDate}`);

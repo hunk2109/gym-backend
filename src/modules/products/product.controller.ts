@@ -99,8 +99,15 @@ export class ProductController {
   // Agregar stock - Solo ADMIN/ENCARGADO/EMPLEADO_CAJERO
   @Post(':id/stock/add')
   @Roles(UserRole.ADMIN, UserRole.ENCARGADO, UserRole.EMPLEADO_CAJERO)
-  async addStock(@Param('id') id: string, @Body('quantity') quantity: number) {
-    return this.productService.addStock(id, quantity);
+  async addStock(
+    @Param('id') id: string,
+    @Body('quantity') quantity: number,
+    @Body('unitCost') unitCost?: number,
+    @Body('generateCashExpense') generateCashExpense?: boolean,
+    @Request() req?: any,
+  ) {
+    const userId = req?.user?.id || req?.user?.sub || req?.user?.userId;
+    return this.productService.addStock(id, quantity, unitCost, generateCashExpense, userId);
   }
 
   // Remover stock - Solo ADMIN/ENCARGADO/EMPLEADO_CAJERO
@@ -109,8 +116,13 @@ export class ProductController {
   async removeStock(
     @Param('id') id: string,
     @Body('quantity') quantity: number,
+    @Body('reason') reason?: string,
+    @Body('generateCashIncome') generateCashIncome?: boolean,
+    @Body('unitPrice') unitPrice?: number,
+    @Request() req?: any,
   ) {
-    return this.productService.removeStock(id, quantity);
+    const userId = req?.user?.id || req?.user?.sub || req?.user?.userId;
+    return this.productService.removeStock(id, quantity, reason, generateCashIncome, unitPrice, userId);
   }
 
   // Ver valor del inventario - Solo ADMIN/ENCARGADO
