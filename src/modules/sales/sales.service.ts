@@ -123,6 +123,33 @@ export class SalesService {
       }
     }
 
+    // Si el método de pago es saldo a favor, validar y descontar del socio
+    if (createSaleDto.paymentMethod === 'credit_balance') {
+      if (!createSaleDto.memberId) {
+        throw new BadRequestException('Para pagar con saldo a favor es necesario seleccionar un socio registrado.');
+      }
+      const memberRows = await this.saleRepository.manager.query(
+        'SELECT id, creditBalance FROM members WHERE id = ? OR userId = ? LIMIT 1',
+        [createSaleDto.memberId, createSaleDto.memberId]
+      );
+      if (!memberRows || memberRows.length === 0) {
+        throw new BadRequestException('No se encontró el socio para verificar el saldo a favor.');
+      }
+      const member = memberRows[0];
+      const memberCredit = Number(member.creditBalance || 0);
+      const netToPay = Math.max(0, totalAmount - (createSaleDto.discount || 0));
+      if (memberCredit < netToPay) {
+        throw new BadRequestException(
+          `Saldo a favor insuficiente. Disponible: RD$ ${memberCredit.toFixed(2)}, Total compra: RD$ ${netToPay.toFixed(2)}`,
+        );
+      }
+      await this.saleRepository.manager.query(
+        'UPDATE members SET creditBalance = creditBalance - ? WHERE id = ?',
+        [netToPay, member.id]
+      );
+      this.logger.log(`[Sales] 💰 Saldo a favor descontado: RD$ ${netToPay} al socio ${member.id}`);
+    }
+
     // Create sale
     const sale = this.saleRepository.create({
       memberId: validUserId,
@@ -189,6 +216,16 @@ export class SalesService {
         item.productId,
         item.quantity,
       );
+    }
+
+    // Si la venta se pagó con saldo a favor, reincorporarlo al socio
+    if (sale.paymentMethod === 'credit_balance' && sale.memberId) {
+      const netToRefund = Math.max(0, Number(sale.totalAmount) - Number(sale.discount || 0));
+      await this.saleRepository.manager.query(
+        'UPDATE members SET creditBalance = creditBalance + ? WHERE id = ? OR userId = ?',
+        [netToRefund, sale.memberId, sale.memberId]
+      );
+      this.logger.log(`[Sales] 💰 Saldo a favor reembolsado: RD$ ${netToRefund} al anular venta ${sale.id}`);
     }
 
     // Registrar motivo y usuario en las notas

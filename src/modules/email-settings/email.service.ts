@@ -388,7 +388,7 @@ export class EmailService {
   }
 
   /**
-   * Envía un email directo sin plantilla (para recordatorios de pago)
+   * Envía un email directo sin plantilla (para reportes y recordatorios de pago)
    */
   async sendEmailDirect(options: {
     to: string;
@@ -398,12 +398,22 @@ export class EmailService {
     attachments?: Array<{ filename: string; content: Buffer | string; contentType?: string; encoding?: string }>;
   }): Promise<void> {
     try {
+      if (!isDeliverableEmail(options.to)) {
+        this.logger.warn(`[EmailService] 🛑 Envío directo cancelado: dirección local/ficticia ignorada (${options.to})`);
+        return;
+      }
+
       if (!this.transporter) {
+        await this.initializeTransporter();
+      }
+
+      if (!this.transporter) {
+        this.logger.warn('[EmailService] ⚠️ No se pudo inicializar el transportador de correo.');
         throw new Error('Email transporter not initialized. Configure email settings first.');
       }
 
       const config = await this.emailConfigRepository.findOne({
-        where: { isActive: true, isVerified: true },
+        where: { isActive: true },
       });
 
       const normalizedAttachments = options.attachments?.map((att: any) => {
@@ -416,7 +426,7 @@ export class EmailService {
         return att;
       });
 
-      await this.transporter.sendMail({
+      const info = await this.transporter.sendMail({
         from: `${config?.senderName || 'Gym Manager'} <${config?.email || 'noreply@gymmanager.com'}>`,
         to: options.to,
         subject: options.subject,
@@ -425,9 +435,24 @@ export class EmailService {
         attachments: normalizedAttachments,
       });
 
-      this.logger.log(`Email sent to ${options.to}`);
+      this.logger.log(`✓ Email directo enviado a ${options.to}`);
 
-      // Intentar enviar también por WhatsApp
+      // Registrar en log de correos
+      try {
+        const log = this.emailLogRepository.create({
+          recipientEmail: options.to,
+          subject: options.subject,
+          htmlContent: options.html,
+          status: EmailStatus.SENT,
+          messageId: info?.messageId,
+          sentAt: new Date(),
+        });
+        await this.emailLogRepository.save(log);
+      } catch (logErr) {
+        this.logger.warn(`Could not save email log for direct send to ${options.to}: ${logErr.message}`);
+      }
+
+      // Intentar enviar también por WhatsApp si aplica
       try {
         const userWithPhone = await this.userRepository.findOne({
           where: { email: options.to },
@@ -440,7 +465,7 @@ export class EmailService {
           } else {
             const statusInfo = this.whatsappService.getStatus();
             if (statusInfo.status === 'CONNECTED') {
-              const fallbackText = `¡Hola! Te hemos enviado una notificación importante de Gym Manager. Adjuntamos el documento detallado.\n\nAsunto: ${options.subject}`;
+              const fallbackText = `¡Hola! Te hemos enviado una notificación importante de Gym Manager.\n\nAsunto: ${options.subject}`;
               await this.whatsappService.sendHtmlAsPdf(userWithPhone.phone, options.html, fallbackText);
             } else {
               this.logger.warn(`WhatsApp no está conectado. No se pudo enviar el PDF a ${userWithPhone.phone}`);

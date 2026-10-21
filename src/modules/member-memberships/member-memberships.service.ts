@@ -330,10 +330,16 @@ export class MemberMembershipsService {
     let paymentMethod = PaymentMethod.CASH;
 
     // Verificar saldo a favor (Crédito)
-    if (finalAmount > 0 && Number(member.creditBalance) >= finalAmount) {
-      // Usar saldo a favor porque cubre el monto total
-      member.creditBalance = Number(member.creditBalance) - finalAmount;
-      await this.memberRepository.save(member);
+    if (dto.paymentMethod === 'credit_balance' || (dto.paymentMethod as any) === PaymentMethod.CREDIT_BALANCE) {
+      if (finalAmount > 0) {
+        if (Number(member.creditBalance || 0) < finalAmount) {
+          throw new BadRequestException(
+            `Saldo a favor insuficiente para cubrir la membresía (Disponible: RD$ ${Number(member.creditBalance || 0).toFixed(2)}, Requerido: RD$ ${finalAmount.toFixed(2)})`,
+          );
+        }
+        member.creditBalance = Number(member.creditBalance) - finalAmount;
+        await this.memberRepository.save(member);
+      }
       isAutoCompleted = true;
       paymentMethod = PaymentMethod.CREDIT_BALANCE;
       console.log(`[MemberMembershipsService] 💰 Pagado con Saldo a Favor. Nuevo saldo: ${member.creditBalance}`);
@@ -830,6 +836,35 @@ export class MemberMembershipsService {
     
     console.log(`[REMOVE MEMBERSHIP] ✓ Membresía cancelada y conservada en historial: ${memberMembership.id}`);
 
+    // Si el miembro era responsable de un grupo, cancelar y bloquear también a los acompañantes
+    if (memberMembership.membershipType === 'responsible' && memberMembership.groupId) {
+      try {
+        const companions = await this.memberMembershipRepository.find({
+          where: { groupId: memberMembership.groupId, membershipType: 'companion', isActive: true },
+          relations: ['member', 'member.user'],
+        });
+        for (const comp of companions) {
+          comp.isActive = false;
+          comp.suspensionDate = new Date();
+          comp.discountReason = comp.discountReason ? `${comp.discountReason} (Cancelada por titular)` : 'Cancelada por titular';
+          await this.memberMembershipRepository.save(comp);
+          if (comp.member?.user) {
+            await this.accessService.pushMemberToAccess({
+              Badgenumber: comp.member.memberCode.replace(/[^0-9]/g, ''),
+              name: comp.member.user.firstName,
+              lastname: comp.member.user.lastName,
+              email: comp.member.user.email,
+              acc_startdate: '2000-01-01',
+              acc_enddate: '2000-01-01',
+            }).catch(() => {});
+          }
+        }
+        console.log(`[REMOVE MEMBERSHIP] ✓ ${companions.length} acompañante(s) del grupo cancelado(s) y bloqueado(s)`);
+      } catch (e) {
+        console.warn(`[REMOVE MEMBERSHIP] Error al cancelar acompañantes del grupo:`, e);
+      }
+    }
+
     // QUINTO: SINCRONIZAR A ZKACCESS: Bloquear fecha de acceso (acc_enddate = 2000-01-01)
     try {
       console.log(`[MemberMembershipsService] 🔄 Removiendo fecha de membresía en ZKAccess...`);
@@ -1014,6 +1049,11 @@ export class MemberMembershipsService {
       );
     }
 
+    // Reactivar membresía si estaba inactiva o suspendida
+    if (!memberMembership.isActive || memberMembership.suspensionDate) {
+      memberMembership.isActive = true;
+      memberMembership.suspensionDate = null as any;
+    }
     const saved = await this.memberMembershipRepository.save(memberMembership);
 
     // Actualizar el Payment asociado en la tabla payments (por paymentId)
@@ -1030,6 +1070,34 @@ export class MemberMembershipsService {
       console.log(`[MemberMembershipsService] ✓ Payment actualizado a COMPLETED con cashRegisterId: ${activeRegisterId} para paymentId: ${memberMembership.paymentId}`);
     }
 
+    // Restaurar acceso en ZKAccess
+    try {
+      const settings = await this.gymSettingsService.getSettings();
+      const isDaily = Boolean(memberMembership.membership?.durationDays && Number(memberMembership.membership?.durationDays) > 0);
+      const graceDays = isDaily ? 0 : (settings?.membershipSuspensionDays || 0);
+      const accEndDate = new Date(memberMembership.endDate);
+      accEndDate.setDate(accEndDate.getDate() + graceDays);
+
+      const memberWithUserSync = await this.memberRepository.findOne({
+        where: { id: memberMembership.memberId },
+        relations: ['user'],
+      });
+
+      if (memberWithUserSync?.user) {
+        await this.accessService.pushMemberToAccess({
+          Badgenumber: memberWithUserSync.memberCode.replace(/[^0-9]/g, ''),
+          name: memberWithUserSync.user.firstName,
+          lastname: memberWithUserSync.user.lastName,
+          email: memberWithUserSync.user.email,
+          acc_startdate: new Date(memberMembership.startDate).toISOString().split('T')[0],
+          acc_enddate: accEndDate.toISOString().split('T')[0],
+        });
+        console.log(`[MemberMembershipsService] ✅ Acceso ZKAccess restaurado por pago completado.`);
+      }
+    } catch (e) {
+      console.error(`[MemberMembershipsService] Error sync ZKAccess en recordPayment:`, e);
+    }
+
     // Enviar email de confirmación de pago
     try {
       const memberWithUser = await this.memberRepository.findOne({
@@ -1037,7 +1105,11 @@ export class MemberMembershipsService {
         relations: ['user'],
       });
 
-      if (memberWithUser?.user?.email) {
+      if (
+        memberWithUser?.user?.email &&
+        memberWithUser.notificationsEnabled !== false &&
+        memberWithUser.receiveEmails !== false
+      ) {
         const memberName = memberWithUser.user.firstName || 'Miembro';
         const memberEmail = memberWithUser.user.email;
         const membershipName = memberMembership.membership?.name || 'Membresía';

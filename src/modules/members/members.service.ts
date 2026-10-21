@@ -6,6 +6,7 @@ import { Member } from '../../entities/member.entity';
 import { User, UserRole } from '../../entities/user.entity';
 import { MemberMembership } from '../../entities/member-membership.entity';
 import { Payment, PaymentType, PaymentStatus, PaymentMethod } from '../../entities/payment.entity';
+import { CashRegister } from '../../entities/cash-register.entity';
 import { CreateMemberDto, UpdateMemberDto } from './dto/create-member.dto';
 import { EmailService } from '../email-settings/email.service';
 import { ModulesManagementService } from '../modules-management/modules-management.service';
@@ -26,12 +27,29 @@ export class MembersService {
     private memberMembershipRepository: Repository<MemberMembership>,
     @InjectRepository(Payment)
     private paymentRepository: Repository<Payment>,
+    @InjectRepository(CashRegister)
+    private cashRegisterRepository: Repository<CashRegister>,
     private emailService: EmailService,
     private modulesManagementService: ModulesManagementService,
     private gymSettingsService: GymSettingsService,
     private accessService: AccessService,
     private zktecoDeviceService: ZktecoDeviceService,
   ) {}
+
+  private async getActiveCashRegisterId(userId?: string): Promise<string | null> {
+    try {
+      const reg = await this.cashRegisterRepository.findOne({
+        where: [
+          ...(userId ? [{ userId, isOpen: true }] : []),
+          { isOpen: true },
+        ],
+        order: { createdAt: 'DESC' },
+      });
+      return reg ? reg.id : null;
+    } catch (e) {
+      return null;
+    }
+  }
 
   /**
    * Calcula si un miembro tiene membresía activa consultando la tabla member_memberships
@@ -473,6 +491,10 @@ export class MembersService {
         'member.joinDate',
         'member.lastVisit',
         'member.registrationPaymentId',
+        'member.creditBalance',
+        'member.notificationsEnabled',
+        'member.receiveEmails',
+        'member.receiveWhatsapp',
         'member.createdAt',
         'member.updatedAt',
         'user',
@@ -520,6 +542,10 @@ export class MembersService {
           
           const mapped = {
             ...member,
+            creditBalance: Number(member.creditBalance || 0),
+            notificationsEnabled: member.notificationsEnabled !== undefined ? Boolean(member.notificationsEnabled) : true,
+            receiveEmails: member.receiveEmails !== undefined ? Boolean(member.receiveEmails) : true,
+            receiveWhatsapp: member.receiveWhatsapp !== undefined ? Boolean(member.receiveWhatsapp) : true,
             currentMembership: null,
             hasMembership,
             isMembershipSuspended: false,
@@ -532,7 +558,25 @@ export class MembersService {
           (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
         );
         
-        const mostRecent = sortedMemberships[0];
+        const activeMembership = sortedMemberships.find((m) => m.isActive) || null;
+        if (!activeMembership) {
+          return {
+            ...member,
+            creditBalance: Number(member.creditBalance || 0),
+            memberships: sortedMemberships,
+            currentMembership: null,
+            activeMembership: null,
+            membership: null,
+            hasMembership: false,
+            hasPendingPayment: false,
+            isPaid: true,
+            membershipType: null,
+            membershipStatusLabel: '',
+            isMembershipSuspended: false,
+          };
+        }
+        
+        const mostRecent = activeMembership;
         
         // Calcular si el pago está pendiente verificando directamente en la tabla Payment
         let isPending = true;
@@ -659,6 +703,10 @@ export class MembersService {
 
         const mapped = {
           ...member,
+          creditBalance: Number(member.creditBalance || 0),
+          notificationsEnabled: member.notificationsEnabled !== undefined ? Boolean(member.notificationsEnabled) : true,
+          receiveEmails: member.receiveEmails !== undefined ? Boolean(member.receiveEmails) : true,
+          receiveWhatsapp: member.receiveWhatsapp !== undefined ? Boolean(member.receiveWhatsapp) : true,
           memberships: sortedMemberships,
           currentMembership: mostRecent,
           activeMembership: mostRecent,
@@ -701,19 +749,24 @@ export class MembersService {
     const sortedMemberships = (member.memberships || []).sort(
       (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
     );
-    const activeMembership = sortedMemberships.find((m) => m.isActive) || sortedMemberships[0] || null;
+    const activeMembership = sortedMemberships.find((m) => m.isActive) || null;
 
     // Verificar si hay pago de membresía pendiente
-    const pendingMembershipPayment = await this.paymentRepository
-      .createQueryBuilder('payment')
-      .innerJoin(MemberMembership, 'mm', 'mm.paymentId = payment.id')
-      .where('mm.memberId = :memberId', { memberId: id })
-      .andWhere('payment.paymentType = :paymentType', { paymentType: PaymentType.MEMBERSHIP })
-      .andWhere('payment.status = :status', { status: PaymentStatus.PENDING })
-      .getOne();
+    let pendingMembershipPayment: Payment | null = null;
+    if (activeMembership) {
+      pendingMembershipPayment = await this.paymentRepository
+        .createQueryBuilder('payment')
+        .innerJoin(MemberMembership, 'mm', 'mm.paymentId = payment.id')
+        .where('mm.memberId = :memberId', { memberId: id })
+        .andWhere('mm.id = :membershipId', { membershipId: activeMembership.id })
+        .andWhere('payment.paymentType = :paymentType', { paymentType: PaymentType.MEMBERSHIP })
+        .andWhere('payment.status = :status', { status: PaymentStatus.PENDING })
+        .getOne();
+    }
 
     const result = {
       ...member,
+      creditBalance: Number(member.creditBalance || 0),
       memberships: sortedMemberships,
       activeMembership: activeMembership,
       currentMembership: activeMembership,
@@ -772,6 +825,29 @@ export class MembersService {
     const saved = await this.memberRepository.save(member);
     await this.syncMemberToDeviceSafe(id, 'update');
     return this.findById(saved.id);
+  }
+
+  async updateNotificationPreferences(
+    id: string,
+    prefs: { notificationsEnabled?: boolean; receiveEmails?: boolean; receiveWhatsapp?: boolean },
+  ): Promise<Member> {
+    const member = await this.memberRepository.findOne({ where: { id } });
+    if (!member) {
+      throw new NotFoundException(`Member with ID ${id} not found`);
+    }
+
+    if (prefs.notificationsEnabled !== undefined) {
+      member.notificationsEnabled = prefs.notificationsEnabled;
+    }
+    if (prefs.receiveEmails !== undefined) {
+      member.receiveEmails = prefs.receiveEmails;
+    }
+    if (prefs.receiveWhatsapp !== undefined) {
+      member.receiveWhatsapp = prefs.receiveWhatsapp;
+    }
+
+    await this.memberRepository.save(member);
+    return this.findById(id);
   }
 
   async removeMemberships(id: string): Promise<{ message: string }> {
@@ -945,14 +1021,15 @@ export class MembersService {
       const sorted = (member.memberships || []).sort(
         (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
       );
-      const mostRecent = sorted[0] || null;
+      const activeMembership = sorted.find((m) => m.isActive) || null;
       return {
         ...member,
+        creditBalance: Number(member.creditBalance || 0),
         memberships: sorted,
-        currentMembership: mostRecent,
-        activeMembership: mostRecent,
-        membership: mostRecent?.membership || null,
-        hasMembership: mostRecent ? Boolean(mostRecent.isActive) : false,
+        currentMembership: activeMembership,
+        activeMembership: activeMembership,
+        membership: activeMembership?.membership || null,
+        hasMembership: Boolean(activeMembership?.isActive),
       };
     });
 
@@ -988,7 +1065,10 @@ export class MembersService {
       throw new BadRequestException('El monto debe ser mayor a cero');
     }
 
-    const member = await this.memberRepository.findOne({ where: { id: memberId } });
+    const member = await this.memberRepository.findOne({
+      where: { id: memberId },
+      relations: ['user'],
+    });
     if (!member) {
       throw new NotFoundException(`Member ${memberId} not found`);
     }
@@ -1007,9 +1087,12 @@ export class MembersService {
     payment.paymentType = PaymentType.ADD_CREDIT;
     payment.status = PaymentStatus.COMPLETED;
     payment.paymentDate = new Date();
-    payment.notes = notes || 'Agregado a saldo a favor';
+    const fullName = member.user ? `${member.user.firstName || ''} ${member.user.lastName || ''}`.trim() : `Socio #${member.memberCode}`;
+    payment.description = `Recarga Saldo a Favor - ${fullName}`;
+    payment.notes = notes || 'Recarga manual de saldo a favor';
     payment.createdBy = userId || null;
     payment.updatedBy = userId || null;
+    payment.cashRegisterId = await this.getActiveCashRegisterId(userId);
 
     await this.paymentRepository.save(payment);
 

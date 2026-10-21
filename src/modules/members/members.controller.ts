@@ -142,6 +142,15 @@ export class MembersController {
     return this.membersService.update(id, updateMemberDto);
   }
 
+  @Put(':id/notifications')
+  @HttpCode(HttpStatus.OK)
+  async updateNotifications(
+    @Param('id') id: string,
+    @Body() body: { notificationsEnabled?: boolean; receiveEmails?: boolean; receiveWhatsapp?: boolean },
+  ) {
+    return this.membersService.updateNotificationPreferences(id, body);
+  }
+
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   async delete(@Param('id') id: string) {

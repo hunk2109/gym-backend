@@ -84,6 +84,15 @@ export class Member {
   @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
   creditBalance: number;
 
+  @Column({ type: 'boolean', default: true })
+  notificationsEnabled: boolean;
+
+  @Column({ type: 'boolean', default: true })
+  receiveEmails: boolean;
+
+  @Column({ type: 'boolean', default: true })
+  receiveWhatsapp: boolean;
+
   @CreateDateColumn()
   createdAt: Date;
 

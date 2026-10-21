@@ -11,6 +11,7 @@ import { WhatsappService } from '../whatsapp-settings/whatsapp.service';
 import { OutboxService } from '../outbox/outbox.service';
 import { NotificationPriority } from '../outbox/entities/notification-outbox.entity';
 import { FinancialAnalyticsService, FinancialAnalyticsDto } from './financial-analytics.service';
+import { normalizeClosingReportRecipients } from '../gym-settings/utils/recipient.util';
 import * as puppeteer from 'puppeteer';
 
 @Injectable()
@@ -500,10 +501,10 @@ export class DailySummaryService {
         </html>
       `;
 
-      // 5. Generar PDF con Puppeteer
+      // 5. Generar PDF con Puppeteer de forma segura
       this.logger.log('Generando PDF del reporte ejecutivo...');
       let browser: any = null;
-      let pdfBuffer: Buffer;
+      let pdfBuffer: Buffer | null = null;
       try {
         browser = await puppeteer.launch({ 
           headless: 'shell', 
@@ -521,7 +522,7 @@ export class DailySummaryService {
         });
         const page = await browser.newPage();
         try {
-          await page.setContent(htmlContent, { waitUntil: 'networkidle2', timeout: 7000 });
+          await page.setContent(htmlContent, { waitUntil: 'networkidle2', timeout: 8000 });
         } catch (_) {
           await page.setContent(htmlContent, { waitUntil: 'domcontentloaded' });
         }
@@ -531,9 +532,10 @@ export class DailySummaryService {
           margin: { top: '15px', right: '15px', bottom: '15px', left: '15px' },
         });
         pdfBuffer = Buffer.from(rawPdf);
-      } catch (pdfErr) {
-        this.logger.error('Error al renderizar PDF con Puppeteer:', pdfErr);
-        throw pdfErr;
+        this.logger.log(`✓ PDF generado exitosamente (${pdfBuffer.length} bytes)`);
+      } catch (pdfErr: any) {
+        this.logger.warn(`No se pudo generar PDF adjunto (${pdfErr?.message || pdfErr}), se enviará el informe HTML completo por correo.`);
+        pdfBuffer = null;
       } finally {
         if (browser) {
           try {
@@ -551,67 +553,84 @@ export class DailySummaryService {
         if (!settingsList.length) return;
         settings = settingsList[0];
       }
-      const recipients = settings.closingReportRecipients || [];
+
+      const channel = settings.notificationChannel || 'both';
+      const recipients = normalizeClosingReportRecipients(settings.closingReportRecipients, channel);
+      this.logger.log(`Destinatarios normalizados para reporte (${recipients.length}): ${JSON.stringify(recipients.map(r => ({ name: r.name, email: r.email, phone: r.phone, sendEmail: r.sendEmail, sendWhatsapp: r.sendWhatsapp })))}`);
+
+      const plainTextContent = `Resumen de Cierre de Caja del ${today.toLocaleDateString()}.\nIngresos Hoy: ${fmt(totalIncomeToday)}\nGanancia Neta Periodo: ${fmt(analytics.financial.netProfit)}\nSocios Activos: ${analytics.behavior.membersStats.activeMembers}`;
+
+      const emailSubject = `📊 Resumen Ejecutivo y Cierre de Caja - ${today.toLocaleDateString('es-DO')}`;
+
+      const attachments = pdfBuffer ? [{
+        filename: `Reporte_Ejecutivo_${today.toLocaleDateString('es-DO').replace(/\//g, '-')}.pdf`,
+        content: pdfBuffer,
+        contentType: 'application/pdf',
+      }] : [];
 
       for (const recipient of recipients) {
         if (recipient.sendEmail && recipient.email) {
           try {
-            const base64Data = pdfBuffer.toString('base64');
-            await this.outboxService.enqueueEmail({
-              recipient: recipient.email,
-              recipientName: recipient.name,
-              subject: `📊 Resumen Ejecutivo y Cierre de Caja - ${today.toLocaleDateString()}`,
-              content: `Resumen de Cierre de Caja del ${today.toLocaleDateString()}.\nIngresos Hoy: ${fmt(totalIncomeToday)}\nGanancia Neta Periodo: ${fmt(analytics.financial.netProfit)}\nSocios Activos: ${analytics.behavior.membersStats.activeMembers}`,
-              htmlContent: `
-                <div style="font-family: Arial, sans-serif; color: #333; max-width: 600px;">
-                  <h2 style="color: #1E3A8A;">Resumen Ejecutivo & Cierre de Caja</h2>
-                  <p>Adjunto encontrarás el informe detallado de inteligencia financiera, ingresos, nómina, horas pico y recomendaciones para la toma de decisiones.</p>
-                  <table style="width: 100%; border-collapse: collapse; margin: 15px 0;">
-                    <tr><td style="padding: 6px; border-bottom: 1px solid #ddd;"><strong>Ingresos Hoy:</strong></td><td style="padding: 6px; border-bottom: 1px solid #ddd; text-align: right; color: #059669;"><strong>${fmt(totalIncomeToday)}</strong></td></tr>
-                    <tr><td style="padding: 6px; border-bottom: 1px solid #ddd;"><strong>Ganancia Neta (Mes):</strong></td><td style="padding: 6px; border-bottom: 1px solid #ddd; text-align: right; color: #2563EB;"><strong>${fmt(analytics.financial.netProfit)}</strong></td></tr>
-                    <tr><td style="padding: 6px; border-bottom: 1px solid #ddd;"><strong>Socios Activos:</strong></td><td style="padding: 6px; border-bottom: 1px solid #ddd; text-align: right;">${analytics.behavior.membersStats.activeMembers}</td></tr>
-                    <tr><td style="padding: 6px; border-bottom: 1px solid #ddd;"><strong>Visitas de Hoy:</strong></td><td style="padding: 6px; border-bottom: 1px solid #ddd; text-align: right;">${totalVisits} check-ins</td></tr>
-                  </table>
-                  <p style="font-size: 12px; color: #666;">Generado automáticamente por Gym Manager.</p>
-                </div>
-              `,
-              priority: NotificationPriority.HIGH,
-              attachments: [{
-                filename: `Reporte_Ejecutivo_${today.toLocaleDateString().replace(/\//g, '-')}.pdf`,
-                content: base64Data,
-                encoding: 'base64',
-                contentType: 'application/pdf',
-              }],
-              metadata: { source: 'daily_summary', recipientName: recipient.name },
+            this.logger.log(`Enviando reporte diario directo a email: ${recipient.email}`);
+            await this.emailService.sendEmailDirect({
+              to: recipient.email,
+              subject: emailSubject,
+              text: plainTextContent,
+              html: htmlContent,
+              attachments,
             });
-            this.logger.log(`Reporte diario encolado en Outbox para Email: ${recipient.email}`);
-          } catch (e) {
-            this.logger.error(`Error encolando correo a ${recipient.email}:`, e);
+            this.logger.log(`✓ Correo entregado inmediatamente a ${recipient.email}`);
+          } catch (e: any) {
+            this.logger.error(`Error enviando correo directo a ${recipient.email}:`, e);
           }
         }
 
         if (recipient.sendWhatsapp && recipient.phone) {
           try {
-            const base64Data = pdfBuffer.toString('base64');
             const waCaption = `📊 *Reporte Ejecutivo & Cierre de Caja*\n` +
               `📅 *Fecha:* ${today.toLocaleDateString()}\n` +
               `💰 *Ingresos Hoy:* ${fmt(totalIncomeToday)} (${incomeDiff >= 0 ? '▲ +' : '▼ -'}${fmt(Math.abs(incomeDiff))})\n` +
               `📈 *Ganancia Neta Mes:* ${fmt(analytics.financial.netProfit)} (Margen: ${analytics.financial.profitMarginPercent.toFixed(1)}%)\n` +
               `👥 *Socios Activos:* ${analytics.behavior.membersStats.activeMembers} | *Visitas Hoy:* ${totalVisits}\n` +
               `⏰ *Horario Pico:* ${analytics.behavior.peakHours.busiestTimeSlot}\n\n` +
-              `_Se adjunta documento PDF con análisis detallado de gastos, nómina y recomendaciones predictivas._`;
+              `_Resumen financiero del día generado por Gym Manager._`;
 
-            await this.outboxService.enqueueWhatsappPdf({
-              recipient: recipient.phone,
-              filename: `Reporte_Ejecutivo_${today.toLocaleDateString().replace(/\//g, '-')}.pdf`,
-              base64Data,
-              caption: waCaption,
-              priority: NotificationPriority.HIGH,
-              metadata: { source: 'daily_summary', recipientName: recipient.name },
-            });
-            this.logger.log(`Reporte diario encolado en Outbox para WhatsApp: ${recipient.phone}`);
-          } catch (e) {
-            this.logger.error(`Error encolando reporte para WhatsApp a ${recipient.phone}:`, e);
+            if (this.whatsappService.isConnected()) {
+              if (pdfBuffer) {
+                await this.whatsappService.sendBase64Pdf(
+                  recipient.phone,
+                  pdfBuffer.toString('base64'),
+                  `Reporte_Ejecutivo_${today.toLocaleDateString('es-DO').replace(/\//g, '-')}.pdf`,
+                  waCaption,
+                );
+              } else {
+                await this.whatsappService.sendMessage(recipient.phone, waCaption);
+              }
+              this.logger.log(`✓ WhatsApp entregado inmediatamente a ${recipient.phone}`);
+            } else {
+              // Encolar en Outbox para cuando WhatsApp conecte
+              if (pdfBuffer) {
+                await this.outboxService.enqueueWhatsappPdf({
+                  recipient: recipient.phone,
+                  filename: `Reporte_Ejecutivo_${today.toLocaleDateString('es-DO').replace(/\//g, '-')}.pdf`,
+                  base64Data: pdfBuffer.toString('base64'),
+                  caption: waCaption,
+                  priority: NotificationPriority.HIGH,
+                  metadata: { source: 'daily_summary', recipientName: recipient.name },
+                });
+              } else {
+                await this.outboxService.enqueueWhatsapp({
+                  recipient: recipient.phone,
+                  recipientName: recipient.name,
+                  content: waCaption,
+                  priority: NotificationPriority.HIGH,
+                  metadata: { source: 'daily_summary', recipientName: recipient.name },
+                });
+              }
+              this.logger.log(`WhatsApp encolado en Outbox para ${recipient.phone} (esperando conexión)`);
+            }
+          } catch (e: any) {
+            this.logger.error(`Error procesando WhatsApp para ${recipient.phone}:`, e);
           }
         }
       }

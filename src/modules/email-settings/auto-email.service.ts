@@ -129,6 +129,7 @@ export class AutoEmailService {
 
       for (const member of members) {
         if (!member.user?.email || member.user.email.endsWith('.local') || member.user.email.endsWith('.test') || member.user.email.includes('example.com')) continue;
+        if (member.notificationsEnabled === false || member.receiveEmails === false) continue;
 
         // ✅ VALIDAR DUPLICADOS: Verificar si ya enviamos email de cumpleaños hace menos de 24 horas
         const isDuplicate = await this.duplicateChecker.isDuplicate({
@@ -230,6 +231,7 @@ export class AutoEmailService {
 
       for (const membershipRecord of memberships) {
         if (!membershipRecord.member?.user?.email || membershipRecord.member.user.email.endsWith('.local') || membershipRecord.member.user.email.endsWith('.test') || membershipRecord.member.user.email.includes('example.com')) continue;
+        if (membershipRecord.member?.notificationsEnabled === false) continue;
 
         // ✅ VALIDAR DUPLICADOS: Verificar si ya enviamos recordatorio de vencimiento en últimas 24 horas
         const isDuplicate = await this.duplicateChecker.isDuplicate({
@@ -260,17 +262,19 @@ export class AutoEmailService {
           gymConfig
         );
 
-        await this.outboxService.enqueueEmail({
-          recipient: member.user.email,
-          recipientName: member.user.firstName,
-          subject,
-          htmlContent,
-          content: message,
-          priority: NotificationPriority.HIGH,
-          metadata: { source: 'auto_email_due_today', memberId: member.id },
-        });
+        if (member.receiveEmails !== false) {
+          await this.outboxService.enqueueEmail({
+            recipient: member.user.email,
+            recipientName: member.user.firstName,
+            subject,
+            htmlContent,
+            content: message,
+            priority: NotificationPriority.HIGH,
+            metadata: { source: 'auto_email_due_today', memberId: member.id },
+          });
+        }
 
-        if (member.user.phone) {
+        if (member.user.phone && member.receiveWhatsapp !== false) {
           await this.outboxService.enqueueWhatsapp({
             recipient: member.user.phone,
             recipientName: member.user.firstName,
@@ -328,6 +332,7 @@ export class AutoEmailService {
 
       for (const membershipRecord of memberships) {
         if (!membershipRecord.member?.user?.email || membershipRecord.member.user.email.endsWith('.local') || membershipRecord.member.user.email.endsWith('.test') || membershipRecord.member.user.email.includes('example.com')) continue;
+        if (membershipRecord.member?.notificationsEnabled === false) continue;
 
         // ✅ VALIDAR DUPLICADOS: Verificar si ya enviamos recordatorio en últimas 72 horas (3 días)
         const isDuplicate = await this.duplicateChecker.isDuplicate({
@@ -361,17 +366,19 @@ export class AutoEmailService {
           gymConfig
         );
 
-        await this.outboxService.enqueueEmail({
-          recipient: member.user.email,
-          recipientName: member.user.firstName,
-          subject,
-          htmlContent,
-          content: message,
-          priority: NotificationPriority.HIGH,
-          metadata: { source: 'auto_email_due_soon', memberId: member.id },
-        });
+        if (member.receiveEmails !== false) {
+          await this.outboxService.enqueueEmail({
+            recipient: member.user.email,
+            recipientName: member.user.firstName,
+            subject,
+            htmlContent,
+            content: message,
+            priority: NotificationPriority.HIGH,
+            metadata: { source: 'auto_email_due_soon', memberId: member.id },
+          });
+        }
 
-        if (member.user.phone) {
+        if (member.user.phone && member.receiveWhatsapp !== false) {
           await this.outboxService.enqueueWhatsapp({
             recipient: member.user.phone,
             recipientName: member.user.firstName,
@@ -425,6 +432,7 @@ export class AutoEmailService {
 
       for (const membershipRecord of memberships) {
         if (!membershipRecord.member?.user?.email || membershipRecord.member.user.email.endsWith('.local') || membershipRecord.member.user.email.endsWith('.test') || membershipRecord.member.user.email.includes('example.com')) continue;
+        if (membershipRecord.member?.notificationsEnabled === false) continue;
 
         // ✅ VALIDAR DUPLICADOS: Verificar si ya enviamos recordatorio en últimas 7 días
         const isDuplicate = await this.duplicateChecker.isDuplicate({
@@ -458,17 +466,19 @@ export class AutoEmailService {
           gymConfig
         );
 
-        await this.outboxService.enqueueEmail({
-          recipient: member.user.email,
-          recipientName: member.user.firstName,
-          subject,
-          htmlContent,
-          content: message,
-          priority: NotificationPriority.HIGH,
-          metadata: { source: 'auto_email_overdue', memberId: member.id },
-        });
+        if (member.receiveEmails !== false) {
+          await this.outboxService.enqueueEmail({
+            recipient: member.user.email,
+            recipientName: member.user.firstName,
+            subject,
+            htmlContent,
+            content: message,
+            priority: NotificationPriority.HIGH,
+            metadata: { source: 'auto_email_overdue', memberId: member.id },
+          });
+        }
 
-        if (member.user.phone) {
+        if (member.user.phone && member.receiveWhatsapp !== false) {
           await this.outboxService.enqueueWhatsapp({
             recipient: member.user.phone,
             recipientName: member.user.firstName,

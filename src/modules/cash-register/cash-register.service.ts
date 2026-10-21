@@ -10,6 +10,7 @@ import { AuditLogService } from '../audit-logs/audit-log.service';
 import { WhatsappService } from '../whatsapp-settings/whatsapp.service';
 import { EmailService } from '../email-settings/email.service';
 import { GymSettingsService } from '../gym-settings/gym-settings.service';
+import { normalizeClosingReportRecipients } from '../gym-settings/utils/recipient.util';
 
 @Injectable()
 export class CashRegisterService {
@@ -199,7 +200,24 @@ export class CashRegisterService {
         newValue: { closingAmount: dto.closingAmount, difference },
       });
 
-      console.log('[CashRegisterService] ✓ Cash register closed successfully');
+      console.log('[CashRegisterService] ✓ Cash register closed successfully in DB');
+
+      // Enviar reporte automático por correo y WhatsApp a los destinatarios configurados
+      try {
+        console.log('[CashRegisterService] 📧 Dispatching closing report notifications...');
+        await this.sendClosingReportDirect(saved, {
+          userId,
+          totalCashSales,
+          totalCashPayments,
+          totalTransactions,
+          expectedClosure,
+          difference,
+          billBreakdown: dto.billBreakdown,
+        });
+      } catch (notifyErr) {
+        console.error('[CashRegisterService] ⚠️ Error sending closing report notification:', notifyErr);
+      }
+
       return saved;
     } catch (error) {
       console.error('[CashRegisterService] ❌ Error in closeCashRegister:', error);
@@ -207,10 +225,258 @@ export class CashRegisterService {
     }
   }
 
+  async sendClosingReportDirect(
+    register: CashRegister,
+    details: {
+      userId: string;
+      totalCashSales: number;
+      totalCashPayments: number;
+      totalTransactions: number;
+      expectedClosure: number;
+      difference: number;
+      billBreakdown?: any;
+    },
+  ): Promise<void> {
+    try {
+      const settings = await this.gymSettingsService.getSettings();
+      const channel = settings?.notificationChannel || 'both';
+      const recipients = normalizeClosingReportRecipients(settings?.closingReportRecipients, channel);
+      if (recipients.length === 0) {
+        console.log('[CashRegisterService] No closing report recipients configured, skipping.');
+        return;
+      }
+
+      const gymName = settings.gymName || 'Gym Manager';
+      const currency = (val: number) => `RD$ ${Number(val || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+      // Obtener datos del cajero
+      let cashierName = 'Cajero';
+      try {
+        const users = await this.cashRegisterRepository.query(
+          'SELECT firstName, lastName, email FROM users WHERE id = ?',
+          [details.userId]
+        );
+        if (users && users[0]) {
+          cashierName = `${users[0].firstName || ''} ${users[0].lastName || ''}`.trim() || users[0].email || 'Cajero';
+        }
+      } catch (e) {
+        console.warn('[CashRegisterService] Could not fetch cashier name:', e);
+      }
+
+      const closedDate = register.closedAt ? new Date(register.closedAt) : new Date();
+      const openDate = register.registerDate ? new Date(register.registerDate) : new Date();
+      const dateFormatted = closedDate.toLocaleDateString('es-DO', { day: '2-digit', month: '2-digit', year: 'numeric' });
+      const timeFormatted = closedDate.toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit', hour12: true });
+      const openTimeFormatted = openDate.toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit', hour12: true });
+
+      const diff = details.difference;
+      let statusBadgeText = 'CUADRE PERFECTO';
+      let statusBadgeColor = '#28a745';
+      let statusBadgeBg = '#d4edda';
+      if (diff > 0.01) {
+        statusBadgeText = `SOBRANTE (+${currency(diff)})`;
+        statusBadgeColor = '#17a2b8';
+        statusBadgeBg = '#d1ecf1';
+      } else if (diff < -0.01) {
+        statusBadgeText = `FALTANTE (-${currency(Math.abs(diff))})`;
+        statusBadgeColor = '#dc3545';
+        statusBadgeBg = '#f8d7da';
+      }
+
+      // Desglose de billetes
+      let breakdownRows = '';
+      let textBreakdown = '';
+      if (details.billBreakdown && typeof details.billBreakdown === 'object') {
+        const denoms = [2000, 1000, 500, 200, 100, 50, 25, 10, 5, 1];
+        let hasDenoms = false;
+        for (const d of denoms) {
+          const count = Number(details.billBreakdown[d] || details.billBreakdown[String(d)] || 0);
+          if (count > 0) {
+            hasDenoms = true;
+            const subtotal = d * count;
+            breakdownRows += `
+              <tr>
+                <td style="padding: 8px 12px; border-bottom: 1px solid #e9ecef;">RD$ ${d.toLocaleString()}</td>
+                <td style="padding: 8px 12px; border-bottom: 1px solid #e9ecef; text-align: center;">${count}</td>
+                <td style="padding: 8px 12px; border-bottom: 1px solid #e9ecef; text-align: right; font-weight: bold;">${currency(subtotal)}</td>
+              </tr>
+            `;
+            textBreakdown += `• RD$ ${d} x ${count} = ${currency(subtotal)}\n`;
+          }
+        }
+        if (!hasDenoms) {
+          breakdownRows = '<tr><td colspan="3" style="padding: 10px; text-align: center; color: #6c757d;">Conteo global directo (sin desglose específico)</td></tr>';
+        }
+      } else {
+        breakdownRows = '<tr><td colspan="3" style="padding: 10px; text-align: center; color: #6c757d;">Conteo global directo</td></tr>';
+      }
+
+      const htmlContent = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f4f6f9; margin: 0; padding: 20px; color: #333; }
+            .container { max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.08); border: 1px solid #e2e8f0; }
+            .header { background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); color: #ffffff; padding: 24px; text-align: center; }
+            .header h1 { margin: 0; font-size: 22px; font-weight: 700; }
+            .header p { margin: 6px 0 0; font-size: 13px; color: #94a3b8; }
+            .badge-container { text-align: center; margin: 18px 0; }
+            .badge { display: inline-block; padding: 6px 16px; border-radius: 20px; font-weight: bold; font-size: 14px; color: ${statusBadgeColor}; background-color: ${statusBadgeBg}; }
+            .section { padding: 0 24px 20px; }
+            .info-grid { width: 100%; border-collapse: collapse; margin-bottom: 18px; font-size: 13px; }
+            .info-grid td { padding: 6px 0; }
+            .table-box { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; border-radius: 8px; overflow: hidden; border: 1px solid #e2e8f0; }
+            .table-box th { background-color: #f8fafc; padding: 10px 12px; text-align: left; font-weight: 600; color: #475569; border-bottom: 2px solid #e2e8f0; }
+            .table-box td { padding: 10px 12px; border-bottom: 1px solid #e2e8f0; }
+            .highlight-row { background-color: #f1f5f9; font-weight: bold; }
+            .footer { background-color: #f8fafc; padding: 16px; text-align: center; font-size: 11px; color: #94a3b8; border-top: 1px solid #e2e8f0; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1>${gymName}</h1>
+              <p>Reporte Oficial de Cierre y Arqueo de Caja</p>
+            </div>
+            
+            <div class="section" style="padding-top: 20px;">
+              <div class="badge-container">
+                <span class="badge">${statusBadgeText}</span>
+              </div>
+
+              <table class="info-grid">
+                <tr>
+                  <td style="color: #64748b;"><strong>Fecha de Cierre:</strong></td>
+                  <td style="text-align: right;">${dateFormatted} a las ${timeFormatted}</td>
+                </tr>
+                <tr>
+                  <td style="color: #64748b;"><strong>Apertura de Caja:</strong></td>
+                  <td style="text-align: right;">${openTimeFormatted} (Inicial: ${currency(Number(register.openingAmount))})</td>
+                </tr>
+                <tr>
+                  <td style="color: #64748b;"><strong>Cajero Responsable:</strong></td>
+                  <td style="text-align: right;">${cashierName}</td>
+                </tr>
+              </table>
+
+              <h3 style="margin: 16px 0 8px; font-size: 15px; color: #1e293b; border-bottom: 2px solid #f1f5f9; padding-bottom: 4px;">Resumen del Cuadre</h3>
+              <table class="table-box">
+                <tr>
+                  <td>Monto Apertura (Fondo)</td>
+                  <td style="text-align: right;">${currency(Number(register.openingAmount))}</td>
+                </tr>
+                <tr>
+                  <td>Ventas Productos (Efectivo)</td>
+                  <td style="text-align: right;">+ ${currency(details.totalCashSales)}</td>
+                </tr>
+                <tr>
+                  <td>Pagos Membresías (Efectivo)</td>
+                  <td style="text-align: right;">+ ${currency(details.totalCashPayments)}</td>
+                </tr>
+                <tr>
+                  <td>Entradas / Salidas Manuales</td>
+                  <td style="text-align: right;">${details.totalTransactions >= 0 ? '+' : ''} ${currency(details.totalTransactions)}</td>
+                </tr>
+                <tr class="highlight-row">
+                  <td>Total Efectivo Esperado</td>
+                  <td style="text-align: right; color: #0284c7;">${currency(details.expectedClosure)}</td>
+                </tr>
+                <tr class="highlight-row" style="background-color: #f8fafc;">
+                  <td>Total Físico Contado</td>
+                  <td style="text-align: right; font-size: 14px; color: #0f172a;">${currency(Number(register.closingAmount))}</td>
+                </tr>
+                <tr style="background-color: ${statusBadgeBg}; font-weight: bold;">
+                  <td style="color: ${statusBadgeColor};">Diferencia (Descuadre)</td>
+                  <td style="text-align: right; color: ${statusBadgeColor};">${diff >= 0 ? '+' : ''}${currency(diff)}</td>
+                </tr>
+              </table>
+
+              <h3 style="margin: 22px 0 8px; font-size: 15px; color: #1e293b; border-bottom: 2px solid #f1f5f9; padding-bottom: 4px;">Arqueo Físico (Desglose de Efectivo)</h3>
+              <table class="table-box">
+                <thead>
+                  <tr>
+                    <th>Denominación</th>
+                    <th style="text-align: center;">Cantidad</th>
+                    <th style="text-align: right;">Subtotal</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${breakdownRows}
+                </tbody>
+              </table>
+            </div>
+
+            <div class="footer">
+              Este reporte fue generado automáticamente por el sistema de gestión ${gymName}.
+            </div>
+          </div>
+        </body>
+        </html>
+      `;
+
+      const plainText = `*${gymName} - REPORTE DE CIERRE DE CAJA*
+Estado: ${statusBadgeText}
+Fecha: ${dateFormatted} ${timeFormatted}
+Cajero: ${cashierName}
+
+--- RESUMEN FINANCIERO ---
+• Fondo de Apertura: ${currency(Number(register.openingAmount))}
+• Ventas Efectivo: ${currency(details.totalCashSales)}
+• Membresías Efectivo: ${currency(details.totalCashPayments)}
+• Movimientos Manuales: ${currency(details.totalTransactions)}
+• Efectivo Esperado: ${currency(details.expectedClosure)}
+• Efectivo Contado: ${currency(Number(register.closingAmount))}
+• Diferencia: ${currency(diff)}
+
+--- DESGLOSE CONTADO ---
+${textBreakdown || 'Conteo directo sin desglose'}
+`;
+
+      for (const recipient of recipients) {
+        // Enviar por Email
+        if (recipient.sendEmail && recipient.email) {
+          try {
+            console.log(`[CashRegisterService] 📧 Sending closing report email to ${recipient.email}`);
+            await this.emailService.sendEmailDirect({
+              to: recipient.email,
+              subject: `Cierre de Caja - ${gymName} [${statusBadgeText}] - ${dateFormatted}`,
+              text: plainText,
+              html: htmlContent,
+            });
+            console.log(`[CashRegisterService] ✓ Closing report email delivered to ${recipient.email}`);
+          } catch (e) {
+            console.error(`[CashRegisterService] ❌ Failed to send closing email to ${recipient.email}:`, e);
+          }
+        }
+
+        // Enviar por WhatsApp si configurado
+        if (recipient.sendWhatsapp && recipient.phone) {
+          try {
+            if (this.whatsappService.isConnected()) {
+              console.log(`[CashRegisterService] 📲 Sending closing report WhatsApp to ${recipient.phone}`);
+              await this.whatsappService.sendMessage(recipient.phone, plainText);
+              console.log(`[CashRegisterService] ✓ WhatsApp message sent to ${recipient.phone}`);
+            } else {
+              console.warn(`[CashRegisterService] WhatsApp not connected, could not send to ${recipient.phone}`);
+            }
+          } catch (we) {
+            console.error(`[CashRegisterService] ❌ Failed to send WhatsApp to ${recipient.phone}:`, we);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('[CashRegisterService] Error in sendClosingReportDirect:', err);
+    }
+  }
+
   async sendPdfReport(base64Pdf: string): Promise<void> {
     try {
       const settings = await this.gymSettingsService.getSettings();
-      if (!settings || !settings.closingReportRecipients || !Array.isArray(settings.closingReportRecipients)) {
+      const channel = settings?.notificationChannel || 'both';
+      const recipients = normalizeClosingReportRecipients(settings?.closingReportRecipients, channel);
+      if (recipients.length === 0) {
         console.log('[CashRegisterService] No closing report recipients configured, skipping.');
         return;
       }
@@ -221,7 +487,7 @@ export class CashRegisterService {
 
       const pdfBuffer = Buffer.from(base64Pdf, 'base64');
 
-      for (const recipient of settings.closingReportRecipients) {
+      for (const recipient of recipients) {
         if (recipient.sendWhatsapp && recipient.phone) {
           try {
             await this.whatsappService.sendBase64Pdf(

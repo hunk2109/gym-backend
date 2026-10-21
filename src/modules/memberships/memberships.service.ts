@@ -967,17 +967,39 @@ export class MembershipsService {
           continue;
         }
 
-        // ✅ Si el pago fue COMPLETADO después de la suspensión, REACTIVAR
+        // ✅ Si el pago fue COMPLETADO, REACTIVAR y RESTAURAR ACCESO
         if (payment.status === PaymentStatus.COMPLETED && payment.paymentDate && suspendedMembership.suspensionDate) {
           const paymentDate = new Date(payment.paymentDate);
           paymentDate.setHours(0, 0, 0, 0);
+          const suspensionDate = new Date(suspendedMembership.suspensionDate);
+          suspensionDate.setHours(0, 0, 0, 0);
 
-          // Solo reactivar si el pago es más reciente que la suspensión
-          if (paymentDate >= suspendedMembership.suspensionDate) {
+          // Reactivar si el pago fue realizado a partir del día de la suspensión o fecha posterior
+          if (paymentDate >= suspensionDate) {
             suspendedMembership.isActive = true;
             suspendedMembership.suspensionDate = null;
             await this.memberMembershipRepository.save(suspendedMembership);
-            console.log(`[MembershipsService] 🔁 Membresía REACTIVADA - Miembro: ${suspendedMembership.memberId}, Pago: ${payment.id}`);
+
+            // Sincronizar ZKAccess para restaurar acceso
+            try {
+              if (suspendedMembership.member?.user) {
+                const isDaily = Boolean(suspendedMembership.membership?.durationDays && Number(suspendedMembership.membership?.durationDays) > 0);
+                const graceDays = isDaily ? 0 : suspensionDays;
+                const accEndDate = new Date(suspendedMembership.endDate);
+                accEndDate.setDate(accEndDate.getDate() + graceDays);
+
+                await this.accessService.pushMemberToAccess({
+                  Badgenumber: suspendedMembership.member.memberCode.replace(/[^0-9]/g, ''),
+                  name: suspendedMembership.member.user.firstName,
+                  lastname: suspendedMembership.member.user.lastName,
+                  email: suspendedMembership.member.user.email,
+                  acc_startdate: new Date(suspendedMembership.startDate).toISOString().split('T')[0],
+                  acc_enddate: accEndDate.toISOString().split('T')[0],
+                });
+              }
+            } catch (e) {}
+
+            console.log(`[MembershipsService] 🔁 Membresía REACTIVADA y acceso ZKAccess restaurado - Miembro: ${suspendedMembership.memberId}, Pago: ${payment.id}`);
             reactivated++;
           }
         }

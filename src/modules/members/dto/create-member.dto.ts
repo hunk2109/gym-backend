@@ -82,6 +82,18 @@ export class CreateMemberDto {
   registrationPaymentId?: string; // ID del pago de inscripción
 
   @IsOptional()
+  @IsBoolean()
+  notificationsEnabled?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  receiveEmails?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  receiveWhatsapp?: boolean;
+
+  @IsOptional()
   createdAt?: string | Date;
 
   @IsOptional()
@@ -163,6 +175,18 @@ export class UpdateMemberDto {
   @IsOptional()
   @IsString()
   fingerprints?: string; // JSON con información de huellas dactilares
+
+  @IsOptional()
+  @IsBoolean()
+  notificationsEnabled?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  receiveEmails?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  receiveWhatsapp?: boolean;
 }
 
 export class MemberResponseDto {
@@ -186,6 +210,9 @@ export class MemberResponseDto {
   joinDate?: Date;
   lastVisit?: Date;
   fingerprints?: string;
+  notificationsEnabled?: boolean;
+  receiveEmails?: boolean;
+  receiveWhatsapp?: boolean;
   createdAt: Date;
   updatedAt: Date;
 }

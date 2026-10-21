@@ -233,7 +233,11 @@ export class PaymentsService {
           try {
             if (mm.member?.user) {
               const isDaily = Boolean(mm.membership?.durationDays && Number(mm.membership?.durationDays) > 0);
-              const graceDays = isDaily ? 0 : 15;
+              const settings = await this.memberMembershipRepository.manager.query(
+                'SELECT membershipSuspensionDays FROM gym_settings LIMIT 1',
+              );
+              const suspensionDays = settings?.[0]?.membershipSuspensionDays != null ? Number(settings[0].membershipSuspensionDays) : 1;
+              const graceDays = isDaily ? 0 : suspensionDays;
               const accEndDate = new Date(mm.endDate);
               accEndDate.setDate(accEndDate.getDate() + graceDays);
               await this.accessService.pushMemberToAccess({
@@ -385,7 +389,7 @@ export class PaymentsService {
       .createQueryBuilder('payment')
       .innerJoin(MemberMembership, 'mm', 'mm.paymentId = payment.id')
       .where('mm.memberId = :memberId', { memberId })
-      .orderBy('payment.paymentDate', 'DESC')
+      .orderBy('COALESCE(payment.paymentDate, payment.createdAt)', 'DESC')
       .getMany();
 
     const totalPaid = payments
@@ -694,6 +698,25 @@ export class PaymentsService {
       finalAmount = Math.max(0, finalAmount - discountAmountParam);
     }
 
+    // Si se paga con saldo a favor, validar y descontar del socio
+    if (paymentMethod === 'credit_balance' || (paymentMethod as any) === 'CREDIT_BALANCE') {
+      const mm = await this.memberMembershipRepository.findOne({
+        where: { paymentId: payment.id },
+        relations: ['member'],
+      });
+      if (mm && mm.member) {
+        const currentBalance = Number(mm.member.creditBalance || 0);
+        if (currentBalance < finalAmount) {
+          throw new BadRequestException(
+            `Saldo a favor insuficiente para cubrir este pago. Disponible: RD$ ${currentBalance.toFixed(2)}, Requerido: RD$ ${finalAmount.toFixed(2)}`,
+          );
+        }
+        mm.member.creditBalance = currentBalance - finalAmount;
+        await this.memberRepository.save(mm.member);
+        this.logger.log(`[PAYMENTS_SERVICE] 💰 Saldo a favor descontado: RD$ ${finalAmount} al socio ${mm.member.id}. Saldo restante: RD$ ${mm.member.creditBalance}`);
+      }
+    }
+
     // Actualizar estado a COMPLETED y el nuevo monto
     payment.status = PaymentStatus.COMPLETED;
     payment.amount = finalAmount;
@@ -731,6 +754,7 @@ export class PaymentsService {
     console.log(`[PAYMENTS_SERVICE] ✅ Membership payment saved: ID=${updatedPayment.id}, Status=${updatedPayment.status}, FinalAmount=${finalAmount}`);
     this.logger.log(`[Membership Payment] ✅ Payment completed. Amount: $${finalAmount}`);
     await this.sendPaymentConfirmationSafe(updatedPayment, appliedDiscountPercentage);
+    await this.autoReactivateMemberOnPayment(updatedPayment);
 
     return {
       statusCode: 200,
