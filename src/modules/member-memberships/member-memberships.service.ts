@@ -99,18 +99,25 @@ export class MemberMembershipsService {
    * Obtener todas las membresías de un miembro
    */
   async getMemberMembershipsHistory(memberId: string): Promise<MemberMembership[]> {
-    const memberExists = await this.memberRepository.findOne({
+    let member = await this.memberRepository.findOne({
       where: { id: memberId },
     });
 
-    if (!memberExists) {
+    if (!member) {
+      member = await this.memberRepository.findOne({
+        where: { userId: memberId },
+      });
+    }
+
+    if (!member) {
       throw new NotFoundException(`Miembro con ID ${memberId} no encontrado`);
     }
 
     return this.memberMembershipRepository.find({
-      where: { memberId },
-      relations: ['membership'],
+      where: { memberId: member.id },
+      relations: ['membership', 'payment'],
       order: {
+        startDate: 'DESC',
         createdAt: 'DESC',
       },
     });
@@ -162,15 +169,31 @@ export class MemberMembershipsService {
       );
     }
 
-    // 🛡️ Política de Empresa: No permitir cambiar de plan directamente si el socio tiene una membresía activa vigente
+    // 🛡️ Política de Empresa: Solo permitir renovar membresía si está vencida
     const activeMembership = await this.getMemberActiveMembership(memberId);
-    if (activeMembership && activeMembership.isActive) {
-      const todayStart = new Date();
-      todayStart.setHours(0, 0, 0, 0);
-      const isStillVigente = !activeMembership.endDate || new Date(activeMembership.endDate) >= todayStart;
-      if (isStillVigente && activeMembership.membershipId !== dto.membershipId) {
+    if (activeMembership) {
+      if (activeMembership.isActive && activeMembership.endDate) {
+        const pad = (n: number) => String(n).padStart(2, '0');
+        const now = new Date();
+        const todayStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+        const endRaw = activeMembership.endDate as any;
+        const endStr = typeof endRaw === 'string'
+          ? endRaw.slice(0, 10)
+          : `${endRaw.getFullYear()}-${pad(endRaw.getMonth() + 1)}-${pad(endRaw.getDate())}`;
+
+        // Durante todo el día de vencimiento sigue vigente. Solo está vencida si endStr < todayStr
+        const isStillVigente = endStr >= todayStr;
+        if (isStillVigente) {
+          throw new BadRequestException(
+            'El socio cuenta con una membresía activa y vigente. Por política de la empresa, solo se permite renovar la membresía una vez haya vencido.',
+          );
+        }
+      }
+
+      // 🛡️ Política de Empresa: No se permite cambiar el plan al renovar una membresía
+      if (activeMembership.membershipId && activeMembership.membershipId !== dto.membershipId) {
         throw new BadRequestException(
-          'El socio tiene una membresía activa con otro plan. Por política de la empresa, no está permitido modificar el plan directamente; debe cancelar el plan actual antes de asignar uno nuevo.',
+          'Por política de la empresa, no está permitido modificar el plan al renovar una membresía. Si deseas asignarle un plan diferente, primero debes cancelar la membresía desde su ficha de socio.',
         );
       }
     }
@@ -795,12 +818,17 @@ export class MemberMembershipsService {
       console.log(`[REMOVE MEMBERSHIP] ✓ Contador de acompañantes decrementado - filas actualizadas: ${updateResult.affected}`);
     }
 
-    // CUARTO: ELIMINAR COMPLETAMENTE el registro de MemberMembership de la BD
-    const deleteResult = await this.memberMembershipRepository.delete({
-      id: memberMembership.id,
-    });
+    // CUARTO: DESACTIVAR Y CANCELAR el registro de MemberMembership (preservar en historial)
+    memberMembership.isActive = false;
+    memberMembership.suspensionDate = new Date();
+    if (!memberMembership.discountReason) {
+      memberMembership.discountReason = 'Cancelada';
+    } else if (!memberMembership.discountReason.includes('Cancelada')) {
+      memberMembership.discountReason = `${memberMembership.discountReason} (Cancelada)`;
+    }
+    await this.memberMembershipRepository.save(memberMembership);
     
-    console.log(`[REMOVE MEMBERSHIP] ✓ Membresía eliminada de la BD: ${memberMembership.id} - Registros eliminados: ${deleteResult.affected}`);
+    console.log(`[REMOVE MEMBERSHIP] ✓ Membresía cancelada y conservada en historial: ${memberMembership.id}`);
 
     // QUINTO: SINCRONIZAR A ZKACCESS: Bloquear fecha de acceso (acc_enddate = 2000-01-01)
     try {

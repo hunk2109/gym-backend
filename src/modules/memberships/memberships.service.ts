@@ -588,7 +588,7 @@ export class MembershipsService {
         .leftJoinAndSelect('mm.membership', 'membership')
         .leftJoinAndSelect('mm.member', 'member')
         .leftJoinAndSelect('member.user', 'user')
-        .where('mm.endDate <= :today', { today })
+        .where('DATE(mm.endDate) < CURDATE()')
         .andWhere('mm.isActive = true')
         .andWhere('mm.isRecurring = true')
         .andWhere('mm.membershipType IN (:...types)', { types: ['individual', 'responsible'] })
@@ -618,7 +618,7 @@ export class MembershipsService {
         .leftJoinAndSelect('mm.membership', 'membership')
         .leftJoinAndSelect('mm.member', 'member')
         .leftJoinAndSelect('member.user', 'user')
-        .where('mm.endDate <= :today', { today })
+        .where('DATE(mm.endDate) < CURDATE()')
         .andWhere('mm.isActive = true')
         .andWhere('mm.isRecurring = false')
         .orderBy('mm.endDate', 'ASC')
@@ -648,7 +648,7 @@ export class MembershipsService {
         .leftJoinAndSelect('mm.member', 'member')
         .leftJoinAndSelect('member.user', 'user')
         .leftJoinAndSelect('mm.group', 'group')
-        .where('mm.endDate <= :today', { today })
+        .where('DATE(mm.endDate) < CURDATE()')
         .andWhere('mm.isActive = true')
         .andWhere('mm.membershipType = :type', { type: 'companion' })
         .orderBy('mm.endDate', 'ASC')
@@ -725,9 +725,15 @@ export class MembershipsService {
             (today.getTime() - new Date(currentMembership.endDate).getTime()) / (1000 * 60 * 60 * 24),
           );
 
+          const isDaily = Boolean(
+            currentMembership.membership?.durationDays &&
+            Number(currentMembership.membership?.durationDays) > 0,
+          );
+          const effectiveSuspensionDays = isDaily ? 0 : suspensionDays;
+
           // Enviar notificación preventiva antes de la suspensión (con tolerancia a fallos de días y horario respetuoso)
-          const daysUntilSuspension = suspensionDays - daysSinceDue;
-          const shouldWarn = daysUntilSuspension <= notificationDaysBefore && daysUntilSuspension >= 1;
+          const daysUntilSuspension = effectiveSuspensionDays - daysSinceDue;
+          const shouldWarn = !isDaily && daysUntilSuspension <= notificationDaysBefore && daysUntilSuspension >= 1;
 
           if (
             shouldWarn && 
@@ -789,7 +795,7 @@ export class MembershipsService {
             }
           }
 
-          if (daysSinceDue > suspensionDays) {
+          if (daysSinceDue > effectiveSuspensionDays) {
             // Suspender membresía
             currentMembership.isActive = false;
             currentMembership.suspensionDate = today;
@@ -817,22 +823,22 @@ export class MembershipsService {
         } else if (membershipPayment && membershipPayment.status === PaymentStatus.COMPLETED) {
           // El ciclo anterior fue pagado satisfactoriamente y ha expirado.
           // Renovar al siguiente periodo y generar nuevo pago en PENDIENTE.
-          await this.renewMembershipWithPendingPayment(currentMembership);
+          const renewedMembership = await this.renewMembershipWithPendingPayment(currentMembership);
           
           // Sincronizar ZKAccess con días de gracia sumados
           try {
-            const isDaily = Boolean(currentMembership.membership?.durationDays && Number(currentMembership.membership?.durationDays) > 0);
+            const isDaily = Boolean(renewedMembership.membership?.durationDays && Number(renewedMembership.membership?.durationDays) > 0);
             const graceDays = isDaily ? 0 : suspensionDays;
-            const accEndDate = new Date(currentMembership.endDate);
+            const accEndDate = new Date(renewedMembership.endDate);
             accEndDate.setDate(accEndDate.getDate() + graceDays);
             
-            if (currentMembership.member?.user) {
+            if (renewedMembership.member?.user) {
               await this.accessService.pushMemberToAccess({
-                Badgenumber: currentMembership.member.memberCode.replace(/[^0-9]/g, ''),
-                name: currentMembership.member.user.firstName,
-                lastname: currentMembership.member.user.lastName,
-                email: currentMembership.member.user.email,
-                acc_startdate: new Date(currentMembership.startDate).toISOString().split('T')[0],
+                Badgenumber: renewedMembership.member.memberCode.replace(/[^0-9]/g, ''),
+                name: renewedMembership.member.user.firstName,
+                lastname: renewedMembership.member.user.lastName,
+                email: renewedMembership.member.user.email,
+                acc_startdate: new Date(renewedMembership.startDate).toISOString().split('T')[0],
                 acc_enddate: accEndDate.toISOString().split('T')[0],
               });
             }
@@ -840,14 +846,14 @@ export class MembershipsService {
             console.error(`[MembershipsService] Error sync ZKAccess:`, e);
           }
           
-          console.log(`[MembershipsService] ✅ Membresía recurrente renovada con nuevo cobro pendiente - Miembro: ${currentMembership.memberId}`);
+          console.log(`[MembershipsService] ✅ Membresía recurrente renovada con nuevo cobro pendiente - Miembro: ${renewedMembership.memberId}`);
           renewed++;
 
           // Mensaje cordial de renovación al cliente
-          if (currentMembership.member?.user) {
+          if (renewedMembership.member?.user) {
             try {
-              const u = currentMembership.member.user;
-              const renewalMsg = `¡Hola ${u.firstName}! 🎉 Tu membresía (${currentMembership.membership.name}) ha sido renovada exitosamente para tu próximo ciclo hasta el ${new Date(currentMembership.endDate).toLocaleDateString()}. ¡Gracias por seguir entrenando con nosotros! 💪`;
+              const u = renewedMembership.member.user;
+              const renewalMsg = `¡Hola ${u.firstName}! 🎉 Tu membresía (${renewedMembership.membership.name}) ha sido renovada exitosamente para tu próximo ciclo hasta el ${new Date(renewedMembership.endDate).toLocaleDateString()}. ¡Gracias por seguir entrenando con nosotros! 💪`;
               
               if (u.phone) {
                 const now = new Date();
@@ -865,7 +871,7 @@ export class MembershipsService {
                   content: renewalMsg,
                   scheduledFor,
                   priority: NotificationPriority.LOW,
-                  metadata: { source: 'membership_renewal_courtesy', memberId: currentMembership.memberId },
+                  metadata: { source: 'membership_renewal_courtesy', memberId: renewedMembership.memberId },
                 });
               }
             } catch (_) {}
@@ -1004,12 +1010,18 @@ export class MembershipsService {
   }
 
   /**
-   * Renovar membresía con pago pendiente automático
+   * Renovar membresía con pago pendiente automático (crea nuevo registro de ciclo)
    */
-  private async renewMembershipWithPendingPayment(currentMembership: MemberMembership): Promise<void> {
-    const newStartDate = currentMembership.endDate;
+  private async renewMembershipWithPendingPayment(currentMembership: MemberMembership): Promise<MemberMembership> {
+    const newStartDate = new Date(currentMembership.endDate);
     const newEndDate = new Date(newStartDate);
-    newEndDate.setMonth(newEndDate.getMonth() + currentMembership.membership.durationMonths);
+    if (currentMembership.membership?.durationDays && Number(currentMembership.membership.durationDays) > 0) {
+      newEndDate.setDate(newEndDate.getDate() + Number(currentMembership.membership.durationDays));
+    } else if (currentMembership.membership?.durationMonths && Number(currentMembership.membership.durationMonths) > 0) {
+      newEndDate.setMonth(newEndDate.getMonth() + Number(currentMembership.membership.durationMonths));
+    } else {
+      newEndDate.setMonth(newEndDate.getMonth() + 1);
+    }
 
     // Crear nuevo Payment pendiente
     const renewalPayment = new Payment();
@@ -1022,14 +1034,28 @@ export class MembershipsService {
     renewalPayment.description = `Auto-renewal for membership: ${currentMembership.membership.name}`;
     const savedPayment = await this.paymentRepository.save(renewalPayment);
 
-    // Actualizar membresía
-    currentMembership.startDate = newStartDate;
-    currentMembership.endDate = newEndDate;
-    currentMembership.isActive = true;
-    currentMembership.paymentId = savedPayment.id;
-    currentMembership.payAmount = renewalPayment.amount as any;
-    
+    // Marcar el ciclo anterior como finalizado (inactivo) para conservar su historial
+    currentMembership.isActive = false;
     await this.memberMembershipRepository.save(currentMembership);
+
+    // Crear un nuevo registro para el nuevo periodo en el historial
+    const newMembership = new MemberMembership();
+    newMembership.id = uuidv4();
+    newMembership.memberId = currentMembership.memberId;
+    newMembership.membershipId = currentMembership.membershipId;
+    newMembership.startDate = newStartDate;
+    newMembership.endDate = newEndDate;
+    newMembership.isActive = true;
+    newMembership.paymentId = savedPayment.id;
+    newMembership.payAmount = renewalPayment.amount as any;
+    newMembership.membershipType = currentMembership.membershipType;
+    newMembership.groupId = currentMembership.groupId;
+    newMembership.isRecurring = currentMembership.isRecurring;
+    newMembership.classesUsed = 0;
+    newMembership.membership = currentMembership.membership;
+    newMembership.member = currentMembership.member;
+
+    return await this.memberMembershipRepository.save(newMembership);
   }
 
   /**

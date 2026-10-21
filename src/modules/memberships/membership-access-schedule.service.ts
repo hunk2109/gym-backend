@@ -168,11 +168,16 @@ export class MembershipAccessScheduleService {
       return { allowed: false, reason: 'Sin membresía asignada' };
     }
 
-    // Verificar que la membresía no esté vencida
-    const today = new Date();
-    const endDate = new Date(activeMembership.endDate);
+    // Verificar que la membresía no esté vencida (durante todo el día de fin sigue vigente)
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const now = new Date();
+    const todayStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+    const endRaw = activeMembership.endDate as any;
+    const endStr = typeof endRaw === 'string'
+      ? endRaw.slice(0, 10)
+      : `${endRaw.getFullYear()}-${pad(endRaw.getMonth() + 1)}-${pad(endRaw.getDate())}`;
 
-    if (endDate < today) {
+    if (endStr < todayStr) {
       return {
         allowed: false,
         reason: 'Membresía vencida',
@@ -311,11 +316,16 @@ export class MembershipAccessScheduleService {
       return { allowed: false, reason: 'Sin membresía asignada' };
     }
 
-    // Verificar que la membresía no esté vencida
-    const today = new Date();
-    const endDate = new Date(activeMembership.endDate);
+    // Verificar que la membresía no esté vencida (durante todo el día de fin sigue vigente)
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const now = new Date();
+    const todayStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+    const endRaw = activeMembership.endDate as any;
+    const endStr = typeof endRaw === 'string'
+      ? endRaw.slice(0, 10)
+      : `${endRaw.getFullYear()}-${pad(endRaw.getMonth() + 1)}-${pad(endRaw.getDate())}`;
 
-    if (endDate < today) {
+    if (endStr < todayStr) {
       return {
         allowed: false,
         reason: 'Membresía vencida',
