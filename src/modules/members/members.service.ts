@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Like, Brackets } from 'typeorm';
+import { Repository, Like, Brackets, In } from 'typeorm';
 import { v4 as uuidv4 } from 'uuid';
 import { Member } from '../../entities/member.entity';
 import { User, UserRole } from '../../entities/user.entity';
@@ -248,6 +248,7 @@ export class MembersService {
     // Obtener o sincronizar código de socio igual que en ZKAccess (secuencial directo sin duplicados)
     let memberCode: string | null = null;
     let zkUid: number | undefined;
+    let syncedToAccessOnCreate = false;
 
     try {
       const accessRes = await this.accessService.findOrCreateAccessMember({
@@ -263,6 +264,7 @@ export class MembersService {
         memberCode = accessRes.badgeNumber;
         const numBadge = Number(accessRes.badgeNumber);
         zkUid = Number.isFinite(numBadge) ? numBadge : accessRes.USERID;
+        syncedToAccessOnCreate = accessRes.action !== 'skipped_sync_disabled';
         this.logger.log(
           `[MembersService] Socio sincronizado con Access. Badge: ${memberCode}, USERID: ${zkUid}, acción: ${accessRes.action}`,
         );
@@ -381,22 +383,24 @@ export class MembersService {
       // No fallar la operación si el email no se envía
     }
 
-    // SINCRONIZAR A ZKACCESS
-    try {
-      this.logger.log(`[MembersService] 🔄 Empujando socio a ZKAccess (USERINFO)...`);
-      await this.accessService.pushMemberToAccess({
-        Badgenumber: savedMember.memberCode.replace(/[^0-9]/g, ''),
-        name: user.firstName,
-        lastname: user.lastName,
-        email: user.email,
-        phone: user.phone,
-        documentId: savedMember.documentId,
-        USERID: savedMember.zkUid,
-        acc_startdate: '2000-01-01',
-        acc_enddate: '2000-01-01',
-      });
-    } catch (accessError) {
-      this.logger.error(`[MembersService] ❌ Falló la sincronización a Access del socio ${savedMember.id}`, accessError);
+    // SINCRONIZAR A ZKACCESS (solo si no fue ya insertado/actualizado en findOrCreateAccessMember)
+    if (!syncedToAccessOnCreate) {
+      try {
+        this.logger.log(`[MembersService] 🔄 Empujando socio a ZKAccess (USERINFO)...`);
+        await this.accessService.pushMemberToAccess({
+          Badgenumber: savedMember.memberCode.replace(/[^0-9]/g, ''),
+          name: user.firstName,
+          lastname: user.lastName,
+          email: user.email,
+          phone: user.phone,
+          documentId: savedMember.documentId,
+          USERID: savedMember.zkUid,
+          acc_startdate: '2000-01-01',
+          acc_enddate: '2000-01-01',
+        });
+      } catch (accessError) {
+        this.logger.error(`[MembersService] ❌ Falló la sincronización a Access del socio ${savedMember.id}`, accessError);
+      }
     }
 
     await this.syncMemberToDeviceSafe(savedMember.id, 'create');
@@ -823,8 +827,41 @@ export class MembersService {
     Object.assign(member, memberUpdate);
 
     const saved = await this.memberRepository.save(member);
+    const updatedMember = await this.findById(saved.id);
+
+    // Sincronizar cambios de nombre/cédula/teléfono a ZKAccess preservando sus fechas de acceso actuales
+    try {
+      if (updatedMember?.user && updatedMember.memberCode) {
+        const activeMm = (updatedMember as any).activeMembership;
+        let accStart: string | null = null;
+        let accEnd: string | null = null;
+        if (activeMm?.startDate && activeMm?.endDate) {
+          const settings = await this.gymSettingsService.getSettings();
+          const isDaily = Boolean(activeMm.membership?.durationDays && Number(activeMm.membership?.durationDays) > 0);
+          const graceDays = isDaily ? 0 : (settings?.membershipSuspensionDays || 0);
+          const endWithGrace = new Date(activeMm.endDate);
+          endWithGrace.setDate(endWithGrace.getDate() + graceDays);
+          accStart = new Date(activeMm.startDate).toISOString().split('T')[0];
+          accEnd = endWithGrace.toISOString().split('T')[0];
+        }
+        await this.accessService.pushMemberToAccess({
+          Badgenumber: updatedMember.memberCode.replace(/[^0-9]/g, ''),
+          name: updatedMember.user.firstName,
+          lastname: updatedMember.user.lastName,
+          email: updatedMember.user.email,
+          phone: updatedMember.user.phone,
+          documentId: updatedMember.documentId,
+          USERID: updatedMember.zkUid,
+          acc_startdate: accStart,
+          acc_enddate: accEnd,
+        });
+      }
+    } catch (accessErr) {
+      this.logger.warn(`[MembersService] No se pudo actualizar ficha en ZKAccess para socio ${id}: ${accessErr.message}`);
+    }
+
     await this.syncMemberToDeviceSafe(id, 'update');
-    return this.findById(saved.id);
+    return updatedMember;
   }
 
   async updateNotificationPreferences(
@@ -862,7 +899,7 @@ export class MembersService {
     if (pendingPayments.length > 0) {
       const paymentIds = pendingPayments.map(p => p.id);
       await this.paymentRepository.update(
-        { id: paymentIds.length === 1 ? paymentIds[0] : undefined },
+        { id: In(paymentIds) },
         {
           status: PaymentStatus.CANCELLED,
         },

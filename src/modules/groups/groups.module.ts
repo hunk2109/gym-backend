@@ -10,6 +10,8 @@ import { Payment } from '../../entities/payment.entity';
 import { GroupsService } from './groups.service';
 import { GroupsController } from './groups.controller';
 import { EmailSettingsModule } from '../email-settings/email-settings.module';
+import { SyncModule } from '../sync/sync.module';
+import { GymSettingsModule } from '../gym-settings/gym-settings.module';
 
 @Module({
   imports: [
@@ -23,6 +25,8 @@ import { EmailSettingsModule } from '../email-settings/email-settings.module';
       Payment,
     ]),
     EmailSettingsModule,
+    SyncModule,
+    GymSettingsModule,
   ],
   controllers: [GroupsController],
   providers: [GroupsService],

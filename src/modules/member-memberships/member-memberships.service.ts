@@ -1070,29 +1070,64 @@ export class MemberMembershipsService {
       console.log(`[MemberMembershipsService] ✓ Payment actualizado a COMPLETED con cashRegisterId: ${activeRegisterId} para paymentId: ${memberMembership.paymentId}`);
     }
 
-    // Restaurar acceso en ZKAccess
+    // Restaurar acceso en ZKAccess y ZKTeco (titular + acompañantes si es grupo)
     try {
       const settings = await this.gymSettingsService.getSettings();
       const isDaily = Boolean(memberMembership.membership?.durationDays && Number(memberMembership.membership?.durationDays) > 0);
       const graceDays = isDaily ? 0 : (settings?.membershipSuspensionDays || 0);
       const accEndDate = new Date(memberMembership.endDate);
       accEndDate.setDate(accEndDate.getDate() + graceDays);
+      const accStartStr = new Date(memberMembership.startDate).toISOString().split('T')[0];
+      const accEndStr = accEndDate.toISOString().split('T')[0];
 
       const memberWithUserSync = await this.memberRepository.findOne({
         where: { id: memberMembership.memberId },
         relations: ['user'],
       });
 
-      if (memberWithUserSync?.user) {
+      if (memberWithUserSync?.user && memberWithUserSync.memberCode) {
         await this.accessService.pushMemberToAccess({
           Badgenumber: memberWithUserSync.memberCode.replace(/[^0-9]/g, ''),
           name: memberWithUserSync.user.firstName,
           lastname: memberWithUserSync.user.lastName,
           email: memberWithUserSync.user.email,
-          acc_startdate: new Date(memberMembership.startDate).toISOString().split('T')[0],
-          acc_enddate: accEndDate.toISOString().split('T')[0],
+          phone: memberWithUserSync.user.phone,
+          documentId: memberWithUserSync.documentId,
+          USERID: memberWithUserSync.zkUid,
+          acc_startdate: accStartStr,
+          acc_enddate: accEndStr,
         });
+        this.syncMemberToDeviceSafe(memberMembership.memberId, 'record-payment').catch(() => {});
         console.log(`[MemberMembershipsService] ✅ Acceso ZKAccess restaurado por pago completado.`);
+      }
+
+      // Si es titular de un grupo, restaurar también a sus acompañantes
+      if (memberMembership.membershipType === 'responsible' && memberMembership.groupId) {
+        const companions = await this.memberMembershipRepository.find({
+          where: { groupId: memberMembership.groupId, membershipType: 'companion' },
+          relations: ['member', 'member.user'],
+        });
+        for (const comp of companions) {
+          if (!comp.isActive || comp.suspensionDate) {
+            comp.isActive = true;
+            comp.suspensionDate = null as any;
+            await this.memberMembershipRepository.save(comp);
+          }
+          if (comp.member?.user && comp.member.memberCode) {
+            await this.accessService.pushMemberToAccess({
+              Badgenumber: comp.member.memberCode.replace(/[^0-9]/g, ''),
+              name: comp.member.user.firstName,
+              lastname: comp.member.user.lastName,
+              email: comp.member.user.email,
+              phone: comp.member.user.phone,
+              documentId: comp.member.documentId,
+              USERID: comp.member.zkUid,
+              acc_startdate: accStartStr,
+              acc_enddate: accEndStr,
+            }).catch(() => {});
+            this.syncMemberToDeviceSafe(comp.memberId, 'record-payment-companion').catch(() => {});
+          }
+        }
       }
     } catch (e) {
       console.error(`[MemberMembershipsService] Error sync ZKAccess en recordPayment:`, e);

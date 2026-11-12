@@ -6,6 +6,7 @@ import { MembershipAccessSchedule, DayOfWeek } from '../../entities/membership-a
 import { Membership } from '../../entities/membership.entity';
 import { MemberMembership } from '../../entities/member-membership.entity';
 import { Member } from '../../entities/member.entity';
+import { GymSettingsService } from '../gym-settings/gym-settings.service';
 import {
   CreateMembershipAccessScheduleDto,
   UpdateMembershipAccessScheduleDto,
@@ -24,7 +25,8 @@ export class MembershipAccessScheduleService {
     private memberMembershipRepository: Repository<MemberMembership>,
     @InjectRepository(Member)
     private memberRepository: Repository<Member>,
-  ) {}
+    private gymSettingsService: GymSettingsService,
+  ) { }
 
   /**
    * Crear un nuevo horario de acceso para una membresía
@@ -138,54 +140,123 @@ export class MembershipAccessScheduleService {
   }
 
   /**
+   * Busca un socio de forma flexible por ID, código exacto, número secuencial (125 -> MEM-000125 / MEM_000125),
+   * zkUid o documento de identidad (cédula).
+   */
+  private async findMemberByIdentifier(identifier: string): Promise<Member | null> {
+    const raw = (identifier || '').trim();
+    if (!raw) return null;
+
+    // 1. Búsqueda directa por id, memberCode o documentId
+    let member = await this.memberRepository.findOne({
+      where: [
+        { id: raw },
+        { memberCode: raw },
+        { documentId: raw },
+      ],
+      relations: ['user'],
+    });
+    if (member) return member;
+
+    // 2. Normalizar si ingresaron solo dígitos o formato MEM-xxx / MEM_xxx
+    const digitsOnly = raw.replace(/[^0-9]/g, '');
+    if (digitsOnly) {
+      const padded = digitsOnly.padStart(6, '0');
+      const unpadded = String(parseInt(digitsOnly, 10));
+      const numericUid = Number(digitsOnly);
+      const conditions: any[] = [
+        { memberCode: unpadded },
+        { memberCode: digitsOnly },
+        { memberCode: `MEM-${padded}` },
+        { memberCode: `MEM_${padded}` },
+        { documentId: digitsOnly },
+      ];
+      if (Number.isFinite(numericUid) && numericUid > 0) {
+        conditions.push({ zkUid: numericUid });
+      }
+      member = await this.memberRepository.findOne({
+        where: conditions,
+        relations: ['user'],
+      });
+    }
+
+    return member;
+  }
+
+  /**
    * Validar si un miembro tiene acceso en este momento
-   * Retorna { allowed: boolean, reason?: string }
+   * Retorna { allowed: boolean, reason?: string, membership?: Membership, member?: Member }
    */
   async validateMemberAccessBySchedule(
     memberIdentifier: string,
-  ): Promise<{ allowed: boolean; reason?: string; membership?: Membership }> {
+  ): Promise<{ allowed: boolean; reason?: string; membership?: Membership; member?: Member }> {
     this.logger.log(`[AccessSchedule] Validando acceso para miembro ${memberIdentifier}`);
 
-    // Buscar el miembro por ID o por código
-    const member = await this.memberRepository.findOne({
-      where: [{ id: memberIdentifier }, { memberCode: memberIdentifier }],
-    });
+    const member = await this.findMemberByIdentifier(memberIdentifier);
 
     if (!member) {
       return { allowed: false, reason: 'Miembro no encontrado' };
     }
 
-    // Obtener la membresía activa del miembro
+    return this.validateResolvedMemberAccess(member);
+  }
+
+  private async validateResolvedMemberAccess(
+    member: Member,
+  ): Promise<{ allowed: boolean; reason?: string; membership?: Membership; member?: Member }> {
+    // Obtener la membresía activa más reciente del miembro
     const activeMembership = await this.memberMembershipRepository.findOne({
       where: {
         memberId: member.id,
         isActive: true,
       },
       relations: ['membership'],
+      order: { endDate: 'DESC' },
     });
 
     if (!activeMembership) {
-      return { allowed: false, reason: 'Sin membresía asignada' };
+      return { allowed: false, reason: 'Sin membresía asignada', member };
     }
 
-    // Verificar que la membresía no esté vencida (durante todo el día de fin sigue vigente)
+    if (activeMembership.suspensionDate) {
+      return {
+        allowed: false,
+        reason: 'Payment pending or suspended',
+        membership: activeMembership.membership,
+        member,
+      };
+    }
+
+    // Verificar que la membresía no esté vencida (incluyendo días de gracia si no es pase diario)
+    let graceDays = 0;
+    try {
+      const isDaily = Boolean(
+        activeMembership.membership?.durationDays &&
+        Number(activeMembership.membership.durationDays) > 0,
+      );
+      if (!isDaily) {
+        const settings = await this.gymSettingsService.getSettings();
+        graceDays = Number(settings?.membershipSuspensionDays || 0);
+      }
+    } catch {
+      graceDays = 0;
+    }
+
     const pad = (n: number) => String(n).padStart(2, '0');
     const now = new Date();
     const todayStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-    const endRaw = activeMembership.endDate as any;
-    const endStr = typeof endRaw === 'string'
-      ? endRaw.slice(0, 10)
-      : `${endRaw.getFullYear()}-${pad(endRaw.getMonth() + 1)}-${pad(endRaw.getDate())}`;
+    const effectiveEndDate = new Date(activeMembership.endDate);
+    effectiveEndDate.setDate(effectiveEndDate.getDate() + graceDays);
+    const endStr = `${effectiveEndDate.getFullYear()}-${pad(effectiveEndDate.getMonth() + 1)}-${pad(effectiveEndDate.getDate())}`;
 
     if (endStr < todayStr) {
       return {
         allowed: false,
         reason: 'Membresía vencida',
         membership: activeMembership.membership,
+        member,
       };
     }
-
-    // TODO: Verificar estado de pago mediante tabla Payment (requiere PaymentRepository)
 
     // Obtener el horario de la membresía
     const membership = await this.membershipRepository.findOne({
@@ -197,6 +268,7 @@ export class MembershipAccessScheduleService {
       return {
         allowed: false,
         reason: 'Membresía no encontrada',
+        member,
       };
     }
 
@@ -205,6 +277,7 @@ export class MembershipAccessScheduleService {
       return {
         allowed: true,
         membership,
+        member,
       };
     }
 
@@ -223,6 +296,7 @@ export class MembershipAccessScheduleService {
         allowed: false,
         reason: `Gimnasio cerrado el ${this.getDayNameInSpanish(dayOfWeek)}`,
         membership,
+        member,
       };
     }
 
@@ -232,6 +306,7 @@ export class MembershipAccessScheduleService {
         allowed: false,
         reason: `Acceso deshabilitado el ${this.getDayNameInSpanish(dayOfWeek)}`,
         membership,
+        member,
       };
     }
 
@@ -241,10 +316,11 @@ export class MembershipAccessScheduleService {
         allowed: false,
         reason: `Fuera de horarios permitidos (${todaySchedule.timeStart} - ${todaySchedule.timeEnd})`,
         membership,
+        member,
       };
     }
 
-    return { allowed: true, membership };
+    return { allowed: true, membership, member };
   }
 
   /**
@@ -291,107 +367,18 @@ export class MembershipAccessScheduleService {
 
   async validateMemberAccessByScheduleId(
     memberId: string,
-  ): Promise<{ allowed: boolean; reason?: string; membership?: Membership }> {
+  ): Promise<{ allowed: boolean; reason?: string; membership?: Membership; member?: Member }> {
     this.logger.log(`[AccessSchedule] Validando acceso por ID para miembro ${memberId}`);
 
-    // Buscar el miembro por ID
     const member = await this.memberRepository.findOne({
       where: { id: memberId },
+      relations: ['user'],
     });
 
     if (!member) {
       return { allowed: false, reason: 'Miembro no encontrado' };
     }
 
-    // Obtener la membresía activa del miembro
-    const activeMembership = await this.memberMembershipRepository.findOne({
-      where: {
-        memberId: member.id,
-        isActive: true,
-      },
-      relations: ['membership'],
-    });
-
-    if (!activeMembership) {
-      return { allowed: false, reason: 'Sin membresía asignada' };
-    }
-
-    // Verificar que la membresía no esté vencida (durante todo el día de fin sigue vigente)
-    const pad = (n: number) => String(n).padStart(2, '0');
-    const now = new Date();
-    const todayStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-    const endRaw = activeMembership.endDate as any;
-    const endStr = typeof endRaw === 'string'
-      ? endRaw.slice(0, 10)
-      : `${endRaw.getFullYear()}-${pad(endRaw.getMonth() + 1)}-${pad(endRaw.getDate())}`;
-
-    if (endStr < todayStr) {
-      return {
-        allowed: false,
-        reason: 'Membresía vencida',
-        membership: activeMembership.membership,
-      };
-    }
-
-    // TODO: Verificar estado de pago mediante tabla Payment (requiere PaymentRepository)
-
-    // Obtener el horario de la membresía
-    const membership = await this.membershipRepository.findOne({
-      where: { id: activeMembership.membershipId },
-      relations: ['accessSchedules'],
-    });
-
-    if (!membership) {
-      return {
-        allowed: false,
-        reason: 'Membresía no encontrada',
-      };
-    }
-
-    // Si la membresía no tiene horarios específicos configurados, se asume acceso libre/completo
-    if (!membership.accessSchedules || membership.accessSchedules.length === 0) {
-      return {
-        allowed: true,
-        membership,
-      };
-    }
-
-    // Obtener día actual
-    const currentDate = new Date();
-    const dayOfWeek = this.getDayOfWeek(currentDate);
-    const currentTime = this.getCurrentTimeString(currentDate);
-
-    // Buscar si hay horario para hoy
-    const todaySchedule = membership.accessSchedules.find(
-      (s) => s.dayOfWeek === dayOfWeek,
-    );
-
-    if (!todaySchedule) {
-      return {
-        allowed: false,
-        reason: `Gimnasio cerrado el ${this.getDayNameInSpanish(dayOfWeek)}`,
-        membership,
-      };
-    }
-
-    // Verificar que el día esté habilitado
-    if (todaySchedule.isEnabled === false) {
-      return {
-        allowed: false,
-        reason: `Acceso deshabilitado el ${this.getDayNameInSpanish(dayOfWeek)}`,
-        membership,
-      };
-    }
-
-    // Validar que la hora actual esté dentro del rango
-    if (currentTime < todaySchedule.timeStart || currentTime > todaySchedule.timeEnd) {
-      return {
-        allowed: false,
-        reason: `Fuera de horarios permitidos (${todaySchedule.timeStart} - ${todaySchedule.timeEnd})`,
-        membership,
-      };
-    }
-
-    return { allowed: true, membership };
+    return this.validateResolvedMemberAccess(member);
   }
 }

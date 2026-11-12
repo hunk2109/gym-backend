@@ -13,6 +13,7 @@ import { PromotionsService } from '../promotions/promotions.service';
 import { OutboxService, isDeliverableEmail } from '../outbox/outbox.service';
 import { NotificationPriority } from '../outbox/entities/notification-outbox.entity';
 import { AccessService } from '../sync/access.service';
+import { ZktecoDeviceService } from '../sync/zkteco-device.service';
 
 @Injectable()
 export class PaymentsService {
@@ -33,6 +34,7 @@ export class PaymentsService {
     private readonly promotionsService: PromotionsService,
     private readonly outboxService: OutboxService,
     private readonly accessService: AccessService,
+    private readonly zktecoDeviceService: ZktecoDeviceService,
   ) {}
 
   private async getActiveCashRegisterId(userId?: string): Promise<string | null> {
@@ -208,8 +210,8 @@ export class PaymentsService {
   }
 
   /**
-   * Reactiva automáticamente la membresía y desbloquea el torniquete ZKTeco
-   * inmediatamente cuando un pago de membresía se completa en caja o POS.
+   * Reactiva automáticamente la membresía (incluyendo acompañantes de grupo) y desbloquea
+   * el torniquete ZKTeco/ZKAccess inmediatamente cuando un pago de membresía se completa.
    */
   private async autoReactivateMemberOnPayment(payment: Payment): Promise<void> {
     try {
@@ -222,37 +224,61 @@ export class PaymentsService {
         relations: ['member', 'member.user', 'membership'],
       });
 
+      // Si el titular de un grupo pagó, incluir también las membresías de los acompañantes del grupo
+      const allMembershipsToSync: MemberMembership[] = [...memberships];
       for (const mm of memberships) {
+        if (mm.membershipType === 'responsible' && mm.groupId) {
+          const companions = await this.memberMembershipRepository.find({
+            where: { groupId: mm.groupId, membershipType: 'companion' },
+            relations: ['member', 'member.user', 'membership'],
+          });
+          for (const comp of companions) {
+            if (!allMembershipsToSync.some((existing) => existing.id === comp.id)) {
+              allMembershipsToSync.push(comp);
+            }
+          }
+        }
+      }
+
+      const settings = await this.memberMembershipRepository.manager.query(
+        'SELECT membershipSuspensionDays FROM gym_settings LIMIT 1',
+      );
+      const suspensionDays =
+        settings?.[0]?.membershipSuspensionDays != null
+          ? Number(settings[0].membershipSuspensionDays)
+          : 1;
+
+      for (const mm of allMembershipsToSync) {
         if (!mm.isActive || mm.suspensionDate) {
           mm.isActive = true;
           mm.suspensionDate = null as any;
           await this.memberMembershipRepository.save(mm);
           this.logger.log(`[PaymentsService] 🔁 Membresía ${mm.id} reactivada inmediatamente tras completar pago.`);
+        }
 
-          // Desbloquear torniquete ZKTeco en tiempo real
-          try {
-            if (mm.member?.user) {
-              const isDaily = Boolean(mm.membership?.durationDays && Number(mm.membership?.durationDays) > 0);
-              const settings = await this.memberMembershipRepository.manager.query(
-                'SELECT membershipSuspensionDays FROM gym_settings LIMIT 1',
-              );
-              const suspensionDays = settings?.[0]?.membershipSuspensionDays != null ? Number(settings[0].membershipSuspensionDays) : 1;
-              const graceDays = isDaily ? 0 : suspensionDays;
-              const accEndDate = new Date(mm.endDate);
-              accEndDate.setDate(accEndDate.getDate() + graceDays);
-              await this.accessService.pushMemberToAccess({
-                Badgenumber: mm.member.memberCode.replace(/[^0-9]/g, ''),
-                name: mm.member.user.firstName,
-                lastname: mm.member.user.lastName,
-                email: mm.member.user.email,
-                acc_startdate: new Date(mm.startDate).toISOString().split('T')[0],
-                acc_enddate: accEndDate.toISOString().split('T')[0],
-              });
-              this.logger.log(`[PaymentsService] ⚡ Torniquete ZKTeco desbloqueado en tiempo real para ${mm.member.user.firstName}`);
-            }
-          } catch (syncErr) {
-            this.logger.warn(`[PaymentsService] Error al sincronizar ZKTeco en tiempo real:`, syncErr);
+        // Desbloquear/actualizar torniquete ZKAccess (.mdb) y equipo ZKTeco en tiempo real
+        try {
+          if (mm.member?.user && mm.member.memberCode) {
+            const isDaily = Boolean(mm.membership?.durationDays && Number(mm.membership?.durationDays) > 0);
+            const graceDays = isDaily ? 0 : suspensionDays;
+            const accEndDate = new Date(mm.endDate);
+            accEndDate.setDate(accEndDate.getDate() + graceDays);
+            await this.accessService.pushMemberToAccess({
+              Badgenumber: mm.member.memberCode.replace(/[^0-9]/g, ''),
+              name: mm.member.user.firstName,
+              lastname: mm.member.user.lastName,
+              email: mm.member.user.email,
+              phone: mm.member.user.phone,
+              documentId: mm.member.documentId,
+              USERID: mm.member.zkUid,
+              acc_startdate: new Date(mm.startDate).toISOString().split('T')[0],
+              acc_enddate: accEndDate.toISOString().split('T')[0],
+            });
+            this.zktecoDeviceService.syncMemberById(mm.memberId).catch(() => {});
+            this.logger.log(`[PaymentsService] ⚡ Torniquete ZKAccess/ZKTeco actualizado en tiempo real para ${mm.member.user.firstName}`);
           }
+        } catch (syncErr) {
+          this.logger.warn(`[PaymentsService] Error al sincronizar ZKTeco en tiempo real:`, syncErr);
         }
       }
     } catch (e) {

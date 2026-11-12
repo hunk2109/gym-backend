@@ -134,6 +134,14 @@ export class ZktecoDeviceService {
     memberId: string,
     options: { allowWithoutActiveMembership?: boolean } = {},
   ): Promise<any> {
+    if (!(await this.accessService.isZktecoSyncEnabled())) {
+      return {
+        success: true,
+        skipped: true,
+        message: 'Sincronizacion ZKTeco omitida (modo manual/desactivado)',
+      };
+    }
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -187,6 +195,14 @@ export class ZktecoDeviceService {
   }
 
   async deleteMemberById(memberId: string): Promise<any> {
+    if (!(await this.accessService.isZktecoSyncEnabled())) {
+      return {
+        success: true,
+        skipped: true,
+        message: 'Eliminacion ZKTeco omitida (modo manual/desactivado)',
+      };
+    }
+
     const member = await this.memberRepository.findOne({
       where: { id: memberId },
     });
@@ -200,6 +216,14 @@ export class ZktecoDeviceService {
   }
 
   async syncEmployeeById(employeeId: string): Promise<any> {
+    if (!(await this.accessService.isZktecoSyncEnabled())) {
+      return {
+        success: true,
+        skipped: true,
+        message: 'Sincronizacion ZKTeco de empleado omitida (modo manual/desactivado)',
+      };
+    }
+
     const employee = await this.employeeRepository.findOne({
       where: { id: employeeId },
     });
@@ -221,6 +245,14 @@ export class ZktecoDeviceService {
   }
 
   async deleteEmployeeById(employeeId: string): Promise<any> {
+    if (!(await this.accessService.isZktecoSyncEnabled())) {
+      return {
+        success: true,
+        skipped: true,
+        message: 'Eliminacion ZKTeco de empleado omitida (modo manual/desactivado)',
+      };
+    }
+
     const employee = await this.employeeRepository.findOne({
       where: { id: employeeId },
     });

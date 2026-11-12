@@ -57,17 +57,19 @@ export class AttendancesController {
       const reason = validation.reason || 'Access denied';
       this.logger.warn(`[AttendancesController] Acceso rechazado: ${reason}`);
       
-      // Cargar información del miembro
-      const member = await this.memberRepository.findOne({
+      // Usar miembro resuelto por el validador o buscarlo por código
+      const member = validation.member || (await this.memberRepository.findOne({
         where: { memberCode: registerByCodeDto.memberCode },
         relations: ['user'],
-      });
+      }));
       
       // Registrar intento rechazado
-      const rejectedAttendance = await this.attendancesService.registerRejectedAttendance(
-        registerByCodeDto.memberCode,
-        reason,
-      );
+      const rejectedAttendance = member
+        ? await this.attendancesService.registerRejectedAttendanceById(member.id, reason)
+        : await this.attendancesService.registerRejectedAttendance(
+            registerByCodeDto.memberCode,
+            reason,
+          );
       
       // Retornar respuesta amigable en lugar de error
       return {
@@ -76,7 +78,7 @@ export class AttendancesController {
         status: 'REJECTED',
         message: this._getFriendlyMessage(reason),
         reason: reason,
-        memberCode: registerByCodeDto.memberCode,
+        memberCode: member?.memberCode || registerByCodeDto.memberCode,
         memberName: member?.user?.firstName || 'Desconocido',
         memberLastName: member?.user?.lastName || '',
         attendance: rejectedAttendance,
@@ -84,7 +86,10 @@ export class AttendancesController {
       };
     }
 
-    return this.attendancesService.registerByCode(registerByCodeDto);
+    return this.attendancesService.registerByCode({
+      ...registerByCodeDto,
+      memberCode: validation.member?.memberCode || registerByCodeDto.memberCode,
+    });
   }
 
   @Post('register-by-id')

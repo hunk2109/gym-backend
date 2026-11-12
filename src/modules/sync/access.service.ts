@@ -21,8 +21,8 @@ const execPromise = promisify(exec);
 export class AccessService {
   private readonly logger = new Logger(AccessService.name);
   private accessDbPath: string | null = null;
-  // Ruta del archivo Access
-  private readonly DEFAULT_DB_PATH = 'c:\\develop\\gym-backend\\dowtown.mdb';
+  // Ruta del archivo Access (relativa al directorio de trabajo del backend)
+  private readonly DEFAULT_DB_PATH = join(process.cwd(), 'dowtown.mdb');
   private readonly CONFIG_KEY = 'ACCESS_DB_PATH';
 
   private successfulMachineQuery: string | null = null;
@@ -86,9 +86,9 @@ export class AccessService {
       path = this.accessDbPath || this.DEFAULT_DB_PATH;
     }
     
-    // Si solo se ingresó el nombre del archivo, agregar la ruta por defecto
+    // Si solo se ingresó el nombre del archivo, agregar la ruta del directorio actual del backend
     if (path && !path.includes('\\') && !path.includes('/')) {
-      path = join('c:\\develop\\gym-backend', path);
+      path = join(process.cwd(), path);
     }
     
     return path;
@@ -459,8 +459,17 @@ export class AccessService {
   }
 
   /**
-   * Envía un miembro a ZKAccess
+   * Verifica si la sincronización con ZKAccess / ZKTeco está habilitada
    */
+  async isZktecoSyncEnabled(): Promise<boolean> {
+    try {
+      const val = await this.configService.getConfig('ZKTECO_SYNC_ENABLED');
+      return val !== 'false';
+    } catch {
+      return true;
+    }
+  }
+
   /**
    * Envía un miembro a ZKAccess asegurando que no se creen duplicados
    */
@@ -476,6 +485,16 @@ export class AccessService {
     phone?: string | null;
     documentId?: string | null;
   }): Promise<any> {
+    if (!(await this.isZktecoSyncEnabled())) {
+      this.logger.debug(`Sincronización ZKAccess omitida para ${userData.Badgenumber} (ZKTECO_SYNC_ENABLED=false)`);
+      return {
+        success: true,
+        skipped: true,
+        action: 'skipped_sync_disabled',
+        badgeNumber: userData.Badgenumber,
+      };
+    }
+
     await this.validateAccessDbPath();
     try {
       let member = await this.findMemberByAccessBadge(userData.Badgenumber);
@@ -554,6 +573,17 @@ export class AccessService {
     acc_startdate?: string | null;
     acc_enddate?: string | null;
   }): Promise<{ badgeNumber: string; USERID?: number; action: string; success: boolean }> {
+    if (!(await this.isZktecoSyncEnabled())) {
+      const nextCode = await this.getNextSequentialMemberCode();
+      const numericCode = Number(nextCode);
+      return {
+        badgeNumber: nextCode,
+        USERID: Number.isFinite(numericCode) ? numericCode : undefined,
+        action: 'skipped_sync_disabled',
+        success: true,
+      };
+    }
+
     await this.validateAccessDbPath();
     const payload: any = {
       action: 'upsert',
@@ -579,25 +609,27 @@ export class AccessService {
    * Obtiene el siguiente ID de miembro numérico secuencial (igual que en Access).
    */
   async getNextSequentialMemberCode(): Promise<string> {
-    try {
-      const rows = await this.executeAccessQuery(
-        'SELECT TOP 1 Badgenumber FROM USERINFO WHERE VAL(Badgenumber) > 0 AND VAL(Badgenumber) < 900 ORDER BY USERID DESC',
-      );
-      let lastBadge = 0;
-      if (rows?.[0]?.Badgenumber) {
-        lastBadge = parseInt(String(rows[0].Badgenumber).trim(), 10) || 0;
-      }
-      if (lastBadge === 0) {
-        const maxRows = await this.executeAccessQuery(
-          'SELECT MAX(VAL(Badgenumber)) AS maxBadge FROM USERINFO WHERE VAL(Badgenumber) < 900',
+    if (await this.isZktecoSyncEnabled()) {
+      try {
+        const rows = await this.executeAccessQuery(
+          'SELECT TOP 1 Badgenumber FROM USERINFO WHERE VAL(Badgenumber) > 0 AND VAL(Badgenumber) < 900 ORDER BY USERID DESC',
         );
-        lastBadge = Number(maxRows?.[0]?.maxBadge) || 0;
+        let lastBadge = 0;
+        if (rows?.[0]?.Badgenumber) {
+          lastBadge = parseInt(String(rows[0].Badgenumber).trim(), 10) || 0;
+        }
+        if (lastBadge === 0) {
+          const maxRows = await this.executeAccessQuery(
+            'SELECT MAX(VAL(Badgenumber)) AS maxBadge FROM USERINFO WHERE VAL(Badgenumber) < 900',
+          );
+          lastBadge = Number(maxRows?.[0]?.maxBadge) || 0;
+        }
+        if (lastBadge > 0) {
+          return String(lastBadge + 1);
+        }
+      } catch (e) {
+        this.logger.warn(`No se pudo consultar max ID en Access, usando base de datos local: ${e.message}`);
       }
-      if (lastBadge > 0) {
-        return String(lastBadge + 1);
-      }
-    } catch (e) {
-      this.logger.warn(`No se pudo consultar max ID en Access, usando base de datos local: ${e.message}`);
     }
 
     try {
@@ -618,6 +650,10 @@ export class AccessService {
   }
 
   async deleteMemberFromAccess(badgeNumber: string, accessUserId?: number): Promise<void> {
+    if (!(await this.isZktecoSyncEnabled())) {
+      this.logger.debug(`Eliminación ZKAccess omitida para ${badgeNumber} (ZKTECO_SYNC_ENABLED=false)`);
+      return;
+    }
     await this.validateAccessDbPath();
     try {
       const payload: any = { Badgenumber: badgeNumber, action: 'delete' };
@@ -975,13 +1011,6 @@ export class AccessService {
                 isActive: hasActiveAccess
              });
           }
-        }
-
-        if (existingMember) {
-          // No incluir id en update
-          const { ...updateData } = memberData;
-          await this.memberRepository.update(existingMember.id, updateData);
-          updated++;
         }
       }
 

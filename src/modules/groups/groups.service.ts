@@ -10,6 +10,9 @@ import { MemberMembership } from '../../entities/member-membership.entity';
 import { User } from '../../entities/user.entity';
 import { Payment, PaymentStatus, PaymentMethod, PaymentType } from '../../entities/payment.entity';
 import { EmailService } from '../email-settings/email.service';
+import { AccessService } from '../sync/access.service';
+import { ZktecoDeviceService } from '../sync/zkteco-device.service';
+import { GymSettingsService } from '../gym-settings/gym-settings.service';
 
 @Injectable()
 export class GroupsService {
@@ -29,6 +32,9 @@ export class GroupsService {
     @InjectRepository(Payment)
     private paymentRepository: Repository<Payment>,
     private emailService: EmailService,
+    private accessService: AccessService,
+    private zktecoDeviceService: ZktecoDeviceService,
+    private gymSettingsService: GymSettingsService,
   ) {}
 
   async createGroup(
@@ -279,7 +285,7 @@ export class GroupsService {
 
     console.log(`[deleteGroup] 👥 Encontrados ${companions.length} acompañantes`);
 
-    // Remover membresía de cada acompañante
+    // Remover membresía de cada acompañante y bloquear en ZKAccess
     for (const companion of companions) {
       console.log(
         `[deleteGroup] 🗑️ Removiendo membresía del acompañante: ${companion.memberId}`,
@@ -287,6 +293,7 @@ export class GroupsService {
       await this.memberMembershipRepository.delete({
         memberId: companion.memberId,
       });
+      this.syncCompanionAccessSafe(companion.memberId, null, null).catch(() => {});
     }
 
     console.log(`[deleteGroup] ✅ Membresías de acompañantes removidas`);
@@ -407,6 +414,7 @@ export class GroupsService {
     memberMembership.membershipType = 'companion';
     memberMembership.startDate = startDateToUse;
     memberMembership.endDate = endDateToUse;
+    memberMembership.isActive = true;
     const companionCost = group.membership.pricePerCompanion || 0;
     memberMembership.payAmount = companionCost;
 
@@ -469,6 +477,11 @@ export class GroupsService {
     // (solo actualiza el Payment del responsable, no el del acompañante)
     await this.recalculateGroupPayment(groupId);
 
+    // Sincronizar acompañante con ZKAccess (.mdb) y equipo ZKTeco
+    this.syncCompanionAccessSafe(memberId, startDateToUse, endDateToUse, group.membership).catch((err) => {
+      console.warn(`[addCompanionToGroup] ⚠️ Advertencia sincronizando acceso para acompañante ${memberId}:`, err?.message || err);
+    });
+
     // Enviar email de notificación al miembro agregado al grupo (sin esperar - fire and forget)
     // Esto evita retrasar la respuesta de la API mientras se envía el email
     this.sendAddCompanionEmail(memberId, relationship, group).catch((err) => {
@@ -477,6 +490,56 @@ export class GroupsService {
 
     // Retornar el objeto directamente sin hacer query adicional
     return newCompanion;
+  }
+
+  /**
+   * Sincroniza la vigencia de acceso de un acompañante en ZKAccess (.mdb) y en el reloj ZKTeco.
+   * Si startDate/endDate son nulos, bloquea el paso con fecha '2000-01-01' preservando huellas.
+   */
+  private async syncCompanionAccessSafe(
+    memberId: string,
+    startDate: Date | string | null,
+    endDate: Date | string | null,
+    membership?: Membership | null,
+  ): Promise<void> {
+    try {
+      const compMember = await this.memberRepository.findOne({
+        where: { id: memberId },
+        relations: ['user'],
+      });
+      if (!compMember || !compMember.user || !compMember.memberCode) {
+        return;
+      }
+
+      let accStartStr = '2000-01-01';
+      let accEndStr = '2000-01-01';
+
+      if (startDate && endDate) {
+        const settings = await this.gymSettingsService.getSettings();
+        const isDaily = Boolean(membership?.durationDays && Number(membership.durationDays) > 0);
+        const graceDays = isDaily ? 0 : (settings?.membershipSuspensionDays || 0);
+        const endWithGrace = new Date(endDate);
+        endWithGrace.setDate(endWithGrace.getDate() + graceDays);
+        accStartStr = new Date(startDate).toISOString().split('T')[0];
+        accEndStr = endWithGrace.toISOString().split('T')[0];
+      }
+
+      await this.accessService.pushMemberToAccess({
+        Badgenumber: compMember.memberCode.replace(/[^0-9]/g, ''),
+        name: compMember.user.firstName,
+        lastname: compMember.user.lastName,
+        email: compMember.user.email,
+        phone: compMember.user.phone,
+        documentId: compMember.documentId,
+        USERID: compMember.zkUid,
+        acc_startdate: accStartStr,
+        acc_enddate: accEndStr,
+      });
+
+      await this.zktecoDeviceService.syncMemberById(memberId).catch(() => {});
+    } catch (err) {
+      console.warn(`[GroupsService] Error sincronizando acceso de acompañante ${memberId}:`, err?.message || err);
+    }
   }
 
   /// Método privado para enviar email de bienvenida del acompañante (fire-and-forget)
@@ -610,20 +673,26 @@ export class GroupsService {
     
     if (existingMemberships.length > 0) {
       for (const membership of existingMemberships) {
-        // Obtener el payment vinculado a esta membresía
-        const payment = await this.paymentRepository.findOne({
-          where: { id: membership.paymentId },
+        if (!membership.paymentId) continue;
+
+        // Verificar cuántas membresías apuntan a este mismo paymentId
+        // (si es > 1, es un pago consolidado con el responsable y NO debe borrarse, sino recalcularse)
+        const linkedCount = await this.memberMembershipRepository.count({
+          where: { paymentId: membership.paymentId },
         });
 
-        if (payment) {
-          console.log(`[removeCompanionFromGroup] 💳 Payment encontrado: ${payment.id}, status: ${payment.status}`);
-          
-          // El payment es del acompañante
-          console.log(`[removeCompanionFromGroup] ✅ PAGO SEPARADO - Se eliminará el Payment del acompañante: ${payment.id}`);
-          
-          // Eliminar este payment
-          await this.paymentRepository.delete({ id: payment.id });
-          console.log(`[removeCompanionFromGroup] ✅ Payment eliminado: ${payment.id}`);
+        if (linkedCount <= 1) {
+          const payment = await this.paymentRepository.findOne({
+            where: { id: membership.paymentId },
+          });
+
+          if (payment && payment.status === PaymentStatus.PENDING) {
+            console.log(`[removeCompanionFromGroup] ✅ PAGO SEPARADO PENDIENTE - Se eliminará el Payment del acompañante: ${payment.id}`);
+            await this.paymentRepository.delete({ id: payment.id });
+            console.log(`[removeCompanionFromGroup] ✅ Payment eliminado: ${payment.id}`);
+          }
+        } else {
+          console.log(`[removeCompanionFromGroup] ℹ️ Pago consolidado (${membership.paymentId}) compartido con titular; se recalculará en recalculateGroupPayment.`);
         }
       }
     } else {
@@ -669,6 +738,11 @@ export class GroupsService {
 
     // Recalcular el pago del grupo basado en la nueva cantidad de miembros
     await this.recalculateGroupPayment(groupId);
+
+    // Bloquear acceso del acompañante retirado en ZKAccess (.mdb) preservando sus huellas
+    this.syncCompanionAccessSafe(companion.memberId, null, null).catch((err) => {
+      console.warn(`[removeCompanionFromGroup] ⚠️ Advertencia bloqueando acceso para ex-acompañante ${companion.memberId}:`, err?.message || err);
+    });
 
     // Enviar email de notificación al miembro removido del grupo (sin esperar - fire and forget)
     // Esto evita retrasar la respuesta de la API mientras se envía el email

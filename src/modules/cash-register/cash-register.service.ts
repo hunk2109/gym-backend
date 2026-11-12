@@ -27,7 +27,7 @@ export class CashRegisterService {
     private whatsappService: WhatsappService,
     private emailService: EmailService,
     private gymSettingsService: GymSettingsService,
-  ) {}
+  ) { }
 
   async openCashRegister(userId: string, dto: OpenCashRegisterDto): Promise<CashRegister> {
     try {
@@ -43,7 +43,7 @@ export class CashRegisterService {
       }
 
       console.log('[CashRegisterService] Verificando cajas abiertas...');
-      
+
       // Buscar CUALQUIER caja abierta para este usuario
       const openRegister = await this.cashRegisterRepository.findOne({
         where: {
@@ -73,9 +73,9 @@ export class CashRegisterService {
       });
 
       console.log('[CashRegisterService] Saving new register...');
-      
+
       const saved = await this.cashRegisterRepository.save(cashRegister);
-      
+
       // Registrar en auditoría
       await this.auditLogService.create({
         action: 'CASH_REGISTER_OPEN',
@@ -108,26 +108,36 @@ export class CashRegisterService {
 
       console.log('[CashRegisterService] Finding open register for user:', userId);
 
-      const cashRegister = await this.cashRegisterRepository.findOne({
+      let cashRegister = await this.cashRegisterRepository.findOne({
         where: {
           userId,
           isOpen: true,
         },
+        order: { createdAt: 'DESC' },
       });
 
       if (!cashRegister) {
-        throw new Error('No existe una caja abierta para este usuario');
+        cashRegister = await this.cashRegisterRepository.findOne({
+          where: {
+            isOpen: true,
+          },
+          order: { createdAt: 'DESC' },
+        });
+      }
+
+      if (!cashRegister) {
+        throw new Error('No existe una caja abierta actualmente');
       }
 
       // Parsear la fecha correctamente (registerDate es "2025-12-05")
-      const dateStr = typeof cashRegister.registerDate === 'string' 
-        ? cashRegister.registerDate 
+      const dateStr = typeof cashRegister.registerDate === 'string'
+        ? cashRegister.registerDate
         : (cashRegister.registerDate as Date).toISOString().split('T')[0];
-      
+
       const [year, month, day] = dateStr.split('-').map(Number);
       const startOfDay = new Date(year, month - 1, day, 0, 0, 0, 0);
       const endOfDay = new Date(year, month - 1, day, 23, 59, 59, 999);
-      
+
       // Obtener total de ventas en efectivo del turno para esta caja
       const cashSalesQuery = await this.saleRepository.query(
         `SELECT COALESCE(SUM(totalAmount - discount), 0) as total FROM sales 
@@ -152,7 +162,7 @@ export class CashRegisterService {
          WHERE cashRegisterId = ?`,
         [cashRegister.id]
       );
-      
+
       const totalTransactions = Number(transactionsQuery[0]?.total || 0);
       console.log('[CashRegisterService] Total manual transactions:', totalTransactions);
 
@@ -177,7 +187,7 @@ export class CashRegisterService {
 
       console.log('[CashRegisterService] Saving closed cash register...');
       const saved = await this.cashRegisterRepository.save(cashRegister);
-      
+
       // Vincular ventas del día a este cierre de caja
       console.log('[CashRegisterService] Linking sales and payments to this cash register...');
       await this.saleRepository.query(
@@ -554,7 +564,7 @@ ${textBreakdown || 'Conteo directo sin desglose'}
       }
 
       console.log('[🟢 getTodayRegister] Query result:', register);
-      
+
       if (register) {
         console.log('[🟢 getTodayRegister] ✓ Found OPEN register:', {
           id: register.id,
@@ -575,7 +585,7 @@ ${textBreakdown || 'Conteo directo sin desglose'}
   }
 
   async getRegisterHistory(
-    userId: string, 
+    userId: string,
     days: number = 30,
     page: number = 1,
     limit: number = 10,
@@ -586,10 +596,9 @@ ${textBreakdown || 'Conteo directo sin desglose'}
 
     const [data, total] = await this.cashRegisterRepository.findAndCount({
       where: {
-        userId,
         registerDate: Between(startDate, new Date()),
       },
-      order: { registerDate: 'DESC' },
+      order: { createdAt: 'DESC' },
       skip: (page - 1) * limit,
       take: limit,
     });
@@ -642,9 +651,9 @@ ${textBreakdown || 'Conteo directo sin desglose'}
     const end = new Date(endDate + 'T23:59:59Z');
 
     console.log('[Statistics] Parameters:', { startDate, endDate });
-    console.log('[Statistics] Date range:', { 
-      start: start.toISOString(), 
-      end: end.toISOString() 
+    console.log('[Statistics] Date range:', {
+      start: start.toISOString(),
+      end: end.toISOString()
     });
 
     const query = this.cashRegisterRepository
@@ -692,23 +701,23 @@ ${textBreakdown || 'Conteo directo sin desglose'}
     }
 
     const totalCashes = registers.length;
-    
+
     // Convertir valores a números (pueden venir como strings de MySQL)
     const totalOpening = registers.reduce((sum, r) => {
       const amount = typeof r.openingAmount === 'string' ? parseFloat(r.openingAmount) : (r.openingAmount || 0);
       return sum + amount;
     }, 0);
-    
+
     const totalClosing = registers.reduce((sum, r) => {
       const amount = typeof r.closingAmount === 'string' ? parseFloat(r.closingAmount) : (r.closingAmount || 0);
       return sum + amount;
     }, 0);
-    
+
     const totalDifference = registers.reduce((sum, r) => {
       const amount = typeof r.difference === 'string' ? parseFloat(r.difference) : (r.difference || 0);
       return sum + amount;
     }, 0);
-    
+
     const totalSales = registers.reduce((sum, r) => {
       const closing = typeof r.closingAmount === 'string' ? parseFloat(r.closingAmount) : (r.closingAmount || 0);
       const opening = typeof r.openingAmount === 'string' ? parseFloat(r.openingAmount) : (r.openingAmount || 0);
@@ -748,7 +757,7 @@ ${textBreakdown || 'Conteo directo sin desglose'}
     limit: number = 20,
   ): Promise<any> {
     console.log('[Discrepancies] Params:', { severity, startDate, endDate, page, limit });
-    
+
     const query = this.cashRegisterRepository
       .createQueryBuilder('cr')
       .where('cr.difference IS NOT NULL')
@@ -760,17 +769,17 @@ ${textBreakdown || 'Conteo directo sin desglose'}
     if (startDate && endDate) {
       const start = new Date(startDate + 'T00:00:00Z');
       const end = new Date(endDate + 'T23:59:59Z');
-      
+
       console.log('[Discrepancies] Date filter:', {
         startDate,
         endDate,
         parsedStart: start.toISOString(),
         parsedEnd: end.toISOString(),
       });
-      
+
       // Usar comparación con >= y <=
       query.andWhere('cr.registerDate >= :start', { start })
-           .andWhere('cr.registerDate <= :end', { end });
+        .andWhere('cr.registerDate <= :end', { end });
     }
 
     console.log('[Discrepancies] Severity filter:', severity);
@@ -821,7 +830,7 @@ ${textBreakdown || 'Conteo directo sin desglose'}
       r.difference.toString(),
       r.isOpen ? 'ABIERTA' : 'CERRADA',
     ]);
-    
+
     const csv = [headers.join(','), ...rows.map(row => row.join(','))].join('\n');
     return csv;
   }
