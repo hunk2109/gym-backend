@@ -35,15 +35,34 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  private resolveBrowserExecutablePath(): string | undefined {
+    const candidates = [
+      process.env.PUPPETEER_EXECUTABLE_PATH,
+      'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+      'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+      'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+      'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+    ];
+    for (const candidate of candidates) {
+      if (candidate && fs.existsSync(candidate)) {
+        return candidate;
+      }
+    }
+    return undefined;
+  }
+
   private initializeClient() {
     this.status = WhatsappStatus.INITIALIZING;
     this.currentQrCode = null;
+
+    const executablePath = this.resolveBrowserExecutablePath();
 
     this.client = new Client({
       authStrategy: new LocalAuth({ clientId: 'gym-manager-wp' }),
       puppeteer: {
         args: ['--no-sandbox', '--disable-setuid-sandbox'],
         headless: true,
+        ...(executablePath ? { executablePath } : {}),
       }
     });
 
